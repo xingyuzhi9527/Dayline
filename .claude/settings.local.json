@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/ZhuanZ（无密码）/flutter/**)",
+      "Read(//c/flutter/**)",
+      "Read(//c/src/flutter/**)",
+      "Bash(export PATH=\"/c/flutter/bin:$PATH\")",
+      "Bash(flutter analyze *)",
+      "Bash(flutter test *)"
+    ]
+  }
+}

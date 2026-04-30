@@ -13,10 +13,12 @@ abstract final class AppTypography {
   static const double caption = 12;
 
   static TextTheme textTheme(Brightness brightness) {
-    final textColor =
-        brightness == Brightness.dark ? AppColors.darkInk : AppColors.ink;
-    final mutedColor =
-        brightness == Brightness.dark ? AppColors.darkInk : AppColors.muted;
+    final textColor = brightness == Brightness.dark
+        ? AppColors.darkInk
+        : AppColors.ink;
+    final mutedColor = brightness == Brightness.dark
+        ? AppColors.darkInk
+        : AppColors.muted;
 
     return TextTheme(
       displaySmall: TextStyle(

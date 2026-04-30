@@ -1,16 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../widgets/empty_tab_page.dart';
+import '../../core/database/repository_providers.dart';
+import 'widgets/timeline_list.dart';
 
-class TimelinePage extends StatelessWidget {
+class TimelinePage extends ConsumerWidget {
   const TimelinePage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return const EmptyTabPage(
-      key: ValueKey('timeline-page'),
-      icon: Icons.timeline_outlined,
-      title: 'Timeline',
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(dataVersionProvider);
+
+    return SafeArea(
+      child: Column(
+        key: const ValueKey('timeline-page'),
+        children: [
+          const TimelineDateBar(),
+          const Expanded(child: TimelineBody()),
+        ],
+      ),
     );
   }
 }
