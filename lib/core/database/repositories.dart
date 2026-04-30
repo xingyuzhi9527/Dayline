@@ -1,0 +1,438 @@
+import 'dart:convert';
+
+import 'local_database.dart';
+
+typedef DatabaseRow = Map<String, Object?>;
+
+String dateKey(DateTime date) {
+  final month = date.month.toString().padLeft(2, '0');
+  final day = date.day.toString().padLeft(2, '0');
+  return '${date.year}-$month-$day';
+}
+
+int timestamp(DateTime dateTime) => dateTime.millisecondsSinceEpoch;
+
+abstract class Repository {
+  Repository(this.localDatabase, this.tableName);
+
+  final LocalDatabase localDatabase;
+  final String tableName;
+
+  Future<int> insert(DatabaseRow values) async {
+    final db = await localDatabase.database;
+    return db.insert(tableName, values);
+  }
+
+  Future<DatabaseRow?> findById(int id) async {
+    final db = await localDatabase.database;
+    final rows = await db.query(
+      tableName,
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.single;
+  }
+
+  Future<List<DatabaseRow>> findAll() async {
+    final db = await localDatabase.database;
+    return db.query(tableName, orderBy: 'id ASC');
+  }
+
+  Future<int> update(int id, DatabaseRow values) async {
+    final db = await localDatabase.database;
+    return db.update(tableName, values, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> delete(int id) async {
+    final db = await localDatabase.database;
+    return db.delete(tableName, where: 'id = ?', whereArgs: [id]);
+  }
+
+  DatabaseRow withTimestamps(DatabaseRow values, {DateTime? now}) {
+    final writtenAt = timestamp(now ?? DateTime.now());
+    return {
+      ...values,
+      'created_at': values['created_at'] ?? writtenAt,
+      'updated_at': values['updated_at'] ?? writtenAt,
+    };
+  }
+}
+
+class RecordsRepository extends Repository {
+  RecordsRepository(LocalDatabase localDatabase)
+    : super(localDatabase, 'records');
+
+  Future<int> create({
+    required DateTime date,
+    required String type,
+    required String content,
+    String? time,
+    List<String> tags = const [],
+    Map<String, Object?> metadata = const {},
+  }) {
+    return insert(
+      withTimestamps({
+        'date': dateKey(date),
+        'type': type,
+        'content': content,
+        'time': time,
+        'tags': jsonEncode(tags),
+        'metadata': jsonEncode(metadata),
+      }),
+    );
+  }
+
+  Future<List<DatabaseRow>> findByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    return db.query(
+      tableName,
+      where: 'date = ?',
+      whereArgs: [dateKey(date)],
+      orderBy: 'created_at ASC, id ASC',
+    );
+  }
+
+  Future<int> countByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM records WHERE date = ?',
+      [dateKey(date)],
+    );
+    return (rows.single['cnt'] as int);
+  }
+
+  Future<List<DatabaseRow>> findRecent({int limit = 3}) async {
+    final db = await localDatabase.database;
+    return db.query(
+      tableName,
+      orderBy: 'created_at DESC, id DESC',
+      limit: limit,
+    );
+  }
+}
+
+class TodosRepository extends Repository {
+  TodosRepository(LocalDatabase localDatabase) : super(localDatabase, 'todos');
+
+  Future<int> create({
+    required DateTime date,
+    required String title,
+    String? note,
+    String? dueTime,
+    int priority = 0,
+  }) {
+    return insert(
+      withTimestamps({
+        'date': dateKey(date),
+        'title': title,
+        'note': note,
+        'due_time': dueTime,
+        'priority': priority,
+        'is_completed': 0,
+        'completed_at': null,
+      }),
+    );
+  }
+
+  Future<List<DatabaseRow>> findByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    return db.query(
+      tableName,
+      where: 'date = ?',
+      whereArgs: [dateKey(date)],
+      orderBy: 'is_completed ASC, priority DESC, created_at ASC, id ASC',
+    );
+  }
+
+  Future<int> countByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM todos WHERE date = ?',
+      [dateKey(date)],
+    );
+    return (rows.single['cnt'] as int);
+  }
+
+  Future<int> countCompletedByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM todos WHERE date = ? AND is_completed = 1',
+      [dateKey(date)],
+    );
+    return (rows.single['cnt'] as int);
+  }
+
+  Future<int> complete(int id, {DateTime? completedAt}) {
+    final finishedAt = completedAt ?? DateTime.now();
+    return update(id, {
+      'is_completed': 1,
+      'completed_at': timestamp(finishedAt),
+      'updated_at': timestamp(finishedAt),
+    });
+  }
+
+  Future<int> reopen(int id, {DateTime? updatedAt}) {
+    final writtenAt = timestamp(updatedAt ?? DateTime.now());
+    return update(id, {
+      'is_completed': 0,
+      'completed_at': null,
+      'updated_at': writtenAt,
+    });
+  }
+}
+
+class TrackersRepository extends Repository {
+  TrackersRepository(LocalDatabase localDatabase)
+    : super(localDatabase, 'trackers');
+
+  Future<int> create({
+    required String name,
+    String? unit,
+    double? targetValue,
+    String? color,
+    String? icon,
+  }) {
+    return insert(
+      withTimestamps({
+        'name': name,
+        'unit': unit,
+        'target_value': targetValue,
+        'color': color,
+        'icon': icon,
+        'is_archived': 0,
+      }),
+    );
+  }
+
+  Future<int> archive(int id, {DateTime? updatedAt}) {
+    return update(id, {
+      'is_archived': 1,
+      'updated_at': timestamp(updatedAt ?? DateTime.now()),
+    });
+  }
+
+  Future<List<DatabaseRow>> findActive() async {
+    final db = await localDatabase.database;
+    return db.query(
+      tableName,
+      where: 'is_archived = 0',
+      orderBy: 'created_at ASC, id ASC',
+    );
+  }
+}
+
+class TrackerLogsRepository extends Repository {
+  TrackerLogsRepository(LocalDatabase localDatabase)
+    : super(localDatabase, 'tracker_logs');
+
+  Future<int> create({
+    required int trackerId,
+    required DateTime date,
+    double value = 1,
+    String? note,
+  }) {
+    return insert(
+      withTimestamps({
+        'tracker_id': trackerId,
+        'date': dateKey(date),
+        'value': value,
+        'note': note,
+      }),
+    );
+  }
+
+  Future<List<DatabaseRow>> findByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    return db.query(
+      tableName,
+      where: 'date = ?',
+      whereArgs: [dateKey(date)],
+      orderBy: 'created_at ASC, id ASC',
+    );
+  }
+
+  Future<int> countByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM tracker_logs WHERE date = ?',
+      [dateKey(date)],
+    );
+    return (rows.single['cnt'] as int);
+  }
+}
+
+class FocusSessionsRepository extends Repository {
+  FocusSessionsRepository(LocalDatabase localDatabase)
+    : super(localDatabase, 'focus_sessions');
+
+  Future<int> create({
+    required DateTime date,
+    required DateTime startedAt,
+    required int durationMinutes,
+    DateTime? endedAt,
+    String? note,
+  }) {
+    return insert(
+      withTimestamps({
+        'date': dateKey(date),
+        'started_at': timestamp(startedAt),
+        'ended_at': endedAt == null ? null : timestamp(endedAt),
+        'duration_minutes': durationMinutes,
+        'note': note,
+      }),
+    );
+  }
+
+  Future<int> sumMinutesByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    final rows = await db.rawQuery(
+      '''
+SELECT COALESCE(SUM(duration_minutes), 0) AS total
+FROM focus_sessions
+WHERE date = ?
+''',
+      [dateKey(date)],
+    );
+    return (rows.single['total'] as num).toInt();
+  }
+
+  Future<List<DatabaseRow>> findByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    return db.query(
+      tableName,
+      where: 'date = ?',
+      whereArgs: [dateKey(date)],
+      orderBy: 'started_at ASC, id ASC',
+    );
+  }
+}
+
+class ExpensesRepository extends Repository {
+  ExpensesRepository(LocalDatabase localDatabase)
+    : super(localDatabase, 'expenses');
+
+  Future<int> create({
+    required DateTime date,
+    required double amount,
+    required String category,
+    String? note,
+    String currency = 'CNY',
+  }) {
+    return insert(
+      withTimestamps({
+        'date': dateKey(date),
+        'amount': amount,
+        'category': category,
+        'note': note,
+        'currency': currency,
+      }),
+    );
+  }
+
+  Future<double> sumAmountByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    final rows = await db.rawQuery(
+      '''
+SELECT COALESCE(SUM(amount), 0) AS total
+FROM expenses
+WHERE date = ?
+''',
+      [dateKey(date)],
+    );
+    return (rows.single['total'] as num).toDouble();
+  }
+
+  Future<List<DatabaseRow>> findByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    return db.query(
+      tableName,
+      where: 'date = ?',
+      whereArgs: [dateKey(date)],
+      orderBy: 'created_at ASC, id ASC',
+    );
+  }
+}
+
+class BodyLogsRepository extends Repository {
+  BodyLogsRepository(LocalDatabase localDatabase)
+    : super(localDatabase, 'body_logs');
+
+  Future<int> create({
+    required DateTime date,
+    required String metric,
+    required double value,
+    String? unit,
+    String? note,
+  }) {
+    return insert(
+      withTimestamps({
+        'date': dateKey(date),
+        'metric': metric,
+        'value': value,
+        'unit': unit,
+        'note': note,
+      }),
+    );
+  }
+
+  Future<List<DatabaseRow>> findByDate(DateTime date) async {
+    final db = await localDatabase.database;
+    return db.query(
+      tableName,
+      where: 'date = ?',
+      whereArgs: [dateKey(date)],
+      orderBy: 'created_at ASC, id ASC',
+    );
+  }
+}
+
+class AppSettingsRepository {
+  AppSettingsRepository(this.localDatabase);
+
+  final LocalDatabase localDatabase;
+
+  Future<void> create({
+    required String key,
+    required String value,
+    DateTime? updatedAt,
+  }) async {
+    final db = await localDatabase.database;
+    await db.insert('app_settings', {
+      'key': key,
+      'value': value,
+      'updated_at': timestamp(updatedAt ?? DateTime.now()),
+    });
+  }
+
+  Future<DatabaseRow?> findByKey(String key) async {
+    final db = await localDatabase.database;
+    final rows = await db.query(
+      'app_settings',
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.single;
+  }
+
+  Future<List<DatabaseRow>> findAll() async {
+    final db = await localDatabase.database;
+    return db.query('app_settings', orderBy: 'key ASC');
+  }
+
+  Future<int> update(String key, String value, {DateTime? updatedAt}) async {
+    final db = await localDatabase.database;
+    return db.update(
+      'app_settings',
+      {'value': value, 'updated_at': timestamp(updatedAt ?? DateTime.now())},
+      where: 'key = ?',
+      whereArgs: [key],
+    );
+  }
+
+  Future<int> delete(String key) async {
+    final db = await localDatabase.database;
+    return db.delete('app_settings', where: 'key = ?', whereArgs: [key]);
+  }
+}

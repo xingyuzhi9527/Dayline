@@ -3,11 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_spacing.dart';
 
 class EmptyTabPage extends StatelessWidget {
-  const EmptyTabPage({
-    required this.icon,
-    required this.title,
-    super.key,
-  });
+  const EmptyTabPage({required this.icon, required this.title, super.key});
 
   final IconData icon;
   final String title;
@@ -23,11 +19,7 @@ class EmptyTabPage extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                icon,
-                size: 40,
-                color: theme.colorScheme.primary,
-              ),
+              Icon(icon, size: 40, color: theme.colorScheme.primary),
               const SizedBox(height: AppSpacing.md),
               Text(
                 title,

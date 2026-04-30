@@ -3,25 +3,25 @@ import 'package:flutter/material.dart';
 enum AppRoute {
   today(
     path: '/today',
-    label: 'Today',
+    label: '今日',
     icon: Icons.today_outlined,
     selectedIcon: Icons.today,
   ),
   record(
     path: '/record',
-    label: 'Record',
+    label: '记录',
     icon: Icons.add_circle_outline,
     selectedIcon: Icons.add_circle,
   ),
   timeline(
     path: '/timeline',
-    label: 'Timeline',
+    label: '时间线',
     icon: Icons.timeline_outlined,
     selectedIcon: Icons.timeline,
   ),
   review(
     path: '/review',
-    label: 'Review',
+    label: '复盘',
     icon: Icons.insights_outlined,
     selectedIcon: Icons.insights,
   );

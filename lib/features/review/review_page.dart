@@ -1,16 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../widgets/empty_tab_page.dart';
+import '../../core/database/repository_providers.dart';
+import 'widgets/review_cards.dart';
 
-class ReviewPage extends StatelessWidget {
+class ReviewPage extends ConsumerWidget {
   const ReviewPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return const EmptyTabPage(
-      key: ValueKey('review-page'),
-      icon: Icons.insights_outlined,
-      title: 'Review',
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(dataVersionProvider);
+
+    return SafeArea(
+      child: Column(
+        key: const ValueKey('review-page'),
+        children: const [
+          ReviewDateBar(),
+          Expanded(child: ReviewBody()),
+        ],
+      ),
     );
   }
 }

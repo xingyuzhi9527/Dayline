@@ -6,16 +6,17 @@ import 'app_typography.dart';
 
 abstract final class AppTheme {
   static ThemeData light() {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: AppColors.seed,
-      brightness: Brightness.light,
-    ).copyWith(
-      primary: AppColors.primary,
-      secondary: AppColors.secondary,
-      tertiary: AppColors.accent,
-      surface: AppColors.surface,
-      onSurface: AppColors.ink,
-    );
+    final colorScheme =
+        ColorScheme.fromSeed(
+          seedColor: AppColors.seed,
+          brightness: Brightness.light,
+        ).copyWith(
+          primary: AppColors.primary,
+          secondary: AppColors.secondary,
+          tertiary: AppColors.accent,
+          surface: AppColors.surface,
+          onSurface: AppColors.ink,
+        );
 
     return _theme(
       brightness: Brightness.light,
@@ -25,16 +26,17 @@ abstract final class AppTheme {
   }
 
   static ThemeData dark() {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: AppColors.seed,
-      brightness: Brightness.dark,
-    ).copyWith(
-      primary: AppColors.primaryDark,
-      secondary: AppColors.secondary,
-      tertiary: AppColors.accent,
-      surface: AppColors.darkSurface,
-      onSurface: AppColors.darkInk,
-    );
+    final colorScheme =
+        ColorScheme.fromSeed(
+          seedColor: AppColors.seed,
+          brightness: Brightness.dark,
+        ).copyWith(
+          primary: AppColors.primaryDark,
+          secondary: AppColors.secondary,
+          tertiary: AppColors.accent,
+          surface: AppColors.darkSurface,
+          onSurface: AppColors.darkInk,
+        );
 
     return _theme(
       brightness: Brightness.dark,
@@ -66,6 +68,8 @@ abstract final class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: colorScheme.surface,
         indicatorColor: colorScheme.primaryContainer,
+        height: 84,
+        elevation: 0,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final isSelected = states.contains(WidgetState.selected);
 
@@ -87,7 +91,21 @@ abstract final class AppTheme {
         color: colorScheme.surface,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+          borderSide: BorderSide(color: colorScheme.outlineVariant),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+          borderSide: BorderSide(color: colorScheme.outlineVariant),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+          borderSide: BorderSide(color: colorScheme.primary),
         ),
       ),
     );
