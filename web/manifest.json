@@ -1,0 +1,9 @@
+{
+  "name": "Dayline",
+  "short_name": "Dayline",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#F7F5EF",
+  "theme_color": "#2F6F73",
+  "description": "A local-first life record app."
+}
