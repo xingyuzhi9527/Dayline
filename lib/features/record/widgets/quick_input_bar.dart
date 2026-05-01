@@ -5,17 +5,21 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../record_notifier.dart';
 
+enum QuickInputMode { preview, saveImmediately }
+
 class QuickInputBar extends ConsumerStatefulWidget {
   const QuickInputBar({
-    this.placeholder = '写下一句话，Dayline 会帮你整理...',
+    this.placeholder = '写下一句话... 或输入“午餐花了38元”',
     this.minLines = 2,
     this.showTools = true,
+    this.mode = QuickInputMode.preview,
     super.key,
   });
 
   final String placeholder;
   final int minLines;
   final bool showTools;
+  final QuickInputMode mode;
 
   @override
   ConsumerState<QuickInputBar> createState() => _QuickInputBarState();
@@ -42,11 +46,33 @@ class _QuickInputBarState extends ConsumerState<QuickInputBar> {
     setState(() {});
   }
 
-  void _submit() {
-    if (!_controller.text.trim().isNotEmpty) return;
+  Future<void> _submit() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+
     _awaitingSaveClear = true;
-    ref.read(recordNotifierProvider.notifier).updateInput(_controller.text);
-    ref.read(recordNotifierProvider.notifier).submit();
+    final notifier = ref.read(recordNotifierProvider.notifier);
+
+    if (widget.mode == QuickInputMode.saveImmediately) {
+      final saved = await notifier.saveInput(text);
+      if (!mounted) return;
+
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            saved
+                ? '已保存到今日'
+                : ref.read(recordNotifierProvider).errorMessage ?? '保存失败',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    notifier.submit(text);
   }
 
   @override
@@ -66,10 +92,13 @@ class _QuickInputBarState extends ConsumerState<QuickInputBar> {
 
     final canSubmit = _controller.text.trim().isNotEmpty && !state.isSaving;
     final theme = Theme.of(context);
+    final buttonLabel = widget.mode == QuickInputMode.saveImmediately
+        ? '保存'
+        : '整理';
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
+        padding: const EdgeInsets.all(AppSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -77,6 +106,24 @@ class _QuickInputBarState extends ConsumerState<QuickInputBar> {
               controller: _controller,
               decoration: InputDecoration(
                 hintText: widget.placeholder,
+                prefixIcon: Container(
+                  width: 42,
+                  height: 42,
+                  margin: const EdgeInsets.only(right: AppSpacing.xs),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withAlpha(14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.edit_rounded,
+                    color: AppColors.primary,
+                  ),
+                ),
+                prefixIconConstraints: const BoxConstraints(
+                  minWidth: 52,
+                  minHeight: 44,
+                ),
+                filled: false,
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
                 focusedBorder: InputBorder.none,
@@ -88,7 +135,7 @@ class _QuickInputBarState extends ConsumerState<QuickInputBar> {
               enabled: !state.isSaving,
               style: theme.textTheme.bodyLarge,
             ),
-            const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.md),
             Row(
               children: [
                 if (widget.showTools) ...[
@@ -108,7 +155,7 @@ class _QuickInputBarState extends ConsumerState<QuickInputBar> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.send_rounded, size: 18),
-                  label: const Text('保存'),
+                  label: Text(buttonLabel),
                 ),
               ],
             ),

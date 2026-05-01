@@ -16,120 +16,48 @@ class ParserPreviewCard extends ConsumerWidget {
     if (parsed == null) return const SizedBox.shrink();
 
     final notifier = ref.read(recordNotifierProvider.notifier);
-    final theme = Theme.of(context);
     final typeMeta = _TypeMeta.from(parsed.type);
+
+    final rawText = state.inputText.isNotEmpty
+        ? state.inputText
+        : parsed.content;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Icon(Icons.psychology_alt_outlined, color: AppColors.primary),
-            const SizedBox(width: AppSpacing.xs),
-            Text('理解为', style: theme.textTheme.titleMedium),
-          ],
+        _OriginalRecordCard(text: rawText),
+        const SizedBox(height: AppSpacing.md),
+        _ParsedBentoGrid(
+          parsed: parsed,
+          typeMeta: typeMeta,
+          enabled: !state.isSaving,
+          onTypeChanged: notifier.updateParsedType,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        _EditableTagChips(tags: parsed.tags, enabled: !state.isSaving),
+        const SizedBox(height: AppSpacing.lg),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: state.isSaving ? null : () => notifier.changeToMemo(),
+            icon: const Icon(Icons.edit_note_rounded),
+            label: const Text('存为备忘'),
+          ),
         ),
         const SizedBox(height: AppSpacing.sm),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _PreviewHeader(typeMeta: typeMeta, parsed: parsed),
-                const SizedBox(height: AppSpacing.md),
-                Text(parsed.content, style: theme.textTheme.bodyLarge),
-                const SizedBox(height: AppSpacing.md),
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: [
-                    _InfoPill(
-                      icon: typeMeta.icon,
-                      label: '类型',
-                      value: typeMeta.label,
-                      color: typeMeta.color,
-                    ),
-                    _InfoPill(
-                      icon: Icons.schedule_rounded,
-                      label: '时间',
-                      value: parsed.time ?? '现在',
-                      color: AppColors.primary,
-                    ),
-                    if (parsed.metadata['durationMinutes'] != null)
-                      _InfoPill(
-                        icon: Icons.timer_rounded,
-                        label: '时长',
-                        value: '${parsed.metadata['durationMinutes']} 分钟',
-                        color: const Color(0xFFE67E22),
-                      ),
-                    if (parsed.metadata['amount'] != null)
-                      _InfoPill(
-                        icon: Icons.payments_rounded,
-                        label: '金额',
-                        value: '¥${parsed.metadata['amount']}',
-                        color: const Color(0xFFE74C3C),
-                      ),
-                    if (parsed.metadata['value'] != null)
-                      _InfoPill(
-                        icon: Icons.monitor_weight_rounded,
-                        label: '数值',
-                        value: '${parsed.metadata['value']}',
-                        color: const Color(0xFF9B59B6),
-                      ),
-                  ],
-                ),
-                if (parsed.tags.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.sm),
-                  Wrap(
-                    spacing: AppSpacing.xs,
-                    runSpacing: AppSpacing.xs,
-                    children: parsed.tags
-                        .map(
-                          (tag) => Chip(
-                            avatar: const Icon(Icons.tag, size: 14),
-                            label: Text('#$tag'),
-                            materialTapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ],
-                const SizedBox(height: AppSpacing.lg),
-                FilledButton.icon(
-                  onPressed: state.isSaving ? null : () => notifier.confirm(),
-                  icon: const Icon(Icons.check_circle_rounded),
-                  label: const Text('确认保存'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: state.isSaving
-                            ? null
-                            : () => notifier.changeToMemo(),
-                        child: const Text('保存为备忘'),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: TextButton(
-                        onPressed: state.isSaving
-                            ? null
-                            : () => notifier.cancel(),
-                        child: const Text('取消'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: state.isSaving ? null : () => notifier.confirm(),
+            icon: const Icon(Icons.check_circle_rounded),
+            label: const Text('确认保存'),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Center(
+          child: TextButton(
+            onPressed: state.isSaving ? null : () => notifier.cancel(),
+            child: const Text('取消'),
           ),
         ),
       ],
@@ -137,92 +65,359 @@ class ParserPreviewCard extends ConsumerWidget {
   }
 }
 
-class _PreviewHeader extends StatelessWidget {
-  const _PreviewHeader({required this.typeMeta, required this.parsed});
+class _OriginalRecordCard extends StatelessWidget {
+  const _OriginalRecordCard({required this.text});
 
-  final _TypeMeta typeMeta;
-  final ParsedInput parsed;
-
-  @override
-  Widget build(BuildContext context) {
-    final confidence = (parsed.confidence * 100).round();
-
-    return Row(
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: typeMeta.color.withAlpha(22),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(typeMeta.icon, color: typeMeta.color),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                typeMeta.label,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              Text(
-                '识别可信度 $confidence%',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _InfoPill extends StatelessWidget {
-  const _InfoPill({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color color;
+  final String text;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Container(
-      constraints: const BoxConstraints(minWidth: 136),
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: color.withAlpha(16),
-        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: AppSpacing.xs),
-          Column(
+    return SizedBox(
+      width: double.infinity,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: theme.textTheme.bodySmall),
               Text(
-                value,
+                '原始记录',
                 style: theme.textTheme.labelLarge?.copyWith(
+                  color: AppColors.muted,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                '"$text"',
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  color: AppColors.ink,
                   fontWeight: FontWeight.w700,
                 ),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ParsedBentoGrid extends StatelessWidget {
+  const _ParsedBentoGrid({
+    required this.parsed,
+    required this.typeMeta,
+    required this.enabled,
+    required this.onTypeChanged,
+  });
+
+  final ParsedInput parsed;
+  final _TypeMeta typeMeta;
+  final bool enabled;
+  final ValueChanged<ParsedInputType> onTypeChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final duration = parsed.metadata['durationMinutes'];
+    final amount = parsed.metadata['amount'];
+    final value = parsed.metadata['value'];
+    final detailsLabel = amount != null
+        ? '金额'
+        : value != null
+        ? '数值'
+        : '时长';
+    final detailsValue = amount != null
+        ? '¥$amount'
+        : value != null
+        ? '$value'
+        : duration != null
+        ? '$duration 分钟'
+        : '未识别';
+
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisSpacing: AppSpacing.md,
+      mainAxisSpacing: AppSpacing.md,
+      childAspectRatio: 1.12,
+      children: [
+        _ParsedTile(
+          icon: typeMeta.icon,
+          label: '类别',
+          color: typeMeta.color,
+          child: _TypeMenu(
+            selectedType: parsed.type,
+            enabled: enabled,
+            onChanged: onTypeChanged,
+          ),
+        ),
+        _ParsedTile(
+          icon: Icons.schedule_rounded,
+          label: '时间',
+          value: parsed.time ?? '现在',
+          color: AppColors.secondaryContainer,
+        ),
+        _ParsedTile(
+          icon: duration != null
+              ? Icons.timer_rounded
+              : amount != null
+              ? Icons.payments_rounded
+              : Icons.monitor_weight_rounded,
+          label: detailsLabel,
+          value: detailsValue,
+          color: AppColors.accent,
+        ),
+        _ParsedTile(
+          icon: Icons.tag_rounded,
+          label: '标签',
+          color: AppColors.primary,
+          child: parsed.tags.isEmpty
+              ? Text('无标签', style: Theme.of(context).textTheme.titleMedium)
+              : Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: AppSpacing.xxs,
+                  runSpacing: AppSpacing.xxs,
+                  children: [
+                    for (final tag in parsed.tags) _TagPreviewChip(tag: tag),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ParsedTile extends StatelessWidget {
+  const _ParsedTile({
+    required this.icon,
+    required this.label,
+    required this.color,
+    this.value,
+    this.child,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final String? value;
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color.withAlpha(18),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              label,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: AppColors.muted,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            child ??
+                Text(
+                  value ?? '',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    color: AppColors.ink,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TagPreviewChip extends StatelessWidget {
+  const _TagPreviewChip({required this.tag});
+
+  final String tag;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xs,
+        vertical: AppSpacing.xxs,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withAlpha(20),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      ),
+      child: Text(
+        '#$tag',
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+          color: AppColors.primary,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _TypeMenu extends StatelessWidget {
+  const _TypeMenu({
+    required this.selectedType,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final ParsedInputType selectedType;
+  final bool enabled;
+  final ValueChanged<ParsedInputType> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedMeta = _TypeMeta.from(selectedType);
+
+    return PopupMenuButton<ParsedInputType>(
+      enabled: enabled,
+      initialValue: selectedType,
+      tooltip: '修改类型',
+      onSelected: onChanged,
+      itemBuilder: (context) {
+        return [
+          for (final type in ParsedInputType.values)
+            PopupMenuItem(
+              value: type,
+              child: Row(
+                children: [
+                  Icon(_TypeMeta.from(type).icon, size: 18),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(_TypeMeta.from(type).label),
+                ],
+              ),
+            ),
+        ];
+      },
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            selectedMeta.label,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(width: AppSpacing.xxs),
+          Icon(
+            Icons.expand_more_rounded,
+            size: 18,
+            color: enabled ? AppColors.muted : Theme.of(context).disabledColor,
+          ),
         ],
       ),
     );
+  }
+}
+
+class _EditableTagChips extends ConsumerStatefulWidget {
+  const _EditableTagChips({required this.tags, required this.enabled});
+
+  final List<String> tags;
+  final bool enabled;
+
+  @override
+  ConsumerState<_EditableTagChips> createState() => _EditableTagChipsState();
+}
+
+class _EditableTagChipsState extends ConsumerState<_EditableTagChips> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _addTags([String? rawValue]) {
+    final additions = _parseTagInput(rawValue ?? _controller.text);
+    if (additions.isEmpty) return;
+
+    ref.read(recordNotifierProvider.notifier).updateParsedTags([
+      ...widget.tags,
+      ...additions,
+    ]);
+    _controller.clear();
+  }
+
+  void _removeTag(String tag) {
+    ref
+        .read(recordNotifierProvider.notifier)
+        .updateParsedTags(widget.tags.where((value) => value != tag).toList());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('编辑标签', style: theme.textTheme.labelLarge),
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            for (final tag in widget.tags)
+              InputChip(
+                avatar: const Icon(Icons.tag, size: 14),
+                label: Text('#$tag'),
+                onDeleted: widget.enabled ? () => _removeTag(tag) : null,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 148, maxWidth: 220),
+              child: TextField(
+                controller: _controller,
+                enabled: widget.enabled,
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: widget.tags.isEmpty ? '添加标签' : '继续添加',
+                  prefixIcon: const Icon(Icons.tag, size: 18),
+                  suffixIcon: IconButton(
+                    tooltip: '添加标签',
+                    onPressed: widget.enabled ? _addTags : null,
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                  ),
+                  border: const OutlineInputBorder(),
+                ),
+                textInputAction: TextInputAction.done,
+                onSubmitted: _addTags,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  List<String> _parseTagInput(String input) {
+    return input
+        .split(RegExp(r'[\s,，、#＃]+'))
+        .map((tag) => tag.trim())
+        .where((tag) => tag.isNotEmpty)
+        .toList(growable: false);
   }
 }
 

@@ -18,6 +18,26 @@ class ParsedInput {
   final List<String> tags;
   final Map<String, Object?> metadata;
   final double confidence;
+
+  ParsedInput copyWith({
+    ParsedInputType? type,
+    String? content,
+    String? time,
+    DateTime? date,
+    List<String>? tags,
+    Map<String, Object?>? metadata,
+    double? confidence,
+  }) {
+    return ParsedInput(
+      type: type ?? this.type,
+      content: content ?? this.content,
+      time: time ?? this.time,
+      date: date ?? this.date,
+      tags: tags ?? this.tags,
+      metadata: metadata ?? this.metadata,
+      confidence: confidence ?? this.confidence,
+    );
+  }
 }
 
 class LuiLiteParser {
@@ -33,7 +53,7 @@ class LuiLiteParser {
     caseSensitive: false,
   );
   static final RegExp _focusPattern = RegExp(
-    r'(番茄|专注|focus|pomodoro|25\s*min|25\s*分钟)',
+    r'(番茄|专注|focus|pomodoro)',
     caseSensitive: false,
   );
   static final RegExp _expensePattern = RegExp(
@@ -53,18 +73,26 @@ class LuiLiteParser {
   );
   static final RegExp _numberPattern = RegExp(r'\d+(?:\.\d+)?');
   static final RegExp _sleepPattern = RegExp(r'(睡觉|入睡|醒来|起床)');
-  static final RegExp _trackerPattern = RegExp(r'(起床|喝水|吃药|运动|冥想|今日计划)');
+  static final RegExp _exerciseTrackerPattern = RegExp(
+    r'(跑步|慢跑|运动|健身|训练|瑜伽|游泳|骑行|骑车|散步|步行|拉伸)',
+  );
+  static final RegExp _trackerPattern = RegExp(
+    r'(起床|喝水|吃药|冥想|今日计划|跑步|慢跑|运动|健身|训练|瑜伽|游泳|骑行|骑车|散步|步行|拉伸)',
+  );
   static final RegExp _durationPattern = RegExp(
-    r'(\d+)\s*(?:min|分钟)',
+    r'(\d+)\s*(min|mins|minute|minutes|分钟|小时|hour|hours|h)',
     caseSensitive: false,
   );
 
   static ParsedInput parse(String rawInput) {
     final normalizedInput = _compactWhitespace(rawInput.trim());
-    final tags = _extractTags(normalizedInput);
+    final explicitTags = _extractTags(normalizedInput);
     final time = _extractTime(normalizedInput);
     final metadata = <String, Object?>{};
     final type = _inferType(normalizedInput, metadata);
+    final tags = explicitTags.isEmpty
+        ? _inferTags(normalizedInput, type)
+        : explicitTags;
     final content = _extractContent(normalizedInput, type);
 
     return ParsedInput(
@@ -143,6 +171,10 @@ class LuiLiteParser {
     }
 
     if (_trackerPattern.hasMatch(input)) {
+      final duration = _extractDuration(input);
+      if (duration != null) {
+        metadata['durationMinutes'] = duration;
+      }
       return ParsedInputType.tracker;
     }
 
@@ -157,6 +189,17 @@ class LuiLiteParser {
 
     if (type == ParsedInputType.todo) {
       content = content.replaceFirst(_todoPrefixPattern, '');
+    }
+
+    if (type == ParsedInputType.focus || type == ParsedInputType.tracker) {
+      content = content.replaceAll(_durationPattern, '');
+    }
+
+    if (type == ParsedInputType.tracker) {
+      final trackerName = _extractTrackerName(content);
+      if (trackerName != null) {
+        return trackerName;
+      }
     }
 
     return _trimLoosePunctuation(_compactWhitespace(content));
@@ -191,7 +234,28 @@ class LuiLiteParser {
       return null;
     }
 
-    return int.parse(match.group(1)!);
+    final value = int.parse(match.group(1)!);
+    final unit = match.group(2)!.toLowerCase();
+
+    if (unit == '小时' || unit == 'h' || unit.startsWith('hour')) {
+      return value * 60;
+    }
+
+    return value;
+  }
+
+  static String? _extractTrackerName(String input) {
+    final match = _trackerPattern.firstMatch(input);
+    return match?.group(0);
+  }
+
+  static List<String> _inferTags(String input, ParsedInputType type) {
+    if (type == ParsedInputType.tracker &&
+        _exerciseTrackerPattern.hasMatch(input)) {
+      return const ['运动'];
+    }
+
+    return const [];
   }
 
   static String _formatTime(int hour, int minute) {

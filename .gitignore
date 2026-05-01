@@ -4,6 +4,11 @@
 .packages
 build/
 coverage/
+.codex_tmp/
+
+# Codex handoff context
+/CODEx_HANDOFF.md
+/RESUME_PROMPT.md
 
 # IDEs
 .idea/

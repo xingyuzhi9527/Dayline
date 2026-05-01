@@ -16,18 +16,22 @@ class RecordPage extends ConsumerWidget {
     return SafeArea(
       child: ListView(
         key: const ValueKey('record-page'),
-        padding: const EdgeInsets.all(AppSpacing.md),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.containerMargin,
+          AppSpacing.lg,
+          AppSpacing.containerMargin,
+          AppSpacing.xl,
+        ),
         children: [
-          Text('新记录', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: AppSpacing.xs),
-          const QuickInputBar(
-            placeholder: '你正在做什么？例如：9点半 跑步 30分钟 #健康',
-            minLines: 4,
-          ),
-          if (state.parsedInput != null) ...[
-            const SizedBox(height: AppSpacing.md),
+          if (state.parsedInput == null) ...[
+            Text('新记录', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: AppSpacing.sm),
+            const QuickInputBar(
+              placeholder: '你正在做什么？例如：9点半 跑步 30分钟 #健康',
+              minLines: 4,
+            ),
+          ] else
             const ParserPreviewCard(),
-          ],
           if (state.errorMessage != null) ...[
             const SizedBox(height: AppSpacing.sm),
             _ErrorBanner(message: state.errorMessage!),

@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'app_colors.dart';
 
 abstract final class AppTypography {
-  static const String fontFamily = 'Roboto';
+  static const String bodyFontFamily = 'Manrope';
+  static const String displayFontFamily = 'Newsreader';
 
   static const double display = 32;
   static const double headline = 24;
@@ -23,44 +24,50 @@ abstract final class AppTypography {
     return TextTheme(
       displaySmall: TextStyle(
         color: textColor,
-        fontFamily: fontFamily,
+        fontFamily: displayFontFamily,
         fontSize: display,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w600,
+        height: 1.2,
         letterSpacing: 0,
       ),
       headlineMedium: TextStyle(
         color: textColor,
-        fontFamily: fontFamily,
+        fontFamily: displayFontFamily,
         fontSize: headline,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w500,
+        height: 1.3,
         letterSpacing: 0,
       ),
       titleMedium: TextStyle(
         color: textColor,
-        fontFamily: fontFamily,
+        fontFamily: bodyFontFamily,
         fontSize: title,
         fontWeight: FontWeight.w600,
+        height: 1.5,
         letterSpacing: 0,
       ),
       bodyLarge: TextStyle(
         color: textColor,
-        fontFamily: fontFamily,
+        fontFamily: bodyFontFamily,
         fontSize: body,
         fontWeight: FontWeight.w400,
+        height: 1.6,
         letterSpacing: 0,
       ),
       labelLarge: TextStyle(
         color: textColor,
-        fontFamily: fontFamily,
+        fontFamily: bodyFontFamily,
         fontSize: label,
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w700,
+        height: 1.4,
         letterSpacing: 0,
       ),
       bodySmall: TextStyle(
         color: mutedColor,
-        fontFamily: fontFamily,
+        fontFamily: bodyFontFamily,
         fontSize: caption,
         fontWeight: FontWeight.w400,
+        height: 1.4,
         letterSpacing: 0,
       ),
     );

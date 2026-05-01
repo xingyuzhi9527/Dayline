@@ -139,5 +139,22 @@ void main() {
       expect(memo.type, ParsedInputType.memo);
       expect(memo.confidence, lessThan(tracker.confidence));
     });
+
+    test('recognizes running duration as a tracker instead of memo', () {
+      final parsed = LuiLiteParser.parse('跑步3分钟');
+
+      expect(parsed.type, ParsedInputType.tracker);
+      expect(parsed.content, '跑步');
+      expect(parsed.metadata['durationMinutes'], 3);
+      expect(parsed.tags, ['运动']);
+    });
+
+    test('does not treat exercise duration as focus without focus keyword', () {
+      final parsed = LuiLiteParser.parse('跑步25分钟');
+
+      expect(parsed.type, ParsedInputType.tracker);
+      expect(parsed.content, '跑步');
+      expect(parsed.metadata['durationMinutes'], 25);
+    });
   });
 }

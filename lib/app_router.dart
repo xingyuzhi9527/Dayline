@@ -36,18 +36,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(
             routes: [
               GoRoute(
-                path: AppRoute.record.path,
-                name: AppRoute.record.name,
-                builder: (context, state) => const RecordPage(),
+                path: AppRoute.timeline.path,
+                name: AppRoute.timeline.name,
+                builder: (context, state) => const TimelinePage(),
               ),
             ],
           ),
           StatefulShellBranch(
             routes: [
               GoRoute(
-                path: AppRoute.timeline.path,
-                name: AppRoute.timeline.name,
-                builder: (context, state) => const TimelinePage(),
+                path: AppRoute.record.path,
+                name: AppRoute.record.name,
+                builder: (context, state) => const RecordPage(),
               ),
             ],
           ),

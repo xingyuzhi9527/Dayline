@@ -13,15 +13,62 @@ class RecordNotifier extends Notifier<RecordState> {
   RecordState build() => const RecordState();
 
   void updateInput(String text) {
-    state = state.copyWith(inputText: text, errorMessage: '');
+    state = state.copyWith(inputText: text, errorMessage: null);
   }
 
-  void submit() {
-    final text = state.inputText.trim();
+  void submit([String? rawText]) {
+    final text = (rawText ?? state.inputText).trim();
     if (text.isEmpty) return;
 
     final parsed = LuiLiteParser.parse(text);
-    state = state.copyWith(parsedInput: parsed, errorMessage: '');
+    state = state.copyWith(
+      inputText: text,
+      parsedInput: parsed,
+      errorMessage: null,
+    );
+  }
+
+  Future<bool> saveInput(String text, {bool asMemo = false}) async {
+    final trimmedText = text.trim();
+    if (trimmedText.isEmpty) return false;
+
+    final parsed = LuiLiteParser.parse(trimmedText);
+    state = state.copyWith(
+      inputText: trimmedText,
+      parsedInput: parsed,
+      isSaving: true,
+      errorMessage: null,
+    );
+
+    try {
+      await _persist(parsed, asMemo: asMemo);
+      ref.read(dataVersionProvider.notifier).increment();
+      state = const RecordState();
+      return true;
+    } catch (e) {
+      state = state.copyWith(isSaving: false, errorMessage: e.toString());
+      return false;
+    }
+  }
+
+  void updateParsedType(ParsedInputType type) {
+    final parsed = state.parsedInput;
+    if (parsed == null || parsed.type == type) return;
+
+    state = state.copyWith(
+      parsedInput: parsed.copyWith(type: type, confidence: 1),
+      errorMessage: null,
+    );
+  }
+
+  void updateParsedTags(List<String> tags) {
+    final parsed = state.parsedInput;
+    if (parsed == null) return;
+
+    state = state.copyWith(
+      parsedInput: parsed.copyWith(tags: _normalizeTags(tags)),
+      errorMessage: null,
+    );
   }
 
   Future<void> confirm() => _save(asMemo: false);
@@ -29,14 +76,14 @@ class RecordNotifier extends Notifier<RecordState> {
   Future<void> changeToMemo() => _save(asMemo: true);
 
   void cancel() {
-    state = state.copyWith(parsedInput: null, errorMessage: '');
+    state = state.copyWith(parsedInput: null, errorMessage: null);
   }
 
   Future<void> _save({required bool asMemo}) async {
     final parsed = state.parsedInput;
     if (parsed == null) return;
 
-    state = state.copyWith(isSaving: true, errorMessage: '');
+    state = state.copyWith(isSaving: true, errorMessage: null);
 
     try {
       await _persist(parsed, asMemo: asMemo);
@@ -139,6 +186,8 @@ class RecordNotifier extends Notifier<RecordState> {
     final trackerName = parsed.content.isNotEmpty
         ? parsed.content
         : (parsed.tags.isNotEmpty ? parsed.tags.first : 'tracker');
+    final durationMinutes = parsed.metadata['durationMinutes'] as int?;
+    final value = durationMinutes?.toDouble() ?? 1;
 
     final allTrackers = await ref.read(trackersRepositoryProvider).findAll();
     final existing = allTrackers.cast<Map<String, Object?>>().firstWhere(
@@ -148,10 +197,38 @@ class RecordNotifier extends Notifier<RecordState> {
 
     final trackerId = existing.isNotEmpty
         ? existing['id'] as int
-        : await ref.read(trackersRepositoryProvider).create(name: trackerName);
+        : await ref
+              .read(trackersRepositoryProvider)
+              .create(
+                name: trackerName,
+                unit: durationMinutes == null ? null : '分钟',
+              );
 
     await ref
         .read(trackerLogsRepositoryProvider)
-        .create(trackerId: trackerId, date: now, note: parsed.content);
+        .create(
+          trackerId: trackerId,
+          date: now,
+          value: value,
+          note: parsed.content,
+        );
+  }
+
+  static List<String> _normalizeTags(Iterable<String> tags) {
+    final seen = <String>{};
+    final normalized = <String>[];
+
+    for (final tag in tags) {
+      final value = tag
+          .replaceFirst(RegExp(r'^[#＃]+'), '')
+          .replaceAll(RegExp(r'\s+'), '')
+          .trim();
+      if (value.isEmpty || seen.contains(value)) continue;
+
+      seen.add(value);
+      normalized.add(value);
+    }
+
+    return normalized;
   }
 }
