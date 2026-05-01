@@ -93,11 +93,13 @@ class ReviewBody extends ConsumerWidget {
         }
 
         return ListView(
+          key: const ValueKey('review-body-scroll'),
+          physics: const ClampingScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.md,
             AppSpacing.sm,
             AppSpacing.md,
-            AppSpacing.xl,
+            AppSpacing.xxl,
           ),
           children: [
             _SummaryCard(summary: summary),
@@ -128,56 +130,42 @@ class _SummaryCard extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Card(
-      child: IntrinsicHeight(
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(left: BorderSide(color: AppColors.primary, width: 4)),
+          borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusLg)),
+        ),
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 4,
-              decoration: const BoxDecoration(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withAlpha(18),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.auto_awesome_rounded,
                 color: AppColors.primary,
-                borderRadius: BorderRadius.horizontal(
-                  left: Radius.circular(AppSpacing.radiusLg),
-                ),
               ),
             ),
+            const SizedBox(width: AppSpacing.sm),
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withAlpha(18),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.auto_awesome_rounded,
-                        color: AppColors.primary,
-                      ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('今日复盘', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    summary.summaryText,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      height: 1.6,
+                      color: AppColors.muted,
                     ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('今日复盘', style: theme.textTheme.titleMedium),
-                          const SizedBox(height: AppSpacing.xs),
-                          Text(
-                            summary.summaryText,
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              height: 1.6,
-                              color: AppColors.muted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -212,14 +200,23 @@ class _StatsGrid extends StatelessWidget {
       ),
     ];
 
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: AppSpacing.sm,
-      mainAxisSpacing: AppSpacing.sm,
-      childAspectRatio: 1.1,
-      children: stats.map((stat) => _StatCard(stat: stat)).toList(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tileWidth = (constraints.maxWidth - AppSpacing.sm) / 2;
+
+        return Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: [
+            for (final stat in stats)
+              SizedBox(
+                width: tileWidth,
+                height: 190,
+                child: _StatCard(stat: stat),
+              ),
+          ],
+        );
+      },
     );
   }
 }

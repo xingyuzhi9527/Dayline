@@ -23,27 +23,50 @@ class DateHeaderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
     final theme = Theme.of(context);
 
-    return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.xs),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '你好，今天。',
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Text(
+            '早上好，探索者',
             style: theme.textTheme.displaySmall?.copyWith(
-              fontWeight: FontWeight.w700,
+              fontSize: 30,
+              fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: AppSpacing.xxs),
-          Text(
-            '今天是 ${formatDate(now)}。',
-            style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
           ),
-        ],
-      ),
+          decoration: BoxDecoration(
+            color: AppColors.secondaryContainer.withAlpha(48),
+            borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+            border: Border.all(color: AppColors.secondaryContainer),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.local_fire_department_rounded,
+                size: 18,
+                color: AppColors.secondary,
+              ),
+              const SizedBox(width: AppSpacing.xxs),
+              Text(
+                '连续记录 4 天',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: AppColors.secondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -72,33 +95,33 @@ class StatsSummaryCard extends ConsumerWidget {
       children: [
         _MetricTile(
           icon: Icons.check_circle_outline,
-          label: '待办',
+          label: '待办进度',
           value: todoValue,
           helper: '已完成',
-          color: const Color(0xFF4A90D9),
+          color: AppColors.muted,
         ),
         _MetricTile(
           icon: Icons.timer_rounded,
-          label: '专注',
+          label: '专注时长',
           value: focusMins.valueOrNull != null
-              ? '${focusMins.valueOrNull} min'
+              ? '${focusMins.valueOrNull} 分钟'
               : '-',
           helper: '深度工作',
-          color: const Color(0xFFE67E22),
+          color: AppColors.primary,
         ),
         _MetricTile(
-          icon: Icons.check_rounded,
-          label: '打卡',
+          icon: Icons.sentiment_satisfied_alt_rounded,
+          label: '当前心情',
           value: trackerCount.valueOrNull?.toString() ?? '-',
-          helper: '今日记录',
-          color: const Color(0xFF7CB342),
+          helper: '今日打卡',
+          color: AppColors.secondaryContainer,
         ),
         _MetricTile(
-          icon: Icons.edit_note_rounded,
-          label: '记录',
+          icon: Icons.bolt_rounded,
+          label: '能量消耗',
           value: recordCount.valueOrNull?.toString() ?? '-',
           helper: '生活片段',
-          color: AppColors.primary,
+          color: AppColors.accent,
         ),
       ],
     );
@@ -201,6 +224,142 @@ class ProgressCard extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class StatusInsightCard extends StatelessWidget {
+  const StatusInsightCard({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const _TypeDot(color: AppColors.primary),
+                          const SizedBox(width: AppSpacing.xs),
+                          Text('状态洞察', style: theme.textTheme.titleMedium),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '92%',
+                            style: theme.textTheme.displaySmall?.copyWith(
+                              color: AppColors.primary,
+                              fontSize: 40,
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              '精力充沛',
+                              style: theme.textTheme.titleMedium,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.nightlight_round, size: 18),
+                        const SizedBox(width: AppSpacing.xs),
+                        Text('睡眠记录', style: theme.textTheme.bodyLarge),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      '7h 45m',
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        color: AppColors.ink,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            const Divider(height: 1, color: AppColors.border),
+            const SizedBox(height: AppSpacing.md),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceLow,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withAlpha(18),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.auto_awesome_rounded,
+                      color: AppColors.primary,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      '基于昨晚充足的睡眠，建议今日开启深度工作模式。',
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            FilledButton.icon(
+              onPressed: () {},
+              icon: const Icon(Icons.center_focus_strong_rounded),
+              label: const Text('开启专注'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TypeDot extends StatelessWidget {
+  const _TypeDot({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
 }

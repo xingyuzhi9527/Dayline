@@ -16,13 +16,20 @@ class TodayPage extends ConsumerWidget {
     return SafeArea(
       child: ListView(
         key: const ValueKey('today-page'),
-        padding: const EdgeInsets.all(AppSpacing.md),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.containerMargin,
+          AppSpacing.lg,
+          AppSpacing.containerMargin,
+          AppSpacing.xl,
+        ),
         children: const [
           DateHeaderCard(),
-          SizedBox(height: AppSpacing.sm),
-          ProgressCard(),
           SizedBox(height: AppSpacing.md),
-          QuickInputBar(),
+          ProgressCard(),
+          SizedBox(height: AppSpacing.lg),
+          QuickInputBar(mode: QuickInputMode.saveImmediately),
+          SizedBox(height: AppSpacing.md),
+          StatusInsightCard(),
           SizedBox(height: AppSpacing.md),
           StatsSummaryCard(),
           SizedBox(height: AppSpacing.md),

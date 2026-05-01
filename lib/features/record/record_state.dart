@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/parser/lui_lite_parser.dart';
 
+const _unchanged = Object();
+
 @immutable
 class RecordState {
   const RecordState({
@@ -18,15 +20,19 @@ class RecordState {
 
   RecordState copyWith({
     String? inputText,
-    ParsedInput? parsedInput,
+    Object? parsedInput = _unchanged,
     bool? isSaving,
-    String? errorMessage,
+    Object? errorMessage = _unchanged,
   }) {
     return RecordState(
       inputText: inputText ?? this.inputText,
-      parsedInput: parsedInput ?? this.parsedInput,
+      parsedInput: identical(parsedInput, _unchanged)
+          ? this.parsedInput
+          : parsedInput as ParsedInput?,
       isSaving: isSaving ?? this.isSaving,
-      errorMessage: errorMessage ?? this.errorMessage,
+      errorMessage: identical(errorMessage, _unchanged)
+          ? this.errorMessage
+          : errorMessage as String?,
     );
   }
 
