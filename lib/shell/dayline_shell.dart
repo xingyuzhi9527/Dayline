@@ -28,22 +28,23 @@ class DaylineShell extends StatelessWidget {
         leadingWidth: 64,
         leading: IconButton(
           tooltip: '菜单',
-          onPressed: () {},
+          onPressed: _releaseInputFocus,
           icon: const Icon(Icons.menu_rounded),
         ),
         actions: [
           IconButton(
             tooltip: '设置',
-            onPressed: () {},
+            onPressed: _releaseInputFocus,
             icon: const Icon(Icons.settings_outlined),
           ),
           const SizedBox(width: AppSpacing.xs),
         ],
       ),
       body: navigationShell,
-      bottomNavigationBar: _DiaryNavigationBar(
+      bottomNavigationBar: _TripleNavBar(
         currentIndex: navigationShell.currentIndex,
         onSelected: (index) {
+          _releaseInputFocus();
           navigationShell.goBranch(
             index,
             initialLocation: index == navigationShell.currentIndex,
@@ -52,10 +53,14 @@ class DaylineShell extends StatelessWidget {
       ),
     );
   }
+
+  static void _releaseInputFocus() {
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
 }
 
-class _DiaryNavigationBar extends StatelessWidget {
-  const _DiaryNavigationBar({
+class _TripleNavBar extends StatelessWidget {
+  const _TripleNavBar({
     required this.currentIndex,
     required this.onSelected,
   });
@@ -85,9 +90,10 @@ class _DiaryNavigationBar extends StatelessWidget {
             children: [
               for (var i = 0; i < AppRoute.values.length; i++)
                 Expanded(
-                  child: _DiaryNavigationItem(
+                  child: _NavItem(
                     route: AppRoute.values[i],
                     selected: i == currentIndex,
+                    isCenter: i == 1,
                     onTap: () => onSelected(i),
                   ),
                 ),
@@ -99,21 +105,25 @@ class _DiaryNavigationBar extends StatelessWidget {
   }
 }
 
-class _DiaryNavigationItem extends StatelessWidget {
-  const _DiaryNavigationItem({
+class _NavItem extends StatelessWidget {
+  const _NavItem({
     required this.route,
     required this.selected,
+    required this.isCenter,
     required this.onTap,
   });
 
   final AppRoute route;
   final bool selected;
+  final bool isCenter;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final color = selected ? AppColors.primary : AppColors.muted;
     final theme = Theme.of(context);
+    final iconSize = isCenter && selected ? 28.0 : 24.0;
+    final scale = isCenter && selected ? 1.12 : 1.0;
 
     return Semantics(
       label: route.label,
@@ -124,26 +134,49 @@ class _DiaryNavigationItem extends StatelessWidget {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: onTap,
-          child: AnimatedScale(
-            duration: const Duration(milliseconds: 160),
-            scale: selected ? 1.08 : 1,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  selected ? route.selectedIcon : route.icon,
-                  color: color.withAlpha(selected ? 255 : 150),
-                  size: 26,
-                ),
-                const SizedBox(height: AppSpacing.xxs),
-                Text(
-                  route.label,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: color.withAlpha(selected ? 255 : 150),
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            child: AnimatedScale(
+              duration: const Duration(milliseconds: 160),
+              scale: scale,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (isCenter)
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? AppColors.primary.withAlpha(20)
+                            : Colors.transparent,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        selected ? route.selectedIcon : route.icon,
+                        color: selected
+                            ? AppColors.primary
+                            : AppColors.muted.withAlpha(160),
+                        size: iconSize,
+                      ),
+                    )
+                  else
+                    Icon(
+                      selected ? route.selectedIcon : route.icon,
+                      color: color.withAlpha(selected ? 255 : 150),
+                      size: iconSize,
+                    ),
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    route.label,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: color.withAlpha(selected ? 255 : 150),
+                      fontWeight:
+                          selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
