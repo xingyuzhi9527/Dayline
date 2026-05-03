@@ -47,6 +47,13 @@ final timelineEventsProvider = FutureProvider<List<TimelineEvent>>((ref) async {
   final date = ref.watch(timelineDateProvider);
   ref.watch(dataVersionProvider);
 
+  return loadTimelineEventsForDate(ref, date);
+});
+
+Future<List<TimelineEvent>> loadTimelineEventsForDate(
+  Ref ref,
+  DateTime date,
+) async {
   final dateStr = dateKey(date);
   final events = <TimelineEvent>[];
 
@@ -184,7 +191,7 @@ final timelineEventsProvider = FutureProvider<List<TimelineEvent>>((ref) async {
 
   events.sort((a, b) => a.timestamp.compareTo(b.timestamp));
   return events;
-});
+}
 
 IconData _iconForType(String type) => switch (type) {
   'memo' => Icons.notes_rounded,

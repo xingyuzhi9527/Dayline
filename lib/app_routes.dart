@@ -1,27 +1,21 @@
 import 'package:flutter/material.dart';
 
 enum AppRoute {
-  today(
-    path: '/today',
-    label: '今日',
-    icon: Icons.today_outlined,
-    selectedIcon: Icons.today,
-  ),
-  timeline(
-    path: '/timeline',
-    label: '时间线',
+  line(
+    path: '/line',
+    label: '线',
     icon: Icons.timeline_outlined,
     selectedIcon: Icons.timeline,
   ),
   record(
     path: '/record',
-    label: '记录',
-    icon: Icons.add_circle_outline,
-    selectedIcon: Icons.add_circle,
+    label: '记',
+    icon: Icons.mic_none_outlined,
+    selectedIcon: Icons.mic,
   ),
-  review(
-    path: '/review',
-    label: '复盘',
+  dashboard(
+    path: '/dashboard',
+    label: '盘',
     icon: Icons.insights_outlined,
     selectedIcon: Icons.insights,
   );

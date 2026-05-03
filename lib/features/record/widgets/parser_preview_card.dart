@@ -464,5 +464,10 @@ class _TypeMeta {
       Icons.bedtime_rounded,
       Color(0xFF5C6BC0),
     ),
+    ParsedInputType.mood => const _TypeMeta(
+      '情绪',
+      Icons.emoji_emotions_outlined,
+      Color(0xFF9B59B6),
+    ),
   };
 }

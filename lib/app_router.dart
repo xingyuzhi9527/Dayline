@@ -2,18 +2,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'app_routes.dart';
-import 'features/record/record_page.dart';
-import 'features/review/review_page.dart';
+import 'features/flash_record/flash_record_page.dart';
+import 'features/dashboard/dashboard_page.dart';
 import 'features/timeline/timeline_page.dart';
-import 'features/today/today_page.dart';
 import 'shell/dayline_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
-    initialLocation: AppRoute.today.path,
+    initialLocation: AppRoute.record.path,
     redirect: (context, state) {
       if (state.uri.path == '/') {
-        return AppRoute.today.path;
+        return AppRoute.record.path;
       }
 
       return null;
@@ -27,17 +26,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(
             routes: [
               GoRoute(
-                path: AppRoute.today.path,
-                name: AppRoute.today.name,
-                builder: (context, state) => const TodayPage(),
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: AppRoute.timeline.path,
-                name: AppRoute.timeline.name,
+                path: AppRoute.line.path,
+                name: AppRoute.line.name,
                 builder: (context, state) => const TimelinePage(),
               ),
             ],
@@ -47,16 +37,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: AppRoute.record.path,
                 name: AppRoute.record.name,
-                builder: (context, state) => const RecordPage(),
+                builder: (context, state) => const FlashRecordPage(),
               ),
             ],
           ),
           StatefulShellBranch(
             routes: [
               GoRoute(
-                path: AppRoute.review.path,
-                name: AppRoute.review.name,
-                builder: (context, state) => const ReviewPage(),
+                path: AppRoute.dashboard.path,
+                name: AppRoute.dashboard.name,
+                builder: (context, state) => const DashboardPage(),
               ),
             ],
           ),

@@ -10,9 +10,19 @@ coverage/
 /CODEx_HANDOFF.md
 /RESUME_PROMPT.md
 
+# Agent skills & Claude Code
+.agents/
+.claude/skills/
+.claude/settings.local.json
+skills-lock.json
+
+# Logs
+*.log
+
 # IDEs
 .idea/
 .vscode/
+*.iml
 
 # OS files
 .DS_Store

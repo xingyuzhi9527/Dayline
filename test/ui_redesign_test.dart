@@ -23,78 +23,73 @@ void main() {
     expect(cardShape.borderRadius, BorderRadius.circular(20));
   });
 
-  test('primary navigation follows the redesigned tab order', () {
+  test('primary navigation follows the three-tab order', () {
     expect(AppRoute.values.map((route) => route.label), [
-      '今日',
-      '时间线',
-      '记录',
-      '复盘',
+      '线',
+      '记',
+      '盘',
     ]);
   });
 
-  testWidgets('home screen opens with redesigned diary chrome and Today hero', (
+  testWidgets('home screen opens with diary chrome and voice record page', (
     tester,
   ) async {
     await tester.pumpWidget(_testApp());
     await tester.pumpAndSettle();
 
+    // App bar is always present
     expect(find.text('我的日记'), findsOneWidget);
     expect(find.byIcon(Icons.menu_rounded), findsOneWidget);
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
-    expect(find.text('早上好，探索者'), findsOneWidget);
-    expect(find.text('连续记录 4 天'), findsOneWidget);
-    expect(find.text('状态洞察'), findsOneWidget);
+
+    // Default page is FlashRecordPage with voice button
+    expect(find.byIcon(Icons.mic), findsWidgets);
+    expect(find.text('点击生成测试记录'), findsOneWidget);
+    expect(find.text('线'), findsOneWidget);
+    expect(find.text('记'), findsWidgets);
+    expect(find.text('盘'), findsOneWidget);
   });
 
-  testWidgets('record parsing preview uses the bento confirmation layout', (
+  testWidgets('dashboard page shows today overview modules', (
     tester,
   ) async {
-    await tester.pumpWidget(_testApp());
-    await tester.pumpAndSettle();
+    await tester.pumpWidget(_testApp(reviewSummary: _reviewSummary()));
+    await tester.pump(const Duration(milliseconds: 100));
 
-    await tester.tap(find.text('记录').last);
-    await tester.pumpAndSettle();
+    // Navigate to 盘 tab
+    await tester.tap(find.text('盘').first);
+    await tester.pump(const Duration(milliseconds: 250));
+    await _pumpUntilFound(tester, find.text('分类统计'));
 
-    await tester.enterText(find.byType(TextField).first, '9:30 跑步 30分钟 #健康');
-    await tester.pump();
-    await tester.tap(find.text('整理'));
-    await tester.pumpAndSettle();
+    // Dashboard should contain expected sections
+    expect(find.text('分类统计'), findsOneWidget);
+    expect(find.text('今日关键词'), findsOneWidget);
+    expect(find.text('今日总结'), findsOneWidget);
+    expect(find.text('晚间复盘'), findsOneWidget);
 
-    expect(find.text('原始记录'), findsOneWidget);
-    expect(find.text('"9:30 跑步 30分钟 #健康"'), findsOneWidget);
-    expect(find.text('类别'), findsOneWidget);
-    expect(find.text('时间'), findsOneWidget);
-    expect(find.text('时长'), findsOneWidget);
-    expect(find.text('标签'), findsOneWidget);
-    expect(find.text('30 分钟'), findsOneWidget);
-    expect(find.text('#健康'), findsWidgets);
+    // Evening review prompts
+    expect(find.text('今天做得不错的是'), findsOneWidget);
+    expect(find.text('今天可以调整的是'), findsOneWidget);
+    expect(find.text('明天想关注的是'), findsOneWidget);
+
+    // Export section
+    expect(find.text('导出 Markdown'), findsOneWidget);
+    expect(find.text('导出 JSON'), findsOneWidget);
   });
 
-  testWidgets(
-    'review page keeps one scroll surface and reaches export actions',
-    (tester) async {
-      await tester.pumpWidget(_testApp(reviewSummary: _reviewSummary()));
-      await tester.pump(const Duration(milliseconds: 100));
+  testWidgets('timeline page still accessible via 线 tab', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_testApp(reviewSummary: _reviewSummary()));
+    await tester.pump(const Duration(milliseconds: 100));
 
-      await tester.tap(find.text('复盘').last);
-      await tester.pump(const Duration(milliseconds: 250));
-      await _pumpUntilFound(tester, find.text('今日复盘'));
+    // Navigate to 线 tab
+    await tester.tap(find.text('线').first);
+    await tester.pump(const Duration(milliseconds: 250));
 
-      expect(find.byType(Scrollable), findsOneWidget);
-
-      await tester.scrollUntilVisible(
-        find.text('导出 Markdown'),
-        400,
-        scrollable: find.byType(Scrollable),
-        maxScrolls: 8,
-      );
-      await tester.pump(const Duration(milliseconds: 100));
-
-      expect(find.text('导出 Markdown'), findsOneWidget);
-      expect(find.text('导出 JSON'), findsOneWidget);
-    },
-    timeout: const Timeout(Duration(seconds: 20)),
-  );
+    // Timeline page key should be found
+    expect(find.byKey(const ValueKey('timeline-page')), findsOneWidget);
+  });
 }
 
 Future<void> _pumpUntilFound(

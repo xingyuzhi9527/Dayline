@@ -177,6 +177,18 @@ class RecordNotifier extends Notifier<RecordState> {
               metadata: parsed.metadata,
             );
 
+      case ParsedInputType.mood:
+        await ref
+            .read(recordsRepositoryProvider)
+            .create(
+              date: now,
+              type: 'mood',
+              content: parsed.content,
+              time: parsed.time,
+              tags: parsed.tags,
+              metadata: parsed.metadata,
+            );
+
       case ParsedInputType.tracker:
         await _saveTrackerLog(parsed, now);
     }
