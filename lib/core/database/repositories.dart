@@ -102,6 +102,23 @@ class RecordsRepository extends Repository {
     return (rows.single['cnt'] as int);
   }
 
+  Future<int> updateDetails(
+    int id, {
+    required String content,
+    String? time,
+    List<String> tags = const [],
+    Map<String, Object?> metadata = const {},
+    DateTime? updatedAt,
+  }) {
+    return update(id, {
+      'content': content,
+      'time': time,
+      'tags': jsonEncode(tags),
+      'metadata': jsonEncode(metadata),
+      'updated_at': timestamp(updatedAt ?? DateTime.now()),
+    });
+  }
+
   Future<List<DatabaseRow>> findRecent({int limit = 3}) async {
     final db = await localDatabase.database;
     return db.query(
@@ -177,6 +194,28 @@ class TodosRepository extends Repository {
     return update(id, {
       'is_completed': 0,
       'completed_at': null,
+      'updated_at': writtenAt,
+    });
+  }
+
+  Future<int> updateDetails(
+    int id, {
+    required String title,
+    String? note,
+    String? dueTime,
+    int priority = 0,
+    required bool isCompleted,
+    int? completedAt,
+    DateTime? updatedAt,
+  }) {
+    final writtenAt = timestamp(updatedAt ?? DateTime.now());
+    return update(id, {
+      'title': title,
+      'note': note,
+      'due_time': dueTime,
+      'priority': priority,
+      'is_completed': isCompleted ? 1 : 0,
+      'completed_at': isCompleted ? (completedAt ?? writtenAt) : null,
       'updated_at': writtenAt,
     });
   }
@@ -260,6 +299,19 @@ class TrackerLogsRepository extends Repository {
     );
     return (rows.single['cnt'] as int);
   }
+
+  Future<int> updateDetails(
+    int id, {
+    required double value,
+    String? note,
+    DateTime? updatedAt,
+  }) {
+    return update(id, {
+      'value': value,
+      'note': note,
+      'updated_at': timestamp(updatedAt ?? DateTime.now()),
+    });
+  }
 }
 
 class FocusSessionsRepository extends Repository {
@@ -305,6 +357,19 @@ WHERE date = ?
       whereArgs: [dateKey(date)],
       orderBy: 'started_at ASC, id ASC',
     );
+  }
+
+  Future<int> updateDetails(
+    int id, {
+    required int durationMinutes,
+    String? note,
+    DateTime? updatedAt,
+  }) {
+    return update(id, {
+      'duration_minutes': durationMinutes,
+      'note': note,
+      'updated_at': timestamp(updatedAt ?? DateTime.now()),
+    });
   }
 }
 
@@ -352,6 +417,23 @@ WHERE date = ?
       orderBy: 'created_at ASC, id ASC',
     );
   }
+
+  Future<int> updateDetails(
+    int id, {
+    required double amount,
+    required String category,
+    String? note,
+    String currency = 'CNY',
+    DateTime? updatedAt,
+  }) {
+    return update(id, {
+      'amount': amount,
+      'category': category,
+      'note': note,
+      'currency': currency,
+      'updated_at': timestamp(updatedAt ?? DateTime.now()),
+    });
+  }
 }
 
 class BodyLogsRepository extends Repository {
@@ -384,6 +466,23 @@ class BodyLogsRepository extends Repository {
       whereArgs: [dateKey(date)],
       orderBy: 'created_at ASC, id ASC',
     );
+  }
+
+  Future<int> updateDetails(
+    int id, {
+    required String metric,
+    required double value,
+    String? unit,
+    String? note,
+    DateTime? updatedAt,
+  }) {
+    return update(id, {
+      'metric': metric,
+      'value': value,
+      'unit': unit,
+      'note': note,
+      'updated_at': timestamp(updatedAt ?? DateTime.now()),
+    });
   }
 }
 

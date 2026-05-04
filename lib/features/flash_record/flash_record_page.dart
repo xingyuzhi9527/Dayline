@@ -13,7 +13,7 @@ import 'flash_record_state.dart';
 import 'widgets/flash_card.dart';
 import 'widgets/voice_button.dart';
 
-final todayMemoryEventsProvider = FutureProvider<List<TimelineEvent>>((
+final todayTodoPanelEventsProvider = FutureProvider<List<TimelineEvent>>((
   ref,
 ) async {
   ref.watch(dataVersionProvider);
@@ -77,7 +77,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(flashRecordProvider);
-    final memoryEvents = ref.watch(todayMemoryEventsProvider);
+    final memoryEvents = ref.watch(todayTodoPanelEventsProvider);
     final theme = Theme.of(context);
 
     // Handle saved state — show snackbar and reset
@@ -154,9 +154,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     AsyncValue<List<TimelineEvent>> memoryEvents,
   ) {
     final subtitle = memoryEvents.when(
-      data: (events) => events.isEmpty ? '今天还没有记录' : '${events.length} 条今天的记录',
-      loading: () => '正在读取今天记录',
-      error: (_, _) => '今天记录读取失败',
+      data: (events) {
+        final todoCount = events
+            .where((event) => event.source == TimelineEventSource.todo)
+            .length;
+        return todoCount == 0 ? '今天还没有待办' : '$todoCount 个待办事项';
+      },
+      loading: () => '正在读取今天待办',
+      error: (_, _) => '今天待办读取失败',
     );
 
     return Positioned(
@@ -165,7 +170,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 330, minWidth: 260),
         child: Material(
-          key: const ValueKey('today-memory-entry'),
+          key: const ValueKey('today-todo-entry'),
           color: AppColors.surface,
           elevation: 8,
           shadowColor: AppColors.softShadow,
@@ -192,7 +197,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                       ),
                     ),
                     child: const Icon(
-                      Icons.favorite_border_rounded,
+                      Icons.checklist_rounded,
                       color: AppColors.primary,
                     ),
                   ),
@@ -203,7 +208,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          '今日回忆',
+                          '待办的事情',
                           style: theme.textTheme.titleMedium?.copyWith(
                             color: AppColors.primary,
                             fontWeight: FontWeight.w700,
@@ -241,7 +246,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     AsyncValue<List<TimelineEvent>> memoryEvents,
   ) {
     return Positioned.fill(
-      key: const ValueKey('memory-scatter-layer'),
+      key: const ValueKey('todo-panel-layer'),
       child: AnimatedBuilder(
         animation: _memoryController,
         builder: (context, child) {
@@ -263,8 +268,8 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               Positioned.fill(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final sheetHeight = (constraints.maxHeight * 0.36)
-                        .clamp(260.0, 380.0)
+                    final sheetHeight = (constraints.maxHeight * 0.38)
+                        .clamp(280.0, 410.0)
                         .toDouble();
 
                     return Padding(
@@ -313,7 +318,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     return GestureDetector(
       onTap: () {},
       child: Material(
-        key: const ValueKey('memory-bottom-sheet'),
+        key: const ValueKey('todo-panel-bottom-sheet'),
         color: AppColors.surface.withAlpha(248),
         elevation: 14,
         shadowColor: AppColors.softShadow,
@@ -337,7 +342,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                       borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                     ),
                     child: const Icon(
-                      Icons.favorite_border_rounded,
+                      Icons.checklist_rounded,
                       color: AppColors.primary,
                       size: 20,
                     ),
@@ -349,16 +354,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '今日回忆',
+                            '待办的事情',
                             style: theme.textTheme.titleMedium?.copyWith(
                               color: AppColors.primary,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
                           Text(
-                            events.isEmpty
-                                ? '今天还没有记录'
-                                : '${events.length} 条真实记录',
+                            _todoPanelSubtitle(events),
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: AppColors.muted,
                             ),
@@ -366,14 +369,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                         ],
                       ),
                       loading: () => Text(
-                        '正在读取今日回忆',
+                        '正在读取待办',
                         style: theme.textTheme.titleSmall?.copyWith(
                           color: AppColors.primary,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                       error: (_, _) => Text(
-                        '今日回忆',
+                        '待办的事情',
                         style: theme.textTheme.titleSmall?.copyWith(
                           color: AppColors.primary,
                           fontWeight: FontWeight.w700,
@@ -382,8 +385,8 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                     ),
                   ),
                   IconButton(
-                    key: const ValueKey('memory-scatter-close'),
-                    tooltip: '收起今日回忆',
+                    key: const ValueKey('todo-panel-close'),
+                    tooltip: '收起待办的事情',
                     onPressed: _closeMemoryScatter,
                     icon: const Icon(Icons.close_rounded),
                     color: AppColors.primary,
@@ -393,45 +396,148 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               const SizedBox(height: AppSpacing.xs),
               Expanded(
                 child: memoryEvents.when(
-                  data: (events) {
-                    if (events.isEmpty) {
-                      return _buildMemoryPanelMessage(
-                        theme,
-                        icon: Icons.inbox_outlined,
-                        title: '今天还没有记录',
-                        message: '说一句或输入一条，回忆会从这里长出来。',
-                      );
-                    }
-
-                    return ListView.separated(
-                      key: const ValueKey('memory-scroll-field'),
-                      physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                      itemCount: events.length,
-                      separatorBuilder: (_, _) =>
-                          const SizedBox(height: AppSpacing.xs),
-                      itemBuilder: (context, index) {
-                        return _buildFoldedMemoryCard(events[index], index);
-                      },
-                    );
-                  },
+                  data: (events) => _buildTodoPanelColumns(theme, events),
                   loading: () => _buildMemoryPanelMessage(
                     theme,
                     icon: Icons.hourglass_empty_rounded,
                     title: '正在读取',
-                    message: '今天的记录马上就来。',
+                    message: '今天的事情马上就来。',
                   ),
                   error: (_, _) => _buildMemoryPanelMessage(
                     theme,
                     icon: Icons.error_outline_rounded,
                     title: '读取失败',
-                    message: '稍后再打开今日回忆试试。',
+                    message: '稍后再打开待办的事情试试。',
                   ),
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  String _todoPanelSubtitle(List<TimelineEvent> events) {
+    final todoCount = events
+        .where((event) => event.source == TimelineEventSource.todo)
+        .length;
+    final dailyCount = events.length - todoCount;
+    if (events.isEmpty) return '今天还没有事情';
+    return '$dailyCount 条日常记录 · $todoCount 个待办';
+  }
+
+  Widget _buildTodoPanelColumns(ThemeData theme, List<TimelineEvent> events) {
+    final dailyEvents = events
+        .where((event) => event.source != TimelineEventSource.todo)
+        .toList();
+    final todoEvents = events
+        .where((event) => event.source == TimelineEventSource.todo)
+        .toList();
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: _buildTodoPanelColumn(
+            theme,
+            key: const ValueKey('todo-panel-daily-column'),
+            listKey: const ValueKey('todo-panel-daily-list'),
+            title: '日常记录',
+            icon: Icons.edit_note_rounded,
+            events: dailyEvents,
+            emptyTitle: '还没有日常记录',
+            emptyMessage: '说一句或输入一条，记录会出现在这里。',
+            todoColumn: false,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.xs),
+        Expanded(
+          child: _buildTodoPanelColumn(
+            theme,
+            key: const ValueKey('todo-panel-todo-column'),
+            listKey: const ValueKey('todo-panel-todo-list'),
+            title: '待办事项',
+            icon: Icons.check_circle_outline,
+            events: todoEvents,
+            emptyTitle: '今天还没有待办',
+            emptyMessage: '输入“待办 买牛奶”就能加入这里。',
+            todoColumn: true,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTodoPanelColumn(
+    ThemeData theme, {
+    required Key key,
+    required Key listKey,
+    required String title,
+    required IconData icon,
+    required List<TimelineEvent> events,
+    required String emptyTitle,
+    required String emptyMessage,
+    required bool todoColumn,
+  }) {
+    return Container(
+      key: key,
+      padding: const EdgeInsets.all(AppSpacing.xs),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLow.withAlpha(160),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border.withAlpha(210)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: AppColors.primary),
+              const SizedBox(width: AppSpacing.xxs),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Expanded(
+            child: events.isEmpty
+                ? _buildMemoryPanelMessage(
+                    theme,
+                    icon: icon,
+                    title: emptyTitle,
+                    message: emptyMessage,
+                  )
+                : ListView.separated(
+                    key: listKey,
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                    itemCount: events.length,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(height: AppSpacing.xs),
+                    itemBuilder: (context, index) {
+                      final event = events[index];
+                      final child = todoColumn
+                          ? _TodoPanelEventCard(event: event)
+                          : _PanelEventCard(event: event);
+                      return _buildFoldedPanelCard(
+                        child,
+                        index,
+                        keyPrefix: todoColumn ? 'todo' : 'daily',
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -466,7 +572,11 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     );
   }
 
-  Widget _buildFoldedMemoryCard(TimelineEvent event, int index) {
+  Widget _buildFoldedPanelCard(
+    Widget child,
+    int index, {
+    required String keyPrefix,
+  }) {
     final delay = index * 0.055;
     final start = delay.clamp(0.0, 0.62).toDouble();
     final end = math.min(1.0, start + 0.34);
@@ -485,9 +595,9 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           child: Transform.scale(
             alignment: Alignment.topCenter,
             scaleY: 0.86 + progress * 0.14,
-            child: _MemoryEventCard(
-              key: ValueKey('memory-card-$index'),
-              event: event,
+            child: KeyedSubtree(
+              key: ValueKey('todo-panel-$keyPrefix-card-$index'),
+              child: child,
             ),
           ),
         ),
@@ -707,8 +817,8 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 }
 
-class _MemoryEventCard extends StatelessWidget {
-  const _MemoryEventCard({required this.event, super.key});
+class _PanelEventCard extends StatelessWidget {
+  const _PanelEventCard({required this.event});
 
   final TimelineEvent event;
 
@@ -729,7 +839,7 @@ class _MemoryEventCard extends StatelessWidget {
       shadowColor: AppColors.softShadow,
       borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       child: Container(
-        constraints: const BoxConstraints(minHeight: 78),
+        constraints: const BoxConstraints(minHeight: 72),
         padding: const EdgeInsets.all(AppSpacing.sm),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
@@ -739,15 +849,15 @@ class _MemoryEventCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
-              width: 38,
-              height: 38,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
                 color: tint.withAlpha(38),
                 shape: BoxShape.circle,
               ),
-              child: Icon(event.icon, color: tint, size: 21),
+              child: Icon(event.icon, color: tint, size: 18),
             ),
-            const SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.xs),
             Expanded(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -755,7 +865,7 @@ class _MemoryEventCard extends StatelessWidget {
                 children: [
                   Text(
                     event.title,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleSmall?.copyWith(
                       color: AppColors.primary,
@@ -774,21 +884,25 @@ class _MemoryEventCard extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: AppSpacing.sm),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.sm,
-                vertical: AppSpacing.xxs,
-              ),
-              decoration: BoxDecoration(
-                color: tint.withAlpha(30),
-                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-              ),
-              child: Text(
-                tag,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: tint,
-                  fontWeight: FontWeight.w600,
+            const SizedBox(width: AppSpacing.xs),
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.xs,
+                  vertical: AppSpacing.xxs,
+                ),
+                decoration: BoxDecoration(
+                  color: tint.withAlpha(30),
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                ),
+                child: Text(
+                  tag,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: tint,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),
@@ -796,6 +910,93 @@ class _MemoryEventCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _TodoPanelEventCard extends ConsumerWidget {
+  const _TodoPanelEventCard({required this.event});
+
+  final TimelineEvent event;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final isCompleted = (event.data['is_completed'] as int? ?? 0) == 1;
+    final note = event.description.trim().isEmpty
+        ? _formatEventTime(event.timestamp)
+        : event.description.trim();
+
+    return Material(
+      color: AppColors.surface.withAlpha(248),
+      elevation: 4,
+      shadowColor: AppColors.softShadow,
+      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        onTap: () => _toggleTodo(ref, isCompleted),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 72),
+          padding: const EdgeInsets.all(AppSpacing.sm),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            border: Border.all(color: AppColors.border.withAlpha(210)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(
+                isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
+                color: isCompleted ? AppColors.todo : AppColors.muted,
+                size: 22,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      event.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: isCompleted
+                            ? AppColors.muted
+                            : AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                        decoration: isCompleted
+                            ? TextDecoration.lineThrough
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xxs),
+                    Text(
+                      note,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _toggleTodo(WidgetRef ref, bool isCompleted) async {
+    final repo = ref.read(todosRepositoryProvider);
+    if (isCompleted) {
+      await repo.reopen(event.sourceId);
+    } else {
+      await repo.complete(event.sourceId);
+    }
+    ref.invalidate(todayTodoPanelEventsProvider);
+    ref.read(dataVersionProvider.notifier).increment();
   }
 }
 

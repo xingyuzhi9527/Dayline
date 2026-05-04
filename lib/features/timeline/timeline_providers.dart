@@ -6,9 +6,30 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/database/repositories.dart';
 import '../../core/database/repository_providers.dart';
 
+enum TimelineEventSource {
+  record,
+  todo,
+  trackerLog,
+  focusSession,
+  expense,
+  bodyLog,
+}
+
+extension TimelineEventSourceX on TimelineEventSource {
+  String get storageKey => switch (this) {
+    TimelineEventSource.record => 'records',
+    TimelineEventSource.todo => 'todos',
+    TimelineEventSource.trackerLog => 'tracker_logs',
+    TimelineEventSource.focusSession => 'focus_sessions',
+    TimelineEventSource.expense => 'expenses',
+    TimelineEventSource.bodyLog => 'body_logs',
+  };
+}
+
 class TimelineEvent {
   const TimelineEvent({
-    required this.id,
+    required this.source,
+    required this.sourceId,
     required this.type,
     required this.title,
     required this.description,
@@ -16,9 +37,11 @@ class TimelineEvent {
     required this.date,
     required this.icon,
     required this.tags,
+    this.data = const {},
   });
 
-  final String id;
+  final TimelineEventSource source;
+  final int sourceId;
   final String type;
   final String title;
   final String description;
@@ -26,6 +49,9 @@ class TimelineEvent {
   final String date;
   final IconData icon;
   final List<String> tags;
+  final Map<String, Object?> data;
+
+  String get id => '${source.storageKey}:$sourceId';
 }
 
 class TimelineDateNotifier extends Notifier<DateTime> {
@@ -71,7 +97,8 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
       final type = r['type'] as String;
       events.add(
         TimelineEvent(
-          id: 'records:${r['id']}',
+          source: TimelineEventSource.record,
+          sourceId: r['id'] as int,
           type: type,
           title: r['content'] as String,
           description: (r['time'] as String?) ?? '',
@@ -79,6 +106,7 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
           date: dateStr,
           icon: _iconForType(type),
           tags: _parseTags(r['tags'] as String),
+          data: r,
         ),
       );
     }
@@ -90,14 +118,16 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
       final isCompleted = (t['is_completed'] as int) == 1;
       events.add(
         TimelineEvent(
-          id: 'todos:${t['id']}',
+          source: TimelineEventSource.todo,
+          sourceId: t['id'] as int,
           type: 'todo',
           title: t['title'] as String,
-          description: isCompleted ? '已完成' : '待完成',
+          description: (t['note'] as String?) ?? (isCompleted ? '已完成' : '待完成'),
           timestamp: t['created_at'] as int,
           date: dateStr,
           icon: isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
           tags: const [],
+          data: t,
         ),
       );
     }
@@ -110,7 +140,8 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
       final name = trackerNames[trackerId] ?? '打卡';
       events.add(
         TimelineEvent(
-          id: 'tracker_logs:${l['id']}',
+          source: TimelineEventSource.trackerLog,
+          sourceId: l['id'] as int,
           type: 'tracker',
           title: name,
           description: (l['note'] as String?) ?? '打卡 ×${l['value'] ?? 1}',
@@ -118,6 +149,7 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
           date: dateStr,
           icon: Icons.check_rounded,
           tags: const [],
+          data: {...l, 'tracker_name': name},
         ),
       );
     }
@@ -131,7 +163,8 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
       final mins = s['duration_minutes'] as int;
       events.add(
         TimelineEvent(
-          id: 'focus_sessions:${s['id']}',
+          source: TimelineEventSource.focusSession,
+          sourceId: s['id'] as int,
           type: 'focus',
           title: (s['note'] as String?) ?? '专注 $mins 分钟',
           description: '$mins min',
@@ -139,6 +172,7 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
           date: dateStr,
           icon: Icons.timer_rounded,
           tags: const [],
+          data: s,
         ),
       );
     }
@@ -153,7 +187,8 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
       final category = e['category'] as String;
       events.add(
         TimelineEvent(
-          id: 'expenses:${e['id']}',
+          source: TimelineEventSource.expense,
+          sourceId: e['id'] as int,
           type: 'expense',
           title: '$category ¥${amount.toStringAsFixed(2)}',
           description: (e['note'] as String?) ?? '',
@@ -161,6 +196,7 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
           date: dateStr,
           icon: Icons.payments_rounded,
           tags: const [],
+          data: e,
         ),
       );
     }
@@ -176,7 +212,8 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
       final unit = (b['unit'] as String?) ?? '';
       events.add(
         TimelineEvent(
-          id: 'body_logs:${b['id']}',
+          source: TimelineEventSource.bodyLog,
+          sourceId: b['id'] as int,
           type: 'body',
           title: '$metric: $value${unit.isNotEmpty ? ' $unit' : ''}',
           description: (b['note'] as String?) ?? '',
@@ -184,6 +221,7 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
           date: dateStr,
           icon: Icons.monitor_weight_rounded,
           tags: const [],
+          data: b,
         ),
       );
     }
@@ -201,6 +239,7 @@ IconData _iconForType(String type) => switch (type) {
   'expense' => Icons.payments_rounded,
   'body' => Icons.monitor_weight_rounded,
   'sleep' => Icons.bedtime_rounded,
+  'mood' => Icons.emoji_emotions_outlined,
   _ => Icons.notes_rounded,
 };
 
