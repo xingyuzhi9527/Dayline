@@ -15,6 +15,7 @@ class DaylineShell extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         toolbarHeight: 64,
         title: Text(

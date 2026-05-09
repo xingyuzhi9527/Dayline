@@ -1,0 +1,12 @@
+﻿10
+5
+10|memo|enter——stress——001
+9|memo|enter——submit——probe——001
+8|memo|吃了一碗面
+7|memo|明天记得戴头盔
+6|memo|晚上记得洗袜子
+5|memo|去了沃尔玛
+4|memo|吃饭二十分钟
+3|memo|拿快递
+2|memo|记着拿快递的拿
+1|memo|吃饭二十分钟

@@ -19,6 +19,8 @@ void main() {
   ) async {
     await tester.pumpWidget(const ProviderScope(child: DaylineApp()));
     await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 1100));
+    await tester.pumpAndSettle();
 
     // Default tab is 记
     expect(find.text('记'), findsWidgets);
@@ -51,6 +53,8 @@ void main() {
     await tester.pumpAndSettle();
 
     // Default page is 记 with voice button
+    await tester.pump(const Duration(milliseconds: 1100));
+    await tester.pumpAndSettle();
     expect(find.text('时刻准备记录你的灵感'), findsOneWidget);
     expect(find.byType(VoiceButton), findsOneWidget);
 

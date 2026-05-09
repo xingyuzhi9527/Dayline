@@ -44,6 +44,8 @@ void main() {
 
     // Default page is FlashRecordPage with voice button
     expect(find.byIcon(Icons.mic), findsWidgets);
+    await tester.pump(const Duration(milliseconds: 1100));
+    await tester.pumpAndSettle();
     expect(find.text('时刻准备记录你的灵感'), findsOneWidget);
     expect(find.text('线'), findsOneWidget);
     expect(find.text('记'), findsWidgets);

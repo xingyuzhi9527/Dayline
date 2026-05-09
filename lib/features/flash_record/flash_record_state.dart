@@ -21,6 +21,8 @@ class FlashRecordState {
     this.audioLevel = 0,
     this.transcriptFinal = false,
     this.sttMetadata,
+    this.textSaving = false,
+    this.savedSequence = 0,
   });
 
   final FlashPhase phase;
@@ -34,6 +36,8 @@ class FlashRecordState {
   final double audioLevel;
   final bool transcriptFinal;
   final SttMetadata? sttMetadata;
+  final bool textSaving;
+  final int savedSequence;
 
   bool get hasResult => parsedInput != null;
   bool get isInputActive => phase == FlashPhase.idle;
@@ -52,6 +56,8 @@ class FlashRecordState {
     double? audioLevel,
     bool? transcriptFinal,
     Object? sttMetadata = _unchanged,
+    bool? textSaving,
+    int? savedSequence,
   }) {
     return FlashRecordState(
       phase: phase ?? this.phase,
@@ -71,6 +77,8 @@ class FlashRecordState {
       sttMetadata: identical(sttMetadata, _unchanged)
           ? this.sttMetadata
           : sttMetadata as SttMetadata?,
+      textSaving: textSaving ?? this.textSaving,
+      savedSequence: savedSequence ?? this.savedSequence,
     );
   }
 }

@@ -57,7 +57,8 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   void _submitText() {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
-    ref.read(flashRecordProvider.notifier).saveAsText(text);
+    _textController.clear();
+    unawaited(ref.read(flashRecordProvider.notifier).saveAsText(text));
   }
 
   void _openMemoryScatter() {
@@ -112,34 +113,23 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           fit: StackFit.expand,
           children: [
             // Main content
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Spacer(flex: 1),
-
-                // Voice button area
-                if (state.phase == FlashPhase.idle ||
-                    state.phase == FlashPhase.listening)
-                  Center(child: _buildVoiceArea(state, theme))
-                else if (state.phase == FlashPhase.recognized)
-                  Center(child: _buildRecognizedArea(state, theme))
-                else if (state.phase == FlashPhase.saving)
-                  Center(child: _buildSavingArea(theme))
-                else
-                  Center(child: _buildVoiceArea(state, theme)),
-
-                const Spacer(flex: 2),
-
-                // Bottom text input
-                if (!state.isInputActive)
-                  const SizedBox.shrink()
-                else
-                  _buildTextInput(theme),
-              ],
+            Positioned.fill(
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 180),
+                opacity: MediaQuery.viewInsetsOf(context).bottom > 0
+                    ? 0.38
+                    : 1,
+                child: Align(
+                  alignment: const Alignment(0, -0.03),
+                  child: _buildPrimaryStage(state, theme),
+                ),
+              ),
             ),
 
             if (state.isInputActive)
               _buildTodayMemoryEntry(theme, memoryEvents),
+
+            if (state.isInputActive) _buildTextInputDock(state, theme),
 
             if (_memoryExpanded) _buildMemoryScatterLayer(theme, memoryEvents),
 
@@ -170,32 +160,32 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
 
     return Positioned(
       right: AppSpacing.containerMargin,
-      bottom: 126,
+      bottom: 104,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 330, minWidth: 260),
+        constraints: const BoxConstraints(maxWidth: 148, minWidth: 132),
         child: Material(
           key: const ValueKey('today-todo-entry'),
           color: AppColors.surface,
-          elevation: 8,
+          elevation: 3,
           shadowColor: AppColors.softShadow,
-          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
           child: InkWell(
-            borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+            borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
             onTap: _openMemoryScatter,
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.sm,
+                horizontal: AppSpacing.sm,
+                vertical: AppSpacing.xs,
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 30,
+                    height: 30,
                     decoration: BoxDecoration(
                       color: AppColors.primary.withAlpha(18),
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      shape: BoxShape.circle,
                       border: Border.all(
                         color: AppColors.primary.withAlpha(90),
                       ),
@@ -203,9 +193,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                     child: const Icon(
                       Icons.checklist_rounded,
                       color: AppColors.primary,
+                      size: 17,
                     ),
                   ),
-                  const SizedBox(width: AppSpacing.md),
+                  const SizedBox(width: AppSpacing.xs),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -213,34 +204,67 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                       children: [
                         Text(
                           '待办的事情',
-                          style: theme.textTheme.titleMedium?.copyWith(
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelMedium?.copyWith(
                             color: AppColors.primary,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        const SizedBox(height: AppSpacing.xxs),
                         Text(
                           subtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
+                          style: theme.textTheme.labelSmall?.copyWith(
                             color: AppColors.muted,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: AppSpacing.sm),
                   Icon(
                     Icons.chevron_right_rounded,
                     color: AppColors.muted.withAlpha(190),
-                    size: 32,
+                    size: 20,
                   ),
                 ],
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildPrimaryStage(FlashRecordState state, ThemeData theme) {
+    if (state.phase == FlashPhase.idle || state.phase == FlashPhase.listening) {
+      return _buildVoiceArea(state, theme);
+    }
+    if (state.phase == FlashPhase.recognized) {
+      return _buildRecognizedArea(state, theme);
+    }
+    if (state.phase == FlashPhase.saving) {
+      return _buildSavingArea(theme);
+    }
+    return _buildVoiceArea(state, theme);
+  }
+
+  Widget _buildTextInputDock(FlashRecordState state, ThemeData theme) {
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final bottomOffset = keyboardInset > 0
+        ? math.max(AppSpacing.sm, keyboardInset - 72)
+        : AppSpacing.lg;
+
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      left: 0,
+      right: 0,
+      bottom: bottomOffset,
+      child: _buildTextInput(
+        state,
+        theme,
+        compact: keyboardInset > 0,
       ),
     );
   }
@@ -797,21 +821,27 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     );
   }
 
-  Widget _buildTextInput(ThemeData theme) {
+  Widget _buildTextInput(
+    FlashRecordState state,
+    ThemeData theme, {
+    bool compact = false,
+  }) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
+      padding: EdgeInsets.fromLTRB(
         AppSpacing.containerMargin,
         0,
         AppSpacing.containerMargin,
-        AppSpacing.lg,
+        compact ? 0 : AppSpacing.lg,
       ),
       child: Row(
         children: [
           Expanded(
             child: TextField(
+              key: const ValueKey('record-text-input'),
               controller: _textController,
               textInputAction: TextInputAction.send,
               onSubmitted: (_) => _submitText(),
+              maxLines: 1,
               decoration: InputDecoration(
                 hintText: '或输入文字…',
                 hintStyle: TextStyle(color: AppColors.muted.withAlpha(160)),
@@ -829,9 +859,28 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             ),
           ),
           const SizedBox(width: AppSpacing.xs),
-          IconButton(
-            onPressed: _submitText,
-            icon: const Icon(Icons.send_rounded, color: AppColors.primary),
+          Semantics(
+            label: 'record-text-submit',
+            button: true,
+            child: IconButton(
+              key: const ValueKey('record-text-submit'),
+              onPressed: _submitText,
+              icon: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 160),
+                child: state.textSaving
+                    ? const SizedBox(
+                        key: ValueKey('record-text-saving'),
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(
+                        Icons.send_rounded,
+                        key: ValueKey('record-text-send-icon'),
+                        color: AppColors.primary,
+                      ),
+              ),
+            ),
           ),
         ],
       ),
