@@ -20,6 +20,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   late final SttEngine _sttEngine;
   SttListenSession? _sttSession;
   StreamSubscription<SttTranscript>? _sttSub;
+  Timer? _initTimer;
   bool _disposed = false;
   int _listenRequestId = 0;
 
@@ -28,10 +29,11 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     _sttEngine = ref.watch(sttEngineProvider);
     ref.onDispose(() {
       _disposed = true;
+      _initTimer?.cancel();
       unawaited(_sttSub?.cancel());
       unawaited(_sttSession?.cancel());
     });
-    scheduleMicrotask(() {
+    _initTimer = Timer(const Duration(milliseconds: 900), () {
       if (!_disposed) {
         unawaited(_initializeStt());
       }
@@ -248,24 +250,34 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
 
     final parsed = LuiLiteParser.parse(trimmed);
     state = state.copyWith(
-      phase: FlashPhase.saving,
+      phase: FlashPhase.idle,
       rawText: trimmed,
       source: 'text',
       parsedInput: parsed,
+      textSaving: true,
+      errorMessage: null,
     );
 
     try {
       await _persist(parsed).timeout(_saveTimeout);
-      ref.read(dataVersionProvider.notifier).increment();
-      state = state.copyWith(phase: FlashPhase.saved);
+      ref.read(dataVersionProvider.notifier).incrementSoon();
+      state = state.copyWith(
+        phase: FlashPhase.idle,
+        rawText: '',
+        parsedInput: null,
+        textSaving: false,
+        savedSequence: state.savedSequence + 1,
+      );
     } on TimeoutException {
       state = state.copyWith(
         phase: FlashPhase.idle,
+        textSaving: false,
         errorMessage: '保存超时，请再试一次。',
       );
     } catch (e) {
       state = state.copyWith(
         phase: FlashPhase.idle,
+        textSaving: false,
         errorMessage: e.toString(),
       );
     }

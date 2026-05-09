@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'local_database.dart';
@@ -38,10 +40,24 @@ final appSettingsRepositoryProvider = Provider<AppSettingsRepository>((ref) {
 });
 
 class DataVersionNotifier extends Notifier<int> {
+  Timer? _debounceTimer;
+
   @override
-  int build() => 0;
+  int build() {
+    ref.onDispose(() {
+      _debounceTimer?.cancel();
+    });
+    return 0;
+  }
 
   void increment() => state = state + 1;
+
+  void incrementSoon([
+    Duration delay = const Duration(milliseconds: 250),
+  ]) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(delay, increment);
+  }
 }
 
 final dataVersionProvider = NotifierProvider<DataVersionNotifier, int>(

@@ -55,6 +55,11 @@ abstract final class _Re {
   );
   static final amountPrefix = RegExp(r'(?:¥|￥|RMB)\s*(\d+(?:\.\d+)?)', caseSensitive: false);
   static final amountSuffix = RegExp(r'(\d+(?:\.\d+)?)\s*(?:元|块|块钱)');
+  static final chineseAmountSuffix = RegExp(
+    '([\\u96f6\\u3007\\u4e00\\u4e8c\\u4e24\\u4e09\\u56db\\u4e94'
+    '\\u516d\\u4e03\\u516b\\u4e5d\\u5341\\u767e\\u5343\\u4e07'
+    '\\u70b9\\u534a]+)\\s*(?:\\u5143|\\u5757|\\u5757\\u94b1)',
+  );
   static final number = RegExp(r'\d+(?:\.\d+)?');
 }
 
@@ -259,8 +264,88 @@ class LuiLiteParser {
     if (pre != null) return double.parse(pre.group(1)!);
     final suf = _Re.amountSuffix.firstMatch(input);
     if (suf != null) return double.parse(suf.group(1)!);
+    final chineseSuf = _Re.chineseAmountSuffix.firstMatch(input);
+    if (chineseSuf != null) {
+      return _parseChineseNumber(chineseSuf.group(1)!);
+    }
     return null;
   }
+
+  static double? _parseChineseNumber(String input) {
+    if (input.isEmpty) return null;
+    if (input == '\u534a') return 0.5;
+
+    final parts = input.split('\u70b9');
+    if (parts.length > 2) return null;
+
+    final whole = _parseChineseInteger(parts.first);
+    if (whole == null) return null;
+
+    if (parts.length == 1) return whole.toDouble();
+
+    final decimalDigits = parts.last.runes.map(_chineseDigit).toList();
+    if (decimalDigits.any((digit) => digit == null)) return whole.toDouble();
+    final decimal = double.parse('0.${decimalDigits.join()}');
+    return whole + decimal;
+  }
+
+  static int? _parseChineseInteger(String input) {
+    if (input.isEmpty) return 0;
+
+    final hasUnit = input.runes.any((rune) =>
+        rune == 0x5341 || rune == 0x767e || rune == 0x5343 || rune == 0x4e07);
+    if (!hasUnit) {
+      final digits = input.runes.map(_chineseDigit).toList();
+      if (digits.any((digit) => digit == null)) return null;
+      return int.parse(digits.join());
+    }
+
+    var result = 0;
+    var section = 0;
+    var number = 0;
+
+    for (final rune in input.runes) {
+      final digit = _chineseDigit(rune);
+      if (digit != null) {
+        number = digit;
+        continue;
+      }
+
+      final unit = switch (rune) {
+        0x5341 => 10,
+        0x767e => 100,
+        0x5343 => 1000,
+        0x4e07 => 10000,
+        _ => null,
+      };
+      if (unit == null) return null;
+
+      if (unit == 10000) {
+        section += number;
+        result += section * unit;
+        section = 0;
+      } else {
+        section += (number == 0 ? 1 : number) * unit;
+      }
+      number = 0;
+    }
+
+    return result + section + number;
+  }
+
+  static int? _chineseDigit(int rune) => switch (rune) {
+        0x96f6 || 0x3007 => 0,
+        0x4e00 => 1,
+        0x4e8c || 0x4e24 => 2,
+        0x4e09 => 3,
+        0x56db => 4,
+        0x4e94 => 5,
+        0x516d => 6,
+        0x4e03 => 7,
+        0x516b => 8,
+        0x4e5d => 9,
+        _ => null,
+      };
 
   static double? _extractNumber(String input) {
     final m = _Re.number.firstMatch(input);

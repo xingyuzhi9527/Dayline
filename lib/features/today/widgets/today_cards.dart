@@ -91,7 +91,7 @@ class StatsSummaryCard extends ConsumerWidget {
       physics: const NeverScrollableScrollPhysics(),
       crossAxisSpacing: AppSpacing.sm,
       mainAxisSpacing: AppSpacing.sm,
-      childAspectRatio: 1.55,
+      childAspectRatio: 1.42,
       children: [
         _MetricTile(
           icon: Icons.check_circle_outline,

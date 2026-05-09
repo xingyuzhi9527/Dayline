@@ -69,7 +69,7 @@ class _VoiceButtonState extends State<VoiceButton>
         widget.phase != 'saving';
 
     return SizedBox.square(
-      dimension: 220,
+      dimension: 260,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: isSaving
@@ -139,8 +139,8 @@ class _VoiceButtonState extends State<VoiceButton>
                   scale: isListening ? 1.15 : (_isPressed ? 0.95 : 1.0),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 300),
-                    width: 120,
-                    height: 120,
+                    width: 144,
+                    height: 144,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: isListening
@@ -169,7 +169,7 @@ class _VoiceButtonState extends State<VoiceButton>
                     ),
                     child: Icon(
                       showUnavailable ? Icons.mic_off : Icons.mic,
-                      size: 52,
+                      size: 62,
                       color: isListening
                           ? Colors.white
                           : showUnavailable
