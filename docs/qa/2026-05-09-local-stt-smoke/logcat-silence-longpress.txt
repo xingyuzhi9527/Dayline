@@ -1,0 +1,2 @@
+﻿--------- beginning of main
+05-09 16:10:32.062 W/erei    ( 6531): [{0}] Failed to resolve name. status={1}

@@ -10,6 +10,7 @@ import '../../core/theme/app_spacing.dart';
 import '../timeline/timeline_providers.dart';
 import 'flash_record_notifier.dart';
 import 'flash_record_state.dart';
+import 'widgets/audio_waveform.dart';
 import 'widgets/flash_card.dart';
 import 'widgets/voice_button.dart';
 
@@ -607,20 +608,25 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
 
   Widget _buildVoiceArea(FlashRecordState state, ThemeData theme) {
     final effectiveLabel = state.phase == FlashPhase.listening
-        ? '正在聆听…'
-        : state.speechAvailable
-        ? '点击开始记录'
-        : '点击生成测试记录';
+        ? '正在本地识别...'
+        : state.sttLoading
+        ? '正在唤醒离线大脑...'
+        : state.sttReady
+        ? '时刻准备记录你的灵感'
+        : state.sttStatusMessage;
 
-    final liveText = state.rawText.trim();
+    final liveText = state.partialText.trim().isNotEmpty
+        ? state.partialText.trim()
+        : state.rawText.trim();
     final errorText = state.errorMessage?.trim();
+    final voiceAvailable = state.sttReady;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         VoiceButton(
           phase: state.phase.name,
-          speechAvailable: state.speechAvailable,
+          voiceAvailable: voiceAvailable,
           onStart: () {
             unawaited(ref.read(flashRecordProvider.notifier).startListening());
           },
@@ -629,15 +635,19 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           },
         ),
         const SizedBox(height: AppSpacing.sm),
-        if (!state.speechAvailable && !state.speechChecking)
+        if (!state.sttReady && !state.sttLoading)
           Text(
-            '模拟器语音不可用 · 使用测试模式',
+            state.sttStatusMessage,
             textAlign: TextAlign.center,
             style: theme.textTheme.labelSmall?.copyWith(
               color: AppColors.muted.withAlpha(140),
             ),
           ),
         const SizedBox(height: AppSpacing.xs),
+        AudioWaveform(
+          level: state.audioLevel,
+          active: state.phase == FlashPhase.listening,
+        ),
         const SizedBox(height: AppSpacing.md),
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 300),
@@ -662,7 +672,9 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                   : liveText.isNotEmpty
                   ? liveText
                   : state.phase == FlashPhase.listening
-                  ? '再次点击或松开后完成识别'
+                  ? '松开后整理成闪记卡片'
+                  : state.sttLoading
+                  ? '首次加载稍慢，之后会热启动'
                   : '也可以长按话筒说话',
               key: ValueKey('${errorText ?? ''}-$liveText'),
               textAlign: TextAlign.center,
@@ -671,6 +683,8 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               style: theme.textTheme.bodySmall?.copyWith(
                 color: errorText?.isNotEmpty == true
                     ? AppColors.accent
+                    : state.transcriptFinal
+                    ? AppColors.ink
                     : AppColors.muted,
               ),
             ),

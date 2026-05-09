@@ -1,0 +1,73 @@
+import 'dart:async';
+
+enum SttAvailabilityStatus { loading, ready, unavailable, error }
+
+class SttAvailability {
+  const SttAvailability({
+    required this.status,
+    required this.message,
+  });
+
+  const SttAvailability.loading()
+      : status = SttAvailabilityStatus.loading,
+        message = '正在唤醒离线大脑...';
+
+  const SttAvailability.ready()
+      : status = SttAvailabilityStatus.ready,
+        message = '时刻准备记录你的灵感';
+
+  const SttAvailability.unavailable(this.message)
+      : status = SttAvailabilityStatus.unavailable;
+
+  const SttAvailability.error(this.message)
+      : status = SttAvailabilityStatus.error;
+
+  final SttAvailabilityStatus status;
+  final String message;
+
+  bool get isReady => status == SttAvailabilityStatus.ready;
+}
+
+class SttMetadata {
+  const SttMetadata({
+    this.modelVersion,
+    this.language,
+    this.elapsed,
+    this.emotion,
+  });
+
+  final String? modelVersion;
+  final String? language;
+  final Duration? elapsed;
+  final String? emotion;
+}
+
+class SttTranscript {
+  const SttTranscript({
+    required this.text,
+    required this.isFinal,
+    this.audioLevel = 0,
+    this.metadata = const SttMetadata(),
+  });
+
+  final String text;
+  final bool isFinal;
+  final double audioLevel;
+  final SttMetadata metadata;
+}
+
+abstract interface class SttEngine {
+  Future<SttAvailability> initialize();
+
+  Future<SttListenSession> startListening();
+
+  Future<void> dispose();
+}
+
+abstract interface class SttListenSession {
+  Stream<SttTranscript> get transcripts;
+
+  Future<SttTranscript> stop();
+
+  Future<void> cancel();
+}

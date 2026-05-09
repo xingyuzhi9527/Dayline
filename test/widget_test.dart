@@ -43,7 +43,7 @@ void main() {
     // Switch back to 记
     await tester.tap(find.text('记').first);
     await tester.pumpAndSettle();
-    expect(find.text('点击生成测试记录'), findsOneWidget);
+    expect(find.text('时刻准备记录你的灵感'), findsOneWidget);
   });
 
   testWidgets('中心话筒按钮存在且按住有状态反馈', (tester) async {
@@ -51,7 +51,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Default page is 记 with voice button
-    expect(find.text('点击生成测试记录'), findsOneWidget);
+    expect(find.text('时刻准备记录你的灵感'), findsOneWidget);
     expect(find.byType(VoiceButton), findsOneWidget);
 
     // Tap on the central voice button — triggers mock simulation
