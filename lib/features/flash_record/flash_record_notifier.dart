@@ -1,13 +1,12 @@
 import 'dart:async';
-import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:speech_to_text/speech_recognition_error.dart';
-import 'package:speech_to_text/speech_recognition_result.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../../core/database/repository_providers.dart';
 import '../../core/parser/lui_lite_parser.dart';
+import '../../core/stt/stt_engine.dart';
+import '../../core/stt/stt_providers.dart';
 import 'flash_record_state.dart';
 
 final flashRecordProvider =
@@ -15,246 +14,170 @@ final flashRecordProvider =
   FlashRecordNotifier.new,
 );
 
-const _mockResults = [
-  '今天跑步30分钟',
-  '花了88元 买了件卫衣 #购物',
-  '待办 明天交报告',
-  '体重70.5公斤',
-  '心情不错 今天挺充实的',
-  '番茄工作25分钟',
-  '喝了8杯水',
-  '学习Flutter 2小时',
-  '开会 产品评审',
-  '聚会 跟老同学吃饭',
-];
-
 class FlashRecordNotifier extends Notifier<FlashRecordState> {
   static const _saveTimeout = Duration(seconds: 8);
 
-  final _speech = stt.SpeechToText();
-  final _random = Random();
-  bool _speechReady = false;
-  bool _speechPressed = false;
+  late final SttEngine _sttEngine;
+  SttListenSession? _sttSession;
+  StreamSubscription<SttTranscript>? _sttSub;
   bool _disposed = false;
   int _listenRequestId = 0;
-  String? _preferredLocaleId;
 
   @override
   FlashRecordState build() {
+    _sttEngine = ref.watch(sttEngineProvider);
     ref.onDispose(() {
       _disposed = true;
-      unawaited(_speech.cancel());
+      unawaited(_sttSub?.cancel());
+      unawaited(_sttSession?.cancel());
     });
-    _checkSpeechAvailability();
+    scheduleMicrotask(() {
+      if (!_disposed) {
+        unawaited(_initializeStt());
+      }
+    });
     return const FlashRecordState();
   }
 
-  Future<void> _checkSpeechAvailability() async {
-    try {
-      final available = await _speech.initialize(
-        onError: _handleSpeechError,
-        onStatus: _handleSpeechStatus,
-        debugLogging: false,
-        finalTimeout: const Duration(milliseconds: 500),
+  Future<SttAvailability> _initializeStt() async {
+    if (!_disposed && state.sttStatus != SttAvailabilityStatus.ready) {
+      state = state.copyWith(
+        sttStatus: SttAvailabilityStatus.loading,
+        sttStatusMessage: const SttAvailability.loading().message,
+        errorMessage: null,
       );
-      if (!_disposed) {
-        _speechReady = available;
-        state = state.copyWith(
-          speechAvailable: available,
-          speechChecking: false,
-        );
-      }
-    } catch (_) {
-      if (!_disposed) {
-        _speechReady = false;
-        state = state.copyWith(
-          speechAvailable: false,
-          speechChecking: false,
-        );
-      }
     }
+    final availability = await _sttEngine.initialize();
+    if (_disposed) return availability;
+    state = state.copyWith(
+      sttStatus: availability.status,
+      sttStatusMessage: availability.message,
+    );
+    return availability;
   }
 
   // ---- voice path ----
 
   Future<void> startListening() async {
-    _speechPressed = true;
     final requestId = ++_listenRequestId;
     state = state.copyWith(
       phase: FlashPhase.listening,
       rawText: '',
+      partialText: '',
+      audioLevel: 0,
       parsedInput: null,
       errorMessage: null,
       source: 'voice',
+      transcriptFinal: false,
     );
 
-    // If speech is known-unavailable, simulate immediately
-    if (!state.speechAvailable) {
-      _simulateListening(requestId);
+    if (state.sttStatus != SttAvailabilityStatus.ready) {
+      state = state.copyWith(
+        phase: FlashPhase.idle,
+        errorMessage: state.sttStatus == SttAvailabilityStatus.loading
+            ? '离线大脑还在唤醒，稍等一下'
+            : kDebugMode
+            ? state.sttStatusMessage
+            : '离线语音暂不可用，请使用文字记录',
+      );
       return;
     }
 
-    // Try real speech recognition
     try {
-      final localeId = await _resolvePreferredLocaleId();
-      if (_disposed || requestId != _listenRequestId || !_speechPressed) return;
+      await _sttSub?.cancel();
+      await _sttSession?.cancel();
 
-      await _speech.listen(
-        onResult: _handleSpeechResult,
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 3),
-        localeId: localeId,
-        listenOptions: stt.SpeechListenOptions(
-          cancelOnError: true,
-          partialResults: true,
-          listenMode: stt.ListenMode.dictation,
-        ),
-      );
+      final session = await _sttEngine.startListening();
+      if (_disposed || requestId != _listenRequestId) {
+        await session.cancel();
+        return;
+      }
+
+      _sttSession = session;
+      _sttSub = session.transcripts.listen((transcript) {
+        _handleTranscript(requestId, transcript);
+      });
     } catch (e) {
       if (_disposed) return;
-      // Real speech failed — fall back to mock
-      _simulateListening(requestId);
-    }
-  }
-
-  void _simulateListening(int requestId) {
-    if (_disposed || requestId != _listenRequestId || !_speechPressed) return;
-
-    // Simulate a short listening delay, then produce a mock result
-    Future.delayed(const Duration(milliseconds: 800), () {
-      if (_disposed || requestId != _listenRequestId || !_speechPressed) return;
-      final mockText = _mockResults[_random.nextInt(_mockResults.length)];
       state = state.copyWith(
-        phase: FlashPhase.recognized,
-        rawText: mockText,
-        errorMessage: null,
+        phase: FlashPhase.idle,
+        errorMessage: _friendlySttError(e),
       );
-    });
+    }
   }
 
   Future<void> stopListening() async {
-    _speechPressed = false;
     if (state.phase != FlashPhase.listening) return;
 
-    if (_speechReady && _speech.isListening) {
-      try {
-        await _speech.stop();
-        await Future<void>.delayed(const Duration(milliseconds: 250));
-      } catch (e) {
-        if (_disposed) return;
-        state = state.copyWith(
-          phase: FlashPhase.idle,
-          errorMessage: '语音停止失败：${_friendlySpeechError(e)}',
-        );
-        return;
-      }
-    }
-
-    // If mock simulated a result, it's already in recognized state — keep it
-    final recognizedText = state.rawText.trim();
-    if (recognizedText.isEmpty) {
+    final session = _sttSession;
+    if (session == null) {
       state = state.copyWith(
         phase: FlashPhase.idle,
-        errorMessage: '没有听清，再按住说一次。',
+        errorMessage: '离线语音还没有开始，请再试一次。',
       );
       return;
     }
-
-    state = state.copyWith(
-      phase: FlashPhase.recognized,
-      rawText: recognizedText,
-      errorMessage: null,
-    );
-  }
-
-  void _handleSpeechResult(SpeechRecognitionResult result) {
-    if (_disposed || state.phase != FlashPhase.listening) return;
-    final text = result.recognizedWords.trim();
-    if (text.isEmpty) return;
-    state = state.copyWith(
-      phase: result.finalResult ? FlashPhase.recognized : FlashPhase.listening,
-      rawText: text,
-      errorMessage: null,
-    );
-  }
-
-  void _handleSpeechStatus(String status) {
-    if (_disposed || state.phase != FlashPhase.listening) return;
-    if (status != 'done' && status != 'notListening') return;
-
-    final recognizedText = state.rawText.trim();
-    if (recognizedText.isNotEmpty) {
-      state = state.copyWith(
-        phase: FlashPhase.recognized,
-        rawText: recognizedText,
-        errorMessage: null,
-      );
-    } else if (!_speechPressed) {
-      state = state.copyWith(
-        phase: FlashPhase.idle,
-        errorMessage: '没有听清，再按住说一次。',
-      );
-    }
-  }
-
-  void _handleSpeechError(SpeechRecognitionError error) {
-    if (_disposed || state.phase != FlashPhase.listening) return;
-
-    // If we got partial text from real speech, keep it
-    final recognizedText = state.rawText.trim();
-    if (recognizedText.isNotEmpty) {
-      state = state.copyWith(
-        phase: FlashPhase.recognized,
-        rawText: recognizedText,
-        errorMessage: null,
-      );
-      return;
-    }
-
-    // Otherwise fall back to mock
-    final mockText = _mockResults[_random.nextInt(_mockResults.length)];
-    state = state.copyWith(
-      phase: FlashPhase.recognized,
-      rawText: mockText,
-      errorMessage: null,
-    );
-  }
-
-  Future<String?> _resolvePreferredLocaleId() async {
-    if (_preferredLocaleId != null) return _preferredLocaleId;
 
     try {
-      final locales = await _speech.locales();
-      for (final locale in locales) {
-        final normalized = locale.localeId.toLowerCase().replaceAll('-', '_');
-        if (normalized == 'zh_cn') {
-          _preferredLocaleId = locale.localeId;
-          return _preferredLocaleId;
-        }
-      }
-      for (final locale in locales) {
-        if (locale.localeId.toLowerCase().startsWith('zh')) {
-          _preferredLocaleId = locale.localeId;
-          return _preferredLocaleId;
-        }
-      }
-    } catch (_) {}
-    return null;
+      final transcript = await session.stop();
+      if (_disposed) return;
+      _completeTranscript(transcript);
+    } catch (e) {
+      if (_disposed) return;
+      state = state.copyWith(
+        phase: FlashPhase.idle,
+        errorMessage: '语音停止失败：${_friendlySttError(e)}',
+      );
+    }
   }
 
-  String _friendlySpeechError(Object error) {
-    if (error is SpeechRecognitionError) {
-      if (error.errorMsg == 'error_permission') {
-        return '麦克风权限未开启，请允许 Dayline 使用麦克风。';
-      }
-      if (error.errorMsg == 'error_no_match') {
-        return '没有听清，再按住说一次。';
-      }
-      return error.errorMsg;
+  void _handleTranscript(int requestId, SttTranscript transcript) {
+    if (_disposed || requestId != _listenRequestId) return;
+    if (state.phase != FlashPhase.listening) return;
+
+    if (transcript.isFinal) {
+      _completeTranscript(transcript);
+      return;
     }
+
+    final text = transcript.text.trim();
+    state = state.copyWith(
+      rawText: text.isNotEmpty ? text : state.rawText,
+      partialText: text,
+      audioLevel: transcript.audioLevel,
+      sttMetadata: transcript.metadata,
+      transcriptFinal: false,
+      errorMessage: null,
+    );
+  }
+
+  void _completeTranscript(SttTranscript transcript) {
+    final recognizedText = transcript.text.trim();
+    if (recognizedText.isNotEmpty) {
+      state = state.copyWith(
+        phase: FlashPhase.recognized,
+        rawText: recognizedText,
+        partialText: recognizedText,
+        audioLevel: 0,
+        sttMetadata: transcript.metadata,
+        transcriptFinal: true,
+        errorMessage: null,
+      );
+    } else {
+      state = state.copyWith(
+        phase: FlashPhase.idle,
+        rawText: '',
+        partialText: '',
+        audioLevel: 0,
+        errorMessage: '没有听清，再按住说一次。',
+      );
+    }
+  }
+
+  String _friendlySttError(Object error) {
     final message = error.toString();
-    if (message.contains('MissingPluginException')) {
-      return '当前运行环境还没有加载语音识别插件。';
+    if (message.contains('麦克风权限')) {
+      return '麦克风权限未开启，请允许 Dayline 使用麦克风。';
     }
     return message;
   }
@@ -267,7 +190,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   }
 
   void cancelConfirm() {
-    state = const FlashRecordState();
+    state = _idleStateKeepingStt();
   }
 
   Future<void> save() async {
@@ -294,7 +217,14 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   }
 
   void resetAfterSaved() {
-    state = const FlashRecordState();
+    state = _idleStateKeepingStt();
+  }
+
+  FlashRecordState _idleStateKeepingStt() {
+    return FlashRecordState(
+      sttStatus: state.sttStatus,
+      sttStatusMessage: state.sttStatusMessage,
+    );
   }
 
   // ---- text path ----

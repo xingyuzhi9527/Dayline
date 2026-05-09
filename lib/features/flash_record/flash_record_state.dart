@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../core/parser/lui_lite_parser.dart';
+import '../../core/stt/stt_engine.dart';
 
 enum FlashPhase { idle, listening, recognized, confirming, saving, saved }
 
@@ -14,8 +15,12 @@ class FlashRecordState {
     this.parsedInput,
     this.errorMessage,
     this.source = 'voice',
-    this.speechAvailable = false,
-    this.speechChecking = true,
+    this.sttStatus = SttAvailabilityStatus.loading,
+    this.sttStatusMessage = '正在唤醒离线大脑...',
+    this.partialText = '',
+    this.audioLevel = 0,
+    this.transcriptFinal = false,
+    this.sttMetadata,
   });
 
   final FlashPhase phase;
@@ -23,11 +28,17 @@ class FlashRecordState {
   final ParsedInput? parsedInput;
   final String? errorMessage;
   final String source;
-  final bool speechAvailable;
-  final bool speechChecking;
+  final SttAvailabilityStatus sttStatus;
+  final String sttStatusMessage;
+  final String partialText;
+  final double audioLevel;
+  final bool transcriptFinal;
+  final SttMetadata? sttMetadata;
 
   bool get hasResult => parsedInput != null;
   bool get isInputActive => phase == FlashPhase.idle;
+  bool get sttReady => sttStatus == SttAvailabilityStatus.ready;
+  bool get sttLoading => sttStatus == SttAvailabilityStatus.loading;
 
   FlashRecordState copyWith({
     FlashPhase? phase,
@@ -35,8 +46,12 @@ class FlashRecordState {
     Object? parsedInput = _unchanged,
     Object? errorMessage = _unchanged,
     String? source,
-    bool? speechAvailable,
-    bool? speechChecking,
+    SttAvailabilityStatus? sttStatus,
+    String? sttStatusMessage,
+    String? partialText,
+    double? audioLevel,
+    bool? transcriptFinal,
+    Object? sttMetadata = _unchanged,
   }) {
     return FlashRecordState(
       phase: phase ?? this.phase,
@@ -48,8 +63,14 @@ class FlashRecordState {
           ? this.errorMessage
           : errorMessage as String?,
       source: source ?? this.source,
-      speechAvailable: speechAvailable ?? this.speechAvailable,
-      speechChecking: speechChecking ?? this.speechChecking,
+      sttStatus: sttStatus ?? this.sttStatus,
+      sttStatusMessage: sttStatusMessage ?? this.sttStatusMessage,
+      partialText: partialText ?? this.partialText,
+      audioLevel: audioLevel ?? this.audioLevel,
+      transcriptFinal: transcriptFinal ?? this.transcriptFinal,
+      sttMetadata: identical(sttMetadata, _unchanged)
+          ? this.sttMetadata
+          : sttMetadata as SttMetadata?,
     );
   }
 }

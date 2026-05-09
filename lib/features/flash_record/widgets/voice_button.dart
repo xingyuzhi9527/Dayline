@@ -7,14 +7,14 @@ class VoiceButton extends StatefulWidget {
     required this.phase,
     required this.onStart,
     required this.onStop,
-    this.speechAvailable = true,
+    this.voiceAvailable = true,
     super.key,
   });
 
   final String phase;
   final VoidCallback onStart;
   final VoidCallback onStop;
-  final bool speechAvailable;
+  final bool voiceAvailable;
 
   @override
   State<VoiceButton> createState() => _VoiceButtonState();
@@ -64,7 +64,7 @@ class _VoiceButtonState extends State<VoiceButton>
   Widget build(BuildContext context) {
     final isListening = widget.phase == 'listening';
     final isSaving = widget.phase == 'saving';
-    final showUnavailable = !widget.speechAvailable &&
+    final showUnavailable = !widget.voiceAvailable &&
         !isListening &&
         widget.phase != 'saving';
 
@@ -78,11 +78,11 @@ class _VoiceButtonState extends State<VoiceButton>
                 if (_longPressActive) return;
                 if (isListening) {
                   widget.onStop();
-                } else {
+                } else if (widget.voiceAvailable) {
                   widget.onStart();
                 }
               },
-        onLongPressStart: isListening || isSaving
+        onLongPressStart: isListening || isSaving || !widget.voiceAvailable
             ? null
             : (_) {
                 setState(() {
