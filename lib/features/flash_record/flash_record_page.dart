@@ -31,6 +31,7 @@ class FlashRecordPage extends ConsumerStatefulWidget {
 class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     with SingleTickerProviderStateMixin {
   final _textController = TextEditingController();
+  final _recognizedTextController = TextEditingController();
   late final AnimationController _memoryController;
   bool _memoryExpanded = false;
 
@@ -47,6 +48,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   @override
   void dispose() {
     _textController.dispose();
+    _recognizedTextController.dispose();
     _memoryController.dispose();
     super.dispose();
   }
@@ -695,6 +697,13 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 
   Widget _buildRecognizedArea(FlashRecordState state, ThemeData theme) {
+    if (_recognizedTextController.text != state.rawText) {
+      _recognizedTextController.text = state.rawText;
+      _recognizedTextController.selection = TextSelection.fromPosition(
+        TextPosition(offset: state.rawText.length),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.containerMargin,
@@ -711,12 +720,30 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             ),
             child: Column(
               children: [
-                Text(
-                  state.rawText,
+                TextField(
+                  controller: _recognizedTextController,
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w500,
                   ),
-                  textAlign: TextAlign.center,
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      borderSide: BorderSide(color: AppColors.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      borderSide: BorderSide(color: AppColors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      borderSide: const BorderSide(color: AppColors.primary),
+                    ),
+                    contentPadding: const EdgeInsets.all(AppSpacing.sm),
+                    hintText: '修改识别结果…',
+                    hintStyle: TextStyle(color: AppColors.muted.withAlpha(120)),
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 Row(
@@ -724,6 +751,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                   children: [
                     TextButton(
                       onPressed: () {
+                        _recognizedTextController.clear();
                         ref.read(flashRecordProvider.notifier).cancelConfirm();
                       },
                       child: const Text('重新说'),
@@ -731,7 +759,11 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                     const SizedBox(width: AppSpacing.md),
                     FilledButton.icon(
                       onPressed: () {
-                        ref.read(flashRecordProvider.notifier).confirmParsed();
+                        final edited =
+                            _recognizedTextController.text.trim();
+                        ref
+                            .read(flashRecordProvider.notifier)
+                            .confirmParsed(edited);
                       },
                       icon: const Icon(Icons.auto_fix_high, size: 18),
                       label: const Text('确认'),
