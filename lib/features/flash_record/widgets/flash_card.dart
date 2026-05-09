@@ -10,6 +10,7 @@ class FlashCard extends StatelessWidget {
     required this.parsedInput,
     required this.onSave,
     required this.onCancel,
+    this.onSwitchToTodo,
     super.key,
   });
 
@@ -17,6 +18,7 @@ class FlashCard extends StatelessWidget {
   final ParsedInput parsedInput;
   final VoidCallback onSave;
   final VoidCallback onCancel;
+  final VoidCallback? onSwitchToTodo;
 
   static String labelForType(ParsedInputType type) =>
       _TypeMeta.from(type).label;
@@ -80,6 +82,50 @@ class FlashCard extends StatelessWidget {
             // Content grid
             _InfoRow(label: '原始文本', value: rawText),
             _InfoRow(label: '类型', value: typeMeta.label),
+            if (onSwitchToTodo != null && parsedInput.type != ParsedInputType.todo)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 64),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                      onTap: onSwitchToTodo,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.xs,
+                          vertical: AppSpacing.xxs,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF4A90D9).withAlpha(18),
+                          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                          border: Border.all(
+                            color: const Color(0xFF4A90D9).withAlpha(80),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.check_circle_outline,
+                              size: 14,
+                              color: Color(0xFF4A90D9),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '改为待办',
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: const Color(0xFF4A90D9),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             _InfoRow(label: '内容', value: parsedInput.content),
             if (parsedInput.tags.isNotEmpty)
               _InfoRow(label: '标签', value: parsedInput.tags.join('、')),

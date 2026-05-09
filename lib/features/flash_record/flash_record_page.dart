@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repository_providers.dart';
+import '../../core/parser/lui_lite_parser.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../timeline/timeline_providers.dart';
@@ -856,6 +857,13 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             onCancel: () {
               ref.read(flashRecordProvider.notifier).cancelConfirm();
             },
+            onSwitchToTodo: state.parsedInput?.type != ParsedInputType.todo
+                ? () {
+                    ref
+                        .read(flashRecordProvider.notifier)
+                        .switchParsedType(ParsedInputType.todo);
+                  }
+                : null,
           ),
         ),
       ),
