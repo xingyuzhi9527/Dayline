@@ -13,9 +13,9 @@ class SttAssetPaths {
 
   final Directory root;
 
-  String get encoder => p.join(root.path, 'encoder-epoch-99-avg-1.int8.onnx');
-  String get decoder => p.join(root.path, 'decoder-epoch-99-avg-1.int8.onnx');
-  String get joiner => p.join(root.path, 'joiner-epoch-99-avg-1.int8.onnx');
+  String get encoder => p.join(root.path, 'encoder-epoch-20-avg-1-chunk-16-left-128.int8.onnx');
+  String get decoder => p.join(root.path, 'decoder-epoch-20-avg-1-chunk-16-left-128.int8.onnx');
+  String get joiner => p.join(root.path, 'joiner-epoch-20-avg-1-chunk-16-left-128.int8.onnx');
   String get tokens => p.join(root.path, 'tokens.txt');
   String get bpeModel => p.join(root.path, 'bpe.model');
   String get vadModel => p.join(root.path, 'silero_vad.onnx');
@@ -24,8 +24,8 @@ class SttAssetPaths {
 
 class SttAssetManager {
   const SttAssetManager({
-    this.assetZipPath = 'assets/stt/dayline-stt-v1.zip',
-    this.directoryName = 'dayline_stt_v1',
+    this.assetZipPath = 'assets/stt/dayline-stt-v2.zip',
+    this.directoryName = 'dayline_stt_v2',
   });
 
   final String assetZipPath;
