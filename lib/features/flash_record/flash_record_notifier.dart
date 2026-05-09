@@ -184,9 +184,14 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
 
   // ---- confirm / save flow ----
 
-  void confirmParsed() {
-    final parsed = LuiLiteParser.parse(state.rawText);
-    state = state.copyWith(phase: FlashPhase.confirming, parsedInput: parsed);
+  void confirmParsed([String? editedText]) {
+    final textToParse = editedText ?? state.rawText;
+    final parsed = LuiLiteParser.parse(textToParse);
+    state = state.copyWith(
+      phase: FlashPhase.confirming,
+      parsedInput: parsed,
+      rawText: textToParse,
+    );
   }
 
   void cancelConfirm() {
