@@ -57,6 +57,42 @@ void main() {
     test('recognizes 要做 prefix', () {
       expect(LuiLiteParser.parse('要做 备份照片').type, ParsedInputType.todo);
     });
+
+    test('recognizes 要 prefix for spoken intent', () {
+      expect(LuiLiteParser.parse('要买牛奶').type, ParsedInputType.todo);
+      expect(LuiLiteParser.parse('要写周报').type, ParsedInputType.todo);
+      expect(LuiLiteParser.parse('要做 备份').type, ParsedInputType.todo);
+    });
+
+    test('recognizes 需要 prefix', () {
+      final p = LuiLiteParser.parse('需要 买菜');
+      expect(p.type, ParsedInputType.todo);
+      expect(p.content, '买菜');
+    });
+
+    test('recognizes 别忘了 prefix', () {
+      final p = LuiLiteParser.parse('别忘了 带伞');
+      expect(p.type, ParsedInputType.todo);
+      expect(p.content, '带伞');
+    });
+
+    test('recognizes 必须 prefix', () {
+      expect(LuiLiteParser.parse('必须 提交报告').type, ParsedInputType.todo);
+    });
+
+    test('recognizes 准备 prefix', () {
+      expect(LuiLiteParser.parse('准备 写报告').type, ParsedInputType.todo);
+    });
+
+    test('recognizes 提醒 prefix', () {
+      final p = LuiLiteParser.parse('提醒 开会');
+      expect(p.type, ParsedInputType.todo);
+      expect(p.content, '开会');
+    });
+
+    test('recognizes 请 prefix', () {
+      expect(LuiLiteParser.parse('请 帮忙买').type, ParsedInputType.todo);
+    });
   });
 
   group('LuiLiteParser — focus', () {

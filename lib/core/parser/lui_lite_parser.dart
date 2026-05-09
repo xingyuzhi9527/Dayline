@@ -46,7 +46,7 @@ abstract final class _Re {
   static final colonTime = RegExp(r'([01]?\d|2[0-3])[:：]([0-5]\d)');
   static final chineseTime = RegExp(r'([01]?\d|2[0-3])点(半)?');
   static final todoPrefix = RegExp(
-    r'^(todo|待办|任务|记得|要做)\s*[:：-]?\s*',
+    r'^(todo|待办|任务|记得|要做|别忘了|需要|必须|准备|提醒|提醒我|请|要)\s*[:：-]?\s*',
     caseSensitive: false,
   );
   static final duration = RegExp(

@@ -194,6 +194,14 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     );
   }
 
+  void switchParsedType(ParsedInputType newType) {
+    final parsed = state.parsedInput;
+    if (parsed == null || parsed.type == newType) return;
+    state = state.copyWith(
+      parsedInput: parsed.copyWith(type: newType, tags: []),
+    );
+  }
+
   void cancelConfirm() {
     state = _idleStateKeepingStt();
   }
