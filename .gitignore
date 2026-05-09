@@ -19,6 +19,15 @@ skills-lock.json
 # Logs
 *.log
 
+# Generated QA artifacts
+docs/qa/**/*.png
+docs/qa/**/*.xml
+docs/qa/**/*.txt
+docs/qa/**/*.csv
+docs/qa/**/*.db
+docs/qa/**/*.sql
+!docs/qa/**/*.md
+
 # IDEs
 .idea/
 .vscode/
