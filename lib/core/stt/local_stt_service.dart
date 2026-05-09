@@ -586,16 +586,6 @@ class _SttWorkerSession {
     _endpointTimer?.cancel();
 
     if (sendFinal) {
-      _vad.flush();
-      while (!_vad.isEmpty()) {
-        final segment = _vad.front();
-        _stream.acceptWaveform(
-          samples: segment.samples,
-          sampleRate: _sttSampleRate,
-        );
-        _vad.pop();
-      }
-
       _stream.inputFinished();
       _decodeAndEmit(0, force: true);
       _emit(
