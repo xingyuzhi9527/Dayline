@@ -11,8 +11,8 @@ import 'flash_record_state.dart';
 
 final flashRecordProvider =
     NotifierProvider<FlashRecordNotifier, FlashRecordState>(
-  FlashRecordNotifier.new,
-);
+      FlashRecordNotifier.new,
+    );
 
 class FlashRecordNotifier extends Notifier<FlashRecordState> {
   static const _saveTimeout = Duration(seconds: 8);
@@ -73,14 +73,16 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       transcriptFinal: false,
     );
 
-    if (state.sttStatus != SttAvailabilityStatus.ready) {
+    final availability = state.sttStatus == SttAvailabilityStatus.ready
+        ? const SttAvailability.ready()
+        : await _initializeStt();
+
+    if (_disposed || requestId != _listenRequestId) return;
+
+    if (!availability.isReady) {
       state = state.copyWith(
         phase: FlashPhase.idle,
-        errorMessage: state.sttStatus == SttAvailabilityStatus.loading
-            ? '离线大脑还在唤醒，稍等一下'
-            : kDebugMode
-            ? state.sttStatusMessage
-            : '离线语音暂不可用，请使用文字记录',
+        errorMessage: kDebugMode ? availability.message : '离线语音暂不可用，请使用文字记录',
       );
       return;
     }
@@ -111,6 +113,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   Future<void> stopListening() async {
     if (state.phase != FlashPhase.listening) return;
 
+    ++_listenRequestId;
     final session = _sttSession;
     if (session == null) {
       state = state.copyWith(
@@ -290,7 +293,9 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
 
     switch (parsed.type) {
       case ParsedInputType.memo:
-        await ref.read(recordsRepositoryProvider).create(
+        await ref
+            .read(recordsRepositoryProvider)
+            .create(
               date: now,
               type: 'memo',
               content: parsed.content,
@@ -300,15 +305,15 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
             );
 
       case ParsedInputType.todo:
-        await ref.read(todosRepositoryProvider).create(
-              date: now,
-              title: parsed.content,
-              dueTime: parsed.time,
-            );
+        await ref
+            .read(todosRepositoryProvider)
+            .create(date: now, title: parsed.content, dueTime: parsed.time);
 
       case ParsedInputType.focus:
         final d = (parsed.metadata['durationMinutes'] as int?) ?? 25;
-        await ref.read(focusSessionsRepositoryProvider).create(
+        await ref
+            .read(focusSessionsRepositoryProvider)
+            .create(
               date: now,
               startedAt: now,
               durationMinutes: d,
@@ -318,25 +323,21 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       case ParsedInputType.expense:
         final a = (parsed.metadata['amount'] as num?)?.toDouble() ?? 0.0;
         final c = parsed.tags.isNotEmpty ? parsed.tags.first : 'other';
-        await ref.read(expensesRepositoryProvider).create(
-              date: now,
-              amount: a,
-              category: c,
-              note: parsed.content,
-            );
+        await ref
+            .read(expensesRepositoryProvider)
+            .create(date: now, amount: a, category: c, note: parsed.content);
 
       case ParsedInputType.body:
         final v = (parsed.metadata['value'] as num?)?.toDouble() ?? 0.0;
         final m = (parsed.metadata['metric'] as String?) ?? 'weight';
-        await ref.read(bodyLogsRepositoryProvider).create(
-              date: now,
-              metric: m,
-              value: v,
-              note: parsed.content,
-            );
+        await ref
+            .read(bodyLogsRepositoryProvider)
+            .create(date: now, metric: m, value: v, note: parsed.content);
 
       case ParsedInputType.sleep:
-        await ref.read(recordsRepositoryProvider).create(
+        await ref
+            .read(recordsRepositoryProvider)
+            .create(
               date: now,
               type: 'sleep',
               content: parsed.content,
@@ -346,7 +347,9 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
             );
 
       case ParsedInputType.mood:
-        await ref.read(recordsRepositoryProvider).create(
+        await ref
+            .read(recordsRepositoryProvider)
+            .create(
               date: now,
               type: 'mood',
               content: parsed.content,
@@ -369,18 +372,22 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
 
     final allTrackers = await ref.read(trackersRepositoryProvider).findAll();
     final existing = allTrackers.cast<Map<String, Object?>>().firstWhere(
-          (t) => t['name'] == trackerName,
-          orElse: () => <String, Object?>{},
-        );
+      (t) => t['name'] == trackerName,
+      orElse: () => <String, Object?>{},
+    );
 
     final trackerId = existing.isNotEmpty
         ? existing['id'] as int
-        : await ref.read(trackersRepositoryProvider).create(
-              name: trackerName,
-              unit: durationMinutes == null ? null : '分钟',
-            );
+        : await ref
+              .read(trackersRepositoryProvider)
+              .create(
+                name: trackerName,
+                unit: durationMinutes == null ? null : '分钟',
+              );
 
-    await ref.read(trackerLogsRepositoryProvider).create(
+    await ref
+        .read(trackerLogsRepositoryProvider)
+        .create(
           trackerId: trackerId,
           date: now,
           value: value,
