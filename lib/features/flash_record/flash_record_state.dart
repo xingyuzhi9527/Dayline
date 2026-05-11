@@ -40,7 +40,8 @@ class FlashRecordState {
   final int savedSequence;
 
   bool get hasResult => parsedInput != null;
-  bool get isInputActive => phase == FlashPhase.idle;
+  bool get isInputActive =>
+      phase == FlashPhase.idle || phase == FlashPhase.listening;
   bool get sttReady => sttStatus == SttAvailabilityStatus.ready;
   bool get sttLoading => sttStatus == SttAvailabilityStatus.loading;
 

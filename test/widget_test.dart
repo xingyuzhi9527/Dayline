@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:dayline_app/app.dart';
 import 'package:dayline_app/core/database/local_database.dart';
 import 'package:dayline_app/core/database/repository_providers.dart';
 import 'package:dayline_app/core/database/repositories.dart';
+import 'package:dayline_app/core/stt/stt_engine.dart';
+import 'package:dayline_app/core/stt/stt_providers.dart';
 import 'package:dayline_app/features/flash_record/flash_record_page.dart';
 import 'package:dayline_app/features/flash_record/widgets/voice_button.dart';
 import 'package:dayline_app/features/timeline/timeline_providers.dart';
@@ -71,8 +75,12 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: DaylineApp()));
     await tester.pumpAndSettle();
 
-    // Find the text input at the bottom
+    await tester.tap(find.byKey(const ValueKey('collapsed-intent-pill')));
+    await tester.pump(const Duration(milliseconds: 260));
+
+    // Find the text input after the unified intent pill expands.
     expect(find.byType(TextField), findsOneWidget);
+    expect(find.text('文字'), findsOneWidget);
 
     final input = find.byType(TextField).first;
     await tester.enterText(input, '今天跑步30分钟');
@@ -81,7 +89,103 @@ void main() {
     expect(find.text('今天跑步30分钟'), findsOneWidget);
   });
 
-  testWidgets('待办的事情使用当天真实记录并以双栏折叠层展示', (tester) async {
+  testWidgets('文字胶囊点空白后收回小窗口', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const ProviderScope(child: DaylineApp()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('collapsed-intent-pill')));
+    await tester.pump(const Duration(milliseconds: 260));
+
+    expect(find.byKey(const ValueKey('expanded-intent-input')), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
+    expect(find.byKey(const ValueKey('intent-dismiss-layer')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('intent-dismiss-layer')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('collapsed-intent-pill')), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets('collapsed intent long press stops after pointer release', (
+    tester,
+  ) async {
+    final sttEngine = _HoldToTalkSttEngine();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sttEngineProvider.overrideWithValue(sttEngine),
+          todayTodoPanelEventsProvider.overrideWith((ref) async => const []),
+        ],
+        child: const MaterialApp(home: Scaffold(body: FlashRecordPage())),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1000));
+    await tester.pump();
+
+    final pill = find.byKey(const ValueKey('collapsed-intent-pill'));
+    expect(pill, findsOneWidget);
+
+    final gesture = await tester.startGesture(tester.getCenter(pill));
+    await tester.pump(const Duration(milliseconds: 650));
+    await tester.pump();
+
+    expect(sttEngine.startCount, 1);
+    expect(pill, findsOneWidget);
+
+    await gesture.up();
+    await tester.pump();
+
+    expect(sttEngine.stopCount, 1);
+  });
+
+  testWidgets('voice long press waits for STT init and starts once ready', (
+    tester,
+  ) async {
+    final sttEngine = _DeferredInitSttEngine();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sttEngineProvider.overrideWithValue(sttEngine),
+          todayTodoPanelEventsProvider.overrideWith((ref) async => const []),
+        ],
+        child: const MaterialApp(home: Scaffold(body: FlashRecordPage())),
+      ),
+    );
+
+    await tester.pump();
+
+    final pill = find.byKey(const ValueKey('collapsed-intent-pill'));
+    expect(pill, findsOneWidget);
+
+    final gesture = await tester.startGesture(tester.getCenter(pill));
+    await tester.pump(const Duration(milliseconds: 650));
+    await tester.pump();
+
+    expect(find.text('离线大脑还在唤醒，稍等一下'), findsNothing);
+    expect(find.textContaining('离线语音暂不可用'), findsNothing);
+    expect(sttEngine.initializeCount, greaterThanOrEqualTo(1));
+
+    sttEngine.completeInitialization();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(sttEngine.startCount, 1);
+
+    await gesture.up();
+    await tester.pump();
+  });
+
+  testWidgets('待办入口使用真实记录并以精简时间轴展示', (tester) async {
     final now = DateTime.now();
 
     tester.view.physicalSize = const Size(1080, 2400);
@@ -129,11 +233,10 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 
-    final todoEntry = find.byKey(const ValueKey('today-todo-entry'));
+    final todoEntry = find.byKey(const ValueKey('collapsed-intent-pill'));
     expect(todoEntry, findsOneWidget);
-    expect(find.text('待办的事情'), findsOneWidget);
 
-    await tester.tap(todoEntry);
+    await tester.drag(todoEntry, const Offset(0, -90));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 700));
 
@@ -144,8 +247,8 @@ void main() {
     );
     expect(find.byKey(const ValueKey('todo-panel-daily-list')), findsOneWidget);
     expect(find.byKey(const ValueKey('todo-panel-todo-list')), findsOneWidget);
-    expect(find.text('日常记录'), findsOneWidget);
-    expect(find.text('待办事项'), findsOneWidget);
+    expect(find.text('迷你时间轴'), findsNothing);
+    expect(find.text('待办事项'), findsNothing);
     expect(find.text('今天跑步30分钟'), findsOneWidget);
     expect(find.text('明天交报告'), findsOneWidget);
     expect(find.text('晨间散步'), findsNothing);
@@ -163,8 +266,8 @@ void main() {
     );
     final screenHeight =
         tester.view.physicalSize.height / tester.view.devicePixelRatio;
-    expect(sheetRect.top, greaterThan(screenHeight * 0.45));
-    expect(sheetRect.height, lessThan(screenHeight * 0.45));
+    expect(sheetRect.top, greaterThan(screenHeight * 0.25));
+    expect(sheetRect.height, greaterThan(screenHeight * 0.45));
 
     await tester.tapAt(Offset(sheetRect.center.dx, sheetRect.top - 24));
     await tester.pump();
@@ -210,10 +313,13 @@ void main() {
 
     await _pumpUntilFound(
       tester,
-      find.byKey(const ValueKey('today-todo-entry')),
+      find.byKey(const ValueKey('collapsed-intent-pill')),
     );
 
-    await tester.tap(find.byKey(const ValueKey('today-todo-entry')));
+    await tester.drag(
+      find.byKey(const ValueKey('collapsed-intent-pill')),
+      const Offset(0, -90),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 700));
     await _pumpUntilFound(tester, find.text('买牛奶'));
@@ -342,4 +448,83 @@ class _FakeRecordsRepository extends RecordsRepository {
     this.content = content;
     return 1;
   }
+}
+
+class _HoldToTalkSttEngine implements SttEngine {
+  int startCount = 0;
+  _HoldToTalkSession? session;
+
+  int get stopCount => session?.stopCount ?? 0;
+
+  @override
+  Future<SttAvailability> initialize() async => const SttAvailability.ready();
+
+  @override
+  Future<SttListenSession> startListening() async {
+    startCount += 1;
+    session = _HoldToTalkSession();
+    return session!;
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
+
+class _HoldToTalkSession implements SttListenSession {
+  final _controller = StreamController<SttTranscript>.broadcast();
+  int stopCount = 0;
+
+  @override
+  Stream<SttTranscript> get transcripts => _controller.stream;
+
+  @override
+  Future<SttTranscript> stop() async {
+    stopCount += 1;
+    const transcript = SttTranscript(
+      text: 'released voice memo',
+      isFinal: true,
+    );
+    if (!_controller.isClosed) {
+      _controller.add(transcript);
+      await _controller.close();
+    }
+    return transcript;
+  }
+
+  @override
+  Future<void> cancel() async {
+    if (!_controller.isClosed) {
+      await _controller.close();
+    }
+  }
+}
+
+class _DeferredInitSttEngine implements SttEngine {
+  final _initializeCompleter = Completer<SttAvailability>();
+  _HoldToTalkSession? session;
+
+  int initializeCount = 0;
+  int startCount = 0;
+
+  @override
+  Future<SttAvailability> initialize() {
+    initializeCount += 1;
+    return _initializeCompleter.future;
+  }
+
+  void completeInitialization() {
+    if (!_initializeCompleter.isCompleted) {
+      _initializeCompleter.complete(const SttAvailability.ready());
+    }
+  }
+
+  @override
+  Future<SttListenSession> startListening() async {
+    startCount += 1;
+    session = _HoldToTalkSession();
+    return session!;
+  }
+
+  @override
+  Future<void> dispose() async {}
 }
