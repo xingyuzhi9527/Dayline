@@ -3,24 +3,21 @@ import 'dart:async';
 enum SttAvailabilityStatus { loading, ready, unavailable, error }
 
 class SttAvailability {
-  const SttAvailability({
-    required this.status,
-    required this.message,
-  });
+  const SttAvailability({required this.status, required this.message});
 
   const SttAvailability.loading()
-      : status = SttAvailabilityStatus.loading,
-        message = '正在唤醒离线大脑...';
+    : status = SttAvailabilityStatus.loading,
+      message = '正在唤醒离线大脑...';
 
   const SttAvailability.ready()
-      : status = SttAvailabilityStatus.ready,
-        message = '时刻准备记录你的灵感';
+    : status = SttAvailabilityStatus.ready,
+      message = '时刻准备记录你的灵感';
 
   const SttAvailability.unavailable(this.message)
-      : status = SttAvailabilityStatus.unavailable;
+    : status = SttAvailabilityStatus.unavailable;
 
   const SttAvailability.error(this.message)
-      : status = SttAvailabilityStatus.error;
+    : status = SttAvailabilityStatus.error;
 
   final SttAvailabilityStatus status;
   final String message;
@@ -34,12 +31,14 @@ class SttMetadata {
     this.language,
     this.elapsed,
     this.emotion,
+    this.events,
   });
 
   final String? modelVersion;
   final String? language;
   final Duration? elapsed;
   final String? emotion;
+  final String? events;
 }
 
 class SttTranscript {

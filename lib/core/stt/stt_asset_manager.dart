@@ -4,36 +4,39 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+
+const senseVoiceModelArchiveUrl =
+    'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/'
+    'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2';
 
 class SttAssetPaths {
   const SttAssetPaths(this.root);
 
   final Directory root;
 
-  String get encoder => p.join(root.path, 'encoder-epoch-20-avg-1-chunk-16-left-128.int8.onnx');
-  String get decoder => p.join(root.path, 'decoder-epoch-20-avg-1-chunk-16-left-128.int8.onnx');
-  String get joiner => p.join(root.path, 'joiner-epoch-20-avg-1-chunk-16-left-128.int8.onnx');
+  String get senseVoiceModel => p.join(root.path, 'model.int8.onnx');
   String get tokens => p.join(root.path, 'tokens.txt');
-  String get bpeModel => p.join(root.path, 'bpe.model');
-  String get vadModel => p.join(root.path, 'silero_vad.onnx');
-  String get hotwords => p.join(root.path, 'life_keywords.txt');
+  String get modelVersion => root.path.split(Platform.pathSeparator).last;
 }
 
 class SttAssetManager {
   const SttAssetManager({
-    this.assetZipPath = 'assets/stt/dayline-stt-v2.zip',
-    this.directoryName = 'dayline_stt_v2',
+    this.directoryName = 'sense_voice_small_zh',
+    this.archiveUrl = senseVoiceModelArchiveUrl,
+    this.archiveSha256,
   });
 
-  final String assetZipPath;
   final String directoryName;
+  final String archiveUrl;
+  final String? archiveSha256;
 
   Future<SttAssetPaths> ensureReady() async {
-    final supportDir = await getApplicationSupportDirectory();
-    final outputDir = Directory(p.join(supportDir.path, directoryName));
+    final documentsDir = await getApplicationDocumentsDirectory();
+    final outputDir = Directory(
+      p.join(documentsDir.path, 'stt_models', directoryName),
+    );
 
     if (await SttAssetExtractor.isValid(outputDir)) {
       return SttAssetPaths(outputDir);
@@ -44,88 +47,156 @@ class SttAssetManager {
     }
     await outputDir.create(recursive: true);
 
-    final bytes = await rootBundle.load(assetZipPath);
-    await compute(
-      _extractSttAssetInBackground,
-      _SttAssetExtractionJob(
-        bytes.buffer.asUint8List(),
-        outputDir.path,
-      ),
-    );
+    final tempDir = await Directory.systemTemp.createTemp('dayline-stt-');
+    try {
+      final archiveFile = File(p.join(tempDir.path, 'sense_voice.tar.bz2'));
+      await SttModelDownloader.download(
+        Uri.parse(archiveUrl),
+        archiveFile,
+        expectedSha256: archiveSha256,
+      );
+
+      await compute(
+        _extractSenseVoiceArchiveInBackground,
+        _SttAssetExtractionJob(archiveFile.path, outputDir.path),
+      );
+
+      await _writeInstallMetadata(outputDir);
+    } finally {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    }
 
     if (!await SttAssetExtractor.isValid(outputDir)) {
-      throw StateError('离线语音模型文件校验失败。');
+      throw StateError('SenseVoice 模型文件校验失败。');
     }
 
     return SttAssetPaths(outputDir);
+  }
+
+  Future<void> _writeInstallMetadata(Directory outputDir) async {
+    final metadataFile = File(p.join(outputDir.path, 'source.json'));
+    await metadataFile.writeAsString(
+      const JsonEncoder.withIndent('  ').convert({
+        'model': 'SenseVoice-Small INT8',
+        'archiveUrl': archiveUrl,
+        if (archiveSha256 != null) 'archiveSha256': archiveSha256,
+        'installedAt': DateTime.now().toUtc().toIso8601String(),
+      }),
+      flush: true,
+    );
+  }
+}
+
+class SttModelDownloader {
+  const SttModelDownloader._();
+
+  static Future<void> download(
+    Uri uri,
+    File outputFile, {
+    String? expectedSha256,
+  }) async {
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError('下载 SenseVoice 模型失败：HTTP ${response.statusCode}');
+      }
+
+      await outputFile.parent.create(recursive: true);
+      final sink = outputFile.openWrite();
+
+      try {
+        await for (final chunk in response) {
+          sink.add(chunk);
+        }
+      } finally {
+        await sink.close();
+      }
+
+      final actualSha256 = (await sha256.bind(outputFile.openRead()).first)
+          .toString();
+      if (expectedSha256 != null && actualSha256 != expectedSha256) {
+        await outputFile.delete().catchError((_) => outputFile);
+        throw StateError('SenseVoice 模型包 SHA256 校验失败。');
+      }
+    } finally {
+      client.close(force: true);
+    }
   }
 }
 
 @immutable
 class _SttAssetExtractionJob {
-  const _SttAssetExtractionJob(this.bytes, this.outputPath);
+  const _SttAssetExtractionJob(this.archivePath, this.outputPath);
 
-  final Uint8List bytes;
+  final String archivePath;
   final String outputPath;
 }
 
-Future<void> _extractSttAssetInBackground(_SttAssetExtractionJob job) {
-  return SttAssetExtractor.extractZipBytes(
-    job.bytes,
+Future<void> _extractSenseVoiceArchiveInBackground(_SttAssetExtractionJob job) {
+  return SttAssetExtractor.extractTarBz2File(
+    File(job.archivePath),
     Directory(job.outputPath),
   );
 }
 
 class SttAssetExtractor {
-  static const manifestFileName = 'manifest.json';
+  static const modelFileName = 'model.int8.onnx';
+  static const tokensFileName = 'tokens.txt';
+  static const _requiredFiles = {modelFileName, tokensFileName};
 
-  static Future<void> extractZipBytes(
+  static Future<void> extractTarBz2File(
+    File archiveFile,
+    Directory outputDir,
+  ) async {
+    final compressed = await archiveFile.readAsBytes();
+    return extractTarBz2Bytes(compressed, outputDir);
+  }
+
+  static Future<void> extractTarBz2Bytes(
     List<int> bytes,
     Directory outputDir,
   ) async {
-    final archive = ZipDecoder().decodeBytes(bytes);
+    final tarBytes = BZip2Decoder().decodeBytes(bytes);
+    final archive = TarDecoder().decodeBytes(tarBytes);
     await outputDir.create(recursive: true);
 
+    final extracted = <String>{};
     for (final entry in archive) {
-      final safePath = _safeOutputPath(outputDir, entry.name);
+      if (!entry.isFile) continue;
+
+      final fileName = p.basename(entry.name);
+      if (!_requiredFiles.contains(fileName)) continue;
+
+      final safePath = _safeOutputPath(outputDir, fileName);
       if (safePath == null) continue;
 
-      if (entry.isFile) {
-        final file = File(safePath);
-        await file.parent.create(recursive: true);
-        final bytes = entry.readBytes();
-        if (bytes == null) {
-          throw StateError('无法读取语音模型压缩包内的 ${entry.name}');
-        }
-        await file.writeAsBytes(bytes, flush: true);
-      } else {
-        await Directory(safePath).create(recursive: true);
+      final bytes = entry.readBytes();
+      if (bytes == null || bytes.isEmpty) {
+        throw StateError('无法读取 SenseVoice 模型包内的 ${entry.name}');
       }
+
+      final file = File(safePath);
+      await file.writeAsBytes(bytes, flush: true);
+      extracted.add(fileName);
+    }
+
+    if (!extracted.containsAll(_requiredFiles)) {
+      throw StateError('SenseVoice 模型包缺少 model.int8.onnx 或 tokens.txt。');
     }
   }
 
   static Future<bool> isValid(Directory outputDir) async {
-    final manifestFile = File(p.join(outputDir.path, manifestFileName));
-    if (!await manifestFile.exists()) return false;
-
-    final manifest = jsonDecode(await manifestFile.readAsString());
-    if (manifest is! Map<String, Object?>) return false;
-    final files = manifest['files'];
-    if (files is! Map<String, Object?>) return false;
-
-    for (final entry in files.entries) {
-      final relativePath = entry.key;
-      final expectedHash = entry.value;
-      if (expectedHash is! String) return false;
-
-      final safePath = _safeOutputPath(outputDir, relativePath);
+    for (final fileName in _requiredFiles) {
+      final safePath = _safeOutputPath(outputDir, fileName);
       if (safePath == null) return false;
 
       final file = File(safePath);
       if (!await file.exists()) return false;
-
-      final digest = sha256.convert(await file.readAsBytes()).toString();
-      if (digest != expectedHash) return false;
+      if (await file.length() == 0) return false;
     }
 
     return true;

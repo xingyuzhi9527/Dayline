@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/database/repository_providers.dart';
 import '../../core/parser/lui_lite_parser.dart';
@@ -19,8 +20,34 @@ final todayTodoPanelEventsProvider = FutureProvider<List<TimelineEvent>>((
   ref,
 ) async {
   ref.watch(dataVersionProvider);
-  return loadTimelineEventsForDate(ref, DateTime.now());
+  final today = DateTime.now();
+  final todayEvents = await loadTimelineEventsForDate(ref, today);
+  final dailyEvents = todayEvents
+      .where((event) => event.source != TimelineEventSource.todo)
+      .toList();
+  final agendaTodos = await ref
+      .read(todosRepositoryProvider)
+      .findAgenda(anchorDate: today);
+  final todoEvents = agendaTodos.map(_todoRowToTimelineEvent);
+  return [...dailyEvents, ...todoEvents]
+    ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
 });
+
+TimelineEvent _todoRowToTimelineEvent(Map<String, Object?> row) {
+  final isCompleted = (row['is_completed'] as int? ?? 0) == 1;
+  return TimelineEvent(
+    source: TimelineEventSource.todo,
+    sourceId: row['id'] as int,
+    type: 'todo',
+    title: row['title'] as String,
+    description: (row['note'] as String?) ?? (isCompleted ? 'done' : ''),
+    timestamp: row['created_at'] as int,
+    date: row['date'] as String,
+    icon: isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
+    tags: const [],
+    data: row,
+  );
+}
 
 class FlashRecordPage extends ConsumerStatefulWidget {
   const FlashRecordPage({super.key});
@@ -30,15 +57,27 @@ class FlashRecordPage extends ConsumerStatefulWidget {
 }
 
 class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  static const double _intentPillWidth = 120;
+  static const double _intentPillHeight = 48;
+  static const double _todoSwipeThreshold = 30;
+  static const double _todoSwipeHorizontalTolerance = 34;
+
   final _textController = TextEditingController();
   final _recognizedTextController = TextEditingController();
+  final _textFocusNode = FocusNode();
   late final AnimationController _memoryController;
   bool _memoryExpanded = false;
+  bool _intentExpanded = false;
+  bool _intentLongPressActive = false;
+  bool _keyboardVisible = false;
+  Offset _intentDragOffset = Offset.zero;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _textFocusNode.addListener(_handleTextFocusChange);
     _memoryController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 680),
@@ -48,17 +87,98 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _textFocusNode.removeListener(_handleTextFocusChange);
     _textController.dispose();
     _recognizedTextController.dispose();
+    _textFocusNode.dispose();
     _memoryController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final keyboardOpen = WidgetsBinding.instance.platformDispatcher.views.any(
+        (view) => view.viewInsets.bottom > 0,
+      );
+      if (_keyboardVisible && !keyboardOpen && _intentExpanded) {
+        _collapseIntentInput();
+      }
+      _keyboardVisible = keyboardOpen;
+    });
+  }
+
+  void _handleTextFocusChange() {
+    if (!_textFocusNode.hasFocus && _intentExpanded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_textFocusNode.hasFocus) {
+          _collapseIntentInput();
+        }
+      });
+    }
   }
 
   void _submitText() {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
     _textController.clear();
+    _collapseIntentInput();
     unawaited(ref.read(flashRecordProvider.notifier).saveAsText(text));
+  }
+
+  void _expandIntentInput() {
+    if (!_intentExpanded) {
+      setState(() => _intentExpanded = true);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _textFocusNode.requestFocus();
+      }
+    });
+  }
+
+  void _collapseIntentInput() {
+    if (_intentExpanded) {
+      setState(() => _intentExpanded = false);
+    }
+    _textFocusNode.unfocus();
+  }
+
+  void _handleIntentLongPress(FlashRecordState state) {
+    _intentLongPressActive = true;
+    HapticFeedback.lightImpact();
+    _collapseIntentInput();
+    unawaited(ref.read(flashRecordProvider.notifier).startListening());
+  }
+
+  void _handleIntentLongPressEnd() {
+    if (!_intentLongPressActive) return;
+    _intentLongPressActive = false;
+    unawaited(ref.read(flashRecordProvider.notifier).stopListening());
+  }
+
+  void _handleIntentPanStart(DragStartDetails details) {
+    _intentDragOffset = Offset.zero;
+  }
+
+  void _handleIntentPanUpdate(DragUpdateDetails details) {
+    _intentDragOffset += details.delta;
+  }
+
+  void _handleIntentPanEnd(DragEndDetails details) {
+    final verticalVelocity = details.velocity.pixelsPerSecond.dy;
+    final isUpwardIntent =
+        _intentDragOffset.dy < -_todoSwipeThreshold || verticalVelocity < -420;
+    final isMostlyVertical =
+        _intentDragOffset.dx.abs() <= _todoSwipeHorizontalTolerance;
+
+    if (isUpwardIntent && isMostlyVertical) {
+      HapticFeedback.selectionClick();
+      _openMemoryScatter();
+    }
+    _intentDragOffset = Offset.zero;
   }
 
   void _openMemoryScatter() {
@@ -108,7 +228,11 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
 
     return SafeArea(
       child: GestureDetector(
-        onTap: () => FocusScope.of(context).unfocus(),
+        behavior: HitTestBehavior.translucent,
+        onTap: () {
+          _collapseIntentInput();
+          FocusScope.of(context).unfocus();
+        },
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -116,9 +240,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             Positioned.fill(
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 180),
-                opacity: MediaQuery.viewInsetsOf(context).bottom > 0
-                    ? 0.38
-                    : 1,
+                opacity: MediaQuery.viewInsetsOf(context).bottom > 0 ? 0.38 : 1,
                 child: Align(
                   alignment: const Alignment(0, -0.03),
                   child: _buildPrimaryStage(state, theme),
@@ -126,8 +248,15 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               ),
             ),
 
-            if (state.isInputActive)
-              _buildTodayMemoryEntry(theme, memoryEvents),
+            if (_intentExpanded)
+              Positioned.fill(
+                child: ModalBarrier(
+                  key: const ValueKey('intent-dismiss-layer'),
+                  color: Colors.transparent,
+                  dismissible: true,
+                  onDismiss: _collapseIntentInput,
+                ),
+              ),
 
             if (state.isInputActive) _buildTextInputDock(state, theme),
 
@@ -143,6 +272,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     );
   }
 
+  // ignore: unused_element
   Widget _buildTodayMemoryEntry(
     ThemeData theme,
     AsyncValue<List<TimelineEvent>> memoryEvents,
@@ -152,21 +282,21 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         final todoCount = events
             .where((event) => event.source == TimelineEventSource.todo)
             .length;
-        return todoCount == 0 ? '今天还没有待办' : '$todoCount 个待办事项';
+        return '$todoCount 个';
       },
-      loading: () => '正在读取今天待办',
-      error: (_, _) => '今天待办读取失败',
+      loading: () => '读取中',
+      error: (_, _) => '读取失败',
     );
 
     return Positioned(
       right: AppSpacing.containerMargin,
-      bottom: 104,
+      bottom: 82,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 148, minWidth: 132),
+        constraints: const BoxConstraints(maxWidth: 88, minWidth: 76),
         child: Material(
           key: const ValueKey('today-todo-entry'),
-          color: AppColors.surface,
-          elevation: 3,
+          color: AppColors.surface.withAlpha(232),
+          elevation: 1,
           shadowColor: AppColors.softShadow,
           borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
           child: InkWell(
@@ -174,8 +304,8 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             onTap: _openMemoryScatter,
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.sm,
-                vertical: AppSpacing.xs,
+                horizontal: AppSpacing.xs,
+                vertical: AppSpacing.xxs,
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -196,36 +326,17 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                       size: 17,
                     ),
                   ),
-                  const SizedBox(width: AppSpacing.xs),
+                  const SizedBox(width: AppSpacing.xxs),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '待办的事情',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: AppColors.muted,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      subtitle == '0 个' ? '待办' : subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    color: AppColors.muted.withAlpha(190),
-                    size: 20,
                   ),
                 ],
               ),
@@ -251,9 +362,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
 
   Widget _buildTextInputDock(FlashRecordState state, ThemeData theme) {
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
-    final bottomOffset = keyboardInset > 0
-        ? math.max(AppSpacing.sm, keyboardInset - 72)
-        : AppSpacing.lg;
+    final bottomOffset = keyboardInset > 0 ? 72.0 : AppSpacing.lg;
 
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 220),
@@ -261,11 +370,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       left: 0,
       right: 0,
       bottom: bottomOffset,
-      child: _buildTextInput(
-        state,
-        theme,
-        compact: keyboardInset > 0,
-      ),
+      child: _buildUnifiedIntentInput(state, theme, compact: keyboardInset > 0),
     );
   }
 
@@ -296,8 +401,8 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               Positioned.fill(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final sheetHeight = (constraints.maxHeight * 0.38)
-                        .clamp(280.0, 410.0)
+                    final sheetHeight = (constraints.maxHeight * 0.58)
+                        .clamp(360.0, 560.0)
                         .toDouble();
 
                     return Padding(
@@ -363,8 +468,8 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               Row(
                 children: [
                   Container(
-                    width: 36,
-                    height: 36,
+                    width: 32,
+                    height: 32,
                     decoration: BoxDecoration(
                       color: AppColors.primary.withAlpha(18),
                       borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
@@ -375,67 +480,25 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                       size: 20,
                     ),
                   ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: memoryEvents.when(
-                      data: (events) => Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '待办的事情',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          Text(
-                            _todoPanelSubtitle(events),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: AppColors.muted,
-                            ),
-                          ),
-                        ],
-                      ),
-                      loading: () => Text(
-                        '正在读取待办',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      error: (_, _) => Text(
-                        '待办的事情',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
+                  const Spacer(),
                   IconButton(
                     key: const ValueKey('todo-panel-close'),
-                    tooltip: '收起待办的事情',
+                    tooltip: '收起',
                     onPressed: _closeMemoryScatter,
                     icon: const Icon(Icons.close_rounded),
                     color: AppColors.primary,
                   ),
                 ],
               ),
-              const SizedBox(height: AppSpacing.xs),
+              const SizedBox(height: AppSpacing.xxs),
               Expanded(
                 child: memoryEvents.when(
-                  data: (events) => _buildTodoPanelColumns(theme, events),
+                  data: (events) => _buildTodoPanelAgenda(events),
                   loading: () => _buildMemoryPanelMessage(
-                    theme,
                     icon: Icons.hourglass_empty_rounded,
-                    title: '正在读取',
-                    message: '今天的事情马上就来。',
                   ),
                   error: (_, _) => _buildMemoryPanelMessage(
-                    theme,
                     icon: Icons.error_outline_rounded,
-                    title: '读取失败',
-                    message: '稍后再打开待办的事情试试。',
                   ),
                 ),
               ),
@@ -446,16 +509,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     );
   }
 
-  String _todoPanelSubtitle(List<TimelineEvent> events) {
-    final todoCount = events
-        .where((event) => event.source == TimelineEventSource.todo)
-        .length;
-    final dailyCount = events.length - todoCount;
-    if (events.isEmpty) return '今天还没有事情';
-    return '$dailyCount 条日常记录 · $todoCount 个待办';
-  }
-
-  Widget _buildTodoPanelColumns(ThemeData theme, List<TimelineEvent> events) {
+  Widget _buildTodoPanelAgenda(List<TimelineEvent> events) {
     final dailyEvents = events
         .where((event) => event.source != TimelineEventSource.todo)
         .toList();
@@ -463,33 +517,23 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         .where((event) => event.source == TimelineEventSource.todo)
         .toList();
 
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
           child: _buildTodoPanelColumn(
-            theme,
             key: const ValueKey('todo-panel-daily-column'),
             listKey: const ValueKey('todo-panel-daily-list'),
-            title: '日常记录',
-            icon: Icons.edit_note_rounded,
             events: dailyEvents,
-            emptyTitle: '还没有日常记录',
-            emptyMessage: '说一句或输入一条，记录会出现在这里。',
             todoColumn: false,
           ),
         ),
-        const SizedBox(width: AppSpacing.xs),
+        const SizedBox(height: AppSpacing.xs),
         Expanded(
           child: _buildTodoPanelColumn(
-            theme,
             key: const ValueKey('todo-panel-todo-column'),
             listKey: const ValueKey('todo-panel-todo-list'),
-            title: '待办事项',
-            icon: Icons.check_circle_outline,
             events: todoEvents,
-            emptyTitle: '今天还没有待办',
-            emptyMessage: '输入“待办 买牛奶”就能加入这里。',
             todoColumn: true,
           ),
         ),
@@ -497,15 +541,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     );
   }
 
-  Widget _buildTodoPanelColumn(
-    ThemeData theme, {
+  Widget _buildTodoPanelColumn({
     required Key key,
     required Key listKey,
-    required String title,
-    required IconData icon,
     required List<TimelineEvent> events,
-    required String emptyTitle,
-    required String emptyMessage,
     required bool todoColumn,
   }) {
     return Container(
@@ -519,50 +558,38 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: AppColors.primary),
-              const SizedBox(width: AppSpacing.xxs),
-              Expanded(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xs),
           Expanded(
             child: events.isEmpty
                 ? _buildMemoryPanelMessage(
-                    theme,
-                    icon: icon,
-                    title: emptyTitle,
-                    message: emptyMessage,
+                    icon: todoColumn
+                        ? Icons.check_circle_outline
+                        : Icons.timeline_rounded,
                   )
-                : ListView.separated(
-                    key: listKey,
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                    itemCount: events.length,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: AppSpacing.xs),
-                    itemBuilder: (context, index) {
-                      final event = events[index];
-                      final child = todoColumn
-                          ? _TodoPanelEventCard(event: event)
-                          : _PanelEventCard(event: event);
-                      return _buildFoldedPanelCard(
-                        child,
-                        index,
-                        keyPrefix: todoColumn ? 'todo' : 'daily',
-                      );
-                    },
+                : _buildFadedScrollable(
+                    ListView.separated(
+                      key: listKey,
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.xxs,
+                      ),
+                      itemCount: events.length,
+                      separatorBuilder: (_, _) =>
+                          SizedBox(height: todoColumn ? AppSpacing.xxs : 2),
+                      itemBuilder: (context, index) {
+                        final event = events[index];
+                        final child = todoColumn
+                            ? _TodoPanelEventCard(event: event)
+                            : _MiniTimelineEvent(
+                                event: event,
+                                isLast: index == events.length - 1,
+                              );
+                        return _buildFoldedPanelCard(
+                          child,
+                          index,
+                          keyPrefix: todoColumn ? 'todo' : 'daily',
+                        );
+                      },
+                    ),
                   ),
           ),
         ],
@@ -570,33 +597,29 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     );
   }
 
-  Widget _buildMemoryPanelMessage(
-    ThemeData theme, {
-    required IconData icon,
-    required String title,
-    required String message,
-  }) {
+  Widget _buildMemoryPanelMessage({required IconData icon}) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: AppColors.muted.withAlpha(150), size: 34),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            title,
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: AppColors.primary,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xxs),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
-          ),
-        ],
-      ),
+      child: Icon(icon, color: AppColors.muted.withAlpha(110), size: 30),
+    );
+  }
+
+  Widget _buildFadedScrollable(Widget child) {
+    return ShaderMask(
+      shaderCallback: (bounds) {
+        return const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.transparent,
+            Colors.black,
+            Colors.black,
+            Colors.transparent,
+          ],
+          stops: [0, 0.08, 0.92, 1],
+        ).createShader(bounds);
+      },
+      blendMode: BlendMode.dstIn,
+      child: child,
     );
   }
 
@@ -651,15 +674,19 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        VoiceButton(
-          phase: state.phase.name,
-          voiceAvailable: voiceAvailable,
-          onStart: () {
-            unawaited(ref.read(flashRecordProvider.notifier).startListening());
-          },
-          onStop: () {
-            unawaited(ref.read(flashRecordProvider.notifier).stopListening());
-          },
+        RepaintBoundary(
+          child: VoiceButton(
+            phase: state.phase.name,
+            voiceAvailable: voiceAvailable,
+            onStart: () {
+              unawaited(
+                ref.read(flashRecordProvider.notifier).startListening(),
+              );
+            },
+            onStop: () {
+              unawaited(ref.read(flashRecordProvider.notifier).stopListening());
+            },
+          ),
         ),
         const SizedBox(height: AppSpacing.sm),
         if (!state.sttReady && !state.sttLoading)
@@ -671,9 +698,11 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             ),
           ),
         const SizedBox(height: AppSpacing.xs),
-        AudioWaveform(
-          level: state.audioLevel,
-          active: state.phase == FlashPhase.listening,
+        RepaintBoundary(
+          child: AudioWaveform(
+            level: state.audioLevel,
+            active: state.phase == FlashPhase.listening,
+          ),
         ),
         const SizedBox(height: AppSpacing.md),
         AnimatedSwitcher(
@@ -784,8 +813,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                     const SizedBox(width: AppSpacing.md),
                     FilledButton.icon(
                       onPressed: () {
-                        final edited =
-                            _recognizedTextController.text.trim();
+                        final edited = _recognizedTextController.text.trim();
                         ref
                             .read(flashRecordProvider.notifier)
                             .confirmParsed(edited);
@@ -821,7 +849,272 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     );
   }
 
+  Widget _buildUnifiedIntentInput(
+    FlashRecordState state,
+    ThemeData theme, {
+    bool compact = false,
+  }) {
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    _keyboardVisible = keyboardOpen;
+    final expanded = _intentExpanded;
+    final horizontalPadding = expanded ? AppSpacing.containerMargin + 12 : 0.0;
+    final isListening = state.phase == FlashPhase.listening;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding,
+        0,
+        horizontalPadding,
+        compact ? 0 : AppSpacing.md,
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final expandedWidth = constraints.maxWidth.isFinite
+              ? constraints.maxWidth
+              : MediaQuery.sizeOf(context).width - horizontalPadding * 2;
+
+          return Align(
+            alignment: Alignment.bottomCenter,
+            child: AnimatedContainer(
+              key: const ValueKey('unified-intent-pill'),
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              width: expanded ? expandedWidth : _intentPillWidth,
+              height: expanded ? 54 : _intentPillHeight,
+              decoration: BoxDecoration(
+                color: (isListening ? AppColors.primary : AppColors.surface)
+                    .withAlpha(isListening ? 232 : 218),
+                borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+                border: Border.all(
+                  color: isListening
+                      ? AppColors.primary.withAlpha(90)
+                      : AppColors.border.withAlpha(132),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color:
+                        (isListening ? AppColors.primary : AppColors.softShadow)
+                            .withAlpha(isListening ? 36 : 24),
+                    blurRadius: isListening ? 22 : 16,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 160),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                child: expanded
+                    ? _buildExpandedIntentInput(state, theme)
+                    : _buildCollapsedIntentPill(state, theme),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCollapsedIntentPill(FlashRecordState state, ThemeData theme) {
+    final isListening = state.phase == FlashPhase.listening;
+    final foreground = isListening ? Colors.white : AppColors.primary;
+
+    return Listener(
+      key: const ValueKey('collapsed-intent-pill'),
+      behavior: HitTestBehavior.opaque,
+      onPointerUp: (_) => _handleIntentLongPressEnd(),
+      onPointerCancel: (_) => _handleIntentLongPressEnd(),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _expandIntentInput,
+        onLongPress: () => _handleIntentLongPress(state),
+        onLongPressEnd: (_) => _handleIntentLongPressEnd(),
+        onLongPressUp: _handleIntentLongPressEnd,
+        onPanStart: _handleIntentPanStart,
+        onPanUpdate: _handleIntentPanUpdate,
+        onPanEnd: _handleIntentPanEnd,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            AnimatedOpacity(
+              duration: const Duration(milliseconds: 280),
+              opacity: isListening ? 0.8 : 0.34,
+              child: Container(
+                width: 58,
+                height: 18,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+                  gradient: LinearGradient(
+                    colors: [
+                      foreground.withAlpha(0),
+                      foreground.withAlpha(isListening ? 92 : 44),
+                      foreground.withAlpha(0),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Icon(
+              isListening
+                  ? Icons.graphic_eq_rounded
+                  : Icons.keyboard_alt_rounded,
+              color: foreground,
+              size: isListening ? 24 : 21,
+            ),
+            Positioned(
+              top: 6,
+              child: Icon(
+                Icons.keyboard_arrow_up_rounded,
+                color: foreground.withAlpha(isListening ? 170 : 105),
+                size: 16,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpandedIntentInput(FlashRecordState state, ThemeData theme) {
+    return Row(
+      key: const ValueKey('expanded-intent-input'),
+      children: [
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: TextField(
+            key: const ValueKey('record-text-input'),
+            focusNode: _textFocusNode,
+            controller: _textController,
+            onTapOutside: (_) => _collapseIntentInput(),
+            textInputAction: TextInputAction.send,
+            onSubmitted: (_) => _submitText(),
+            maxLines: 1,
+            decoration: InputDecoration(
+              hintText: '文字',
+              hintStyle: TextStyle(color: AppColors.muted.withAlpha(145)),
+              filled: false,
+              fillColor: Colors.transparent,
+              isCollapsed: true,
+              contentPadding: EdgeInsets.zero,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              disabledBorder: InputBorder.none,
+              errorBorder: InputBorder.none,
+              focusedErrorBorder: InputBorder.none,
+            ),
+          ),
+        ),
+        Semantics(
+          label: 'record-text-submit',
+          button: true,
+          child: IconButton(
+            key: const ValueKey('record-text-submit'),
+            onPressed: _submitText,
+            icon: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 160),
+              child: state.textSaving
+                  ? const SizedBox(
+                      key: ValueKey('record-text-saving'),
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(
+                      Icons.send_rounded,
+                      key: ValueKey('record-text-send-icon'),
+                      color: AppColors.primary,
+                    ),
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.xxs),
+      ],
+    );
+  }
+
+  // ignore: unused_element
   Widget _buildTextInput(
+    FlashRecordState state,
+    ThemeData theme, {
+    bool compact = false,
+  }) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.containerMargin + 12,
+        0,
+        AppSpacing.containerMargin + 12,
+        compact ? 0 : AppSpacing.md,
+      ),
+      child: Material(
+        color: AppColors.surface.withAlpha(218),
+        elevation: 0,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+        child: Container(
+          height: 54,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+            border: Border.all(color: AppColors.border.withAlpha(130)),
+          ),
+          child: Row(
+            children: [
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('record-text-input'),
+                  controller: _textController,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _submitText(),
+                  maxLines: 1,
+                  decoration: InputDecoration(
+                    hintText: '文字',
+                    hintStyle: TextStyle(color: AppColors.muted.withAlpha(145)),
+                    filled: false,
+                    fillColor: Colors.transparent,
+                    isCollapsed: true,
+                    contentPadding: EdgeInsets.zero,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    errorBorder: InputBorder.none,
+                    focusedErrorBorder: InputBorder.none,
+                  ),
+                ),
+              ),
+              Semantics(
+                label: 'record-text-submit',
+                button: true,
+                child: IconButton(
+                  key: const ValueKey('record-text-submit'),
+                  onPressed: _submitText,
+                  icon: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 160),
+                    child: state.textSaving
+                        ? const SizedBox(
+                            key: ValueKey('record-text-saving'),
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(
+                            Icons.send_rounded,
+                            key: ValueKey('record-text-send-icon'),
+                            color: AppColors.primary,
+                          ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xxs),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ignore: unused_element
+  Widget _buildLegacyTextInput(
     FlashRecordState state,
     ThemeData theme, {
     bool compact = false,
@@ -920,98 +1213,123 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 }
 
-class _PanelEventCard extends StatelessWidget {
-  const _PanelEventCard({required this.event});
+class _MiniTimelineEvent extends StatelessWidget {
+  const _MiniTimelineEvent({required this.event, required this.isLast});
 
   final TimelineEvent event;
+  final bool isLast;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final tint = _tintForType(event.type);
-    final tag = event.tags.isNotEmpty
-        ? event.tags.first
-        : _labelForType(event.type);
-    final note = event.description.trim().isEmpty
-        ? _formatEventTime(event.timestamp)
-        : event.description.trim();
+    final note = event.description.trim();
+    final tags = event.tags.take(2).toList();
 
-    return Material(
-      color: AppColors.surface.withAlpha(248),
-      elevation: 4,
-      shadowColor: AppColors.softShadow,
-      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 72),
-        padding: const EdgeInsets.all(AppSpacing.sm),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-          border: Border.all(color: AppColors.border.withAlpha(210)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: tint.withAlpha(38),
-                shape: BoxShape.circle,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 36,
+          child: Column(
+            children: [
+              Container(
+                width: 28,
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                decoration: BoxDecoration(
+                  color: tint.withAlpha(24),
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                ),
+                child: Text(
+                  _formatEventTime(event.timestamp),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: tint,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 10,
+                  ),
+                ),
               ),
-              child: Icon(event.icon, color: tint, size: 18),
-            ),
-            const SizedBox(width: AppSpacing.xs),
-            Expanded(
+              if (!isLast)
+                Container(
+                  width: 1,
+                  height: 34,
+                  margin: const EdgeInsets.only(top: 2),
+                  color: AppColors.border,
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(width: AppSpacing.xxs),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(bottom: isLast ? 0 : AppSpacing.xxs),
+            child: Container(
+              padding: const EdgeInsets.all(AppSpacing.xs),
+              decoration: BoxDecoration(
+                color: AppColors.surface.withAlpha(232),
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                border: Border.all(color: AppColors.border.withAlpha(190)),
+              ),
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     event.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w700,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: AppColors.ink,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.xxs),
-                  Text(
-                    note,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: AppColors.muted,
+                  if (note.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      note,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.muted,
+                      ),
                     ),
-                  ),
+                  ],
+                  if (tags.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.xxs),
+                    Wrap(
+                      spacing: AppSpacing.xxs,
+                      runSpacing: AppSpacing.xxs,
+                      children: tags
+                          .map(
+                            (tag) => Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.xs,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: tint.withAlpha(22),
+                                borderRadius: BorderRadius.circular(
+                                  AppSpacing.radiusSm,
+                                ),
+                              ),
+                              child: Text(
+                                tag,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: tint,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ],
                 ],
               ),
             ),
-            const SizedBox(width: AppSpacing.xs),
-            Flexible(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.xs,
-                  vertical: AppSpacing.xxs,
-                ),
-                decoration: BoxDecoration(
-                  color: tint.withAlpha(30),
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                ),
-                child: Text(
-                  tag,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: tint,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -1025,9 +1343,6 @@ class _TodoPanelEventCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final isCompleted = (event.data['is_completed'] as int? ?? 0) == 1;
-    final note = event.description.trim().isEmpty
-        ? _formatEventTime(event.timestamp)
-        : event.description.trim();
 
     return Material(
       color: AppColors.surface.withAlpha(248),
@@ -1038,8 +1353,8 @@ class _TodoPanelEventCard extends ConsumerWidget {
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         onTap: () => _toggleTodo(ref, isCompleted),
         child: Container(
-          constraints: const BoxConstraints(minHeight: 72),
-          padding: const EdgeInsets.all(AppSpacing.sm),
+          constraints: const BoxConstraints(minHeight: 54),
+          padding: const EdgeInsets.all(AppSpacing.xs),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
             border: Border.all(color: AppColors.border.withAlpha(210)),
@@ -1060,7 +1375,7 @@ class _TodoPanelEventCard extends ConsumerWidget {
                   children: [
                     Text(
                       event.title,
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleSmall?.copyWith(
                         color: isCompleted
@@ -1070,15 +1385,6 @@ class _TodoPanelEventCard extends ConsumerWidget {
                         decoration: isCompleted
                             ? TextDecoration.lineThrough
                             : null,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text(
-                      note,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppColors.muted,
                       ),
                     ),
                   ],
@@ -1109,17 +1415,6 @@ String _formatEventTime(int timestamp) {
   final minute = time.minute.toString().padLeft(2, '0');
   return '$hour:$minute';
 }
-
-String _labelForType(String type) => switch (type) {
-  'todo' => '待办',
-  'tracker' => '打卡',
-  'focus' => '专注',
-  'expense' => '消费',
-  'body' => '身体',
-  'sleep' => '睡眠',
-  'mood' => '情绪',
-  _ => '记录',
-};
 
 Color _tintForType(String type) => switch (type) {
   'todo' => AppColors.todo,
