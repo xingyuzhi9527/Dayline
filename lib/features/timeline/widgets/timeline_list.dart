@@ -161,164 +161,158 @@ class _TimelineTile extends ConsumerWidget {
     final theme = Theme.of(context);
     final hasDetails = event.description.isNotEmpty || event.tags.isNotEmpty;
 
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: 32,
-            child: Column(
-              children: [
-                Container(
-                  width: 20,
-                  height: 20,
-                  margin: const EdgeInsets.only(bottom: 4),
-                  decoration: BoxDecoration(
-                    color: color.withAlpha(25),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Container(
-                    width: 1.5,
-                    color: isLast
-                        ? Colors.transparent
-                        : AppColors.muted.withAlpha(35),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(
-                left: AppSpacing.xs,
-                bottom: 6,
-              ),
-              child: Container(
-                clipBehavior: Clip.antiAlias,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 32,
+          child: Column(
+            children: [
+              Container(
+                width: 20,
+                height: 20,
+                margin: const EdgeInsets.only(bottom: 4),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surface,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: theme.colorScheme.outlineVariant.withAlpha(55),
+                  color: color.withAlpha(25),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
                   ),
                 ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Container(width: 3, color: color),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          AppSpacing.xs,
-                          8,
-                          AppSpacing.xs,
-                          8,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Text(
-                                  _formatTime(event.timestamp),
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: AppColors.muted,
-                                    fontSize: 11,
-                                  ),
+              ),
+              Container(
+                width: 1.5,
+                height: 72,
+                color: isLast
+                    ? Colors.transparent
+                    : AppColors.muted.withAlpha(35),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(left: AppSpacing.xs, bottom: 6),
+            child: Container(
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: theme.colorScheme.outlineVariant.withAlpha(55),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(width: 3, height: 72, color: color),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.xs,
+                        8,
+                        AppSpacing.xs,
+                        8,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                _formatTime(event.timestamp),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: AppColors.muted,
+                                  fontSize: 11,
                                 ),
-                                const SizedBox(width: AppSpacing.xs),
-                                Text(
-                                  _labelForType(event.type),
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: color,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 11,
-                                  ),
+                              ),
+                              const SizedBox(width: AppSpacing.xs),
+                              Text(
+                                _labelForType(event.type),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: color,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 11,
                                 ),
-                                const Spacer(),
-                                SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: IconButton(
-                                    key: ValueKey('edit-${event.id}'),
-                                    tooltip: '修改',
-                                    onPressed: () => _openEditor(context, ref),
-                                    icon: const Icon(Icons.edit_rounded),
-                                    iconSize: 15,
-                                    visualDensity: VisualDensity.compact,
-                                    color: AppColors.muted,
-                                    padding: EdgeInsets.zero,
-                                  ),
+                              ),
+                              const Spacer(),
+                              SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: IconButton(
+                                  key: ValueKey('edit-${event.id}'),
+                                  tooltip: '修改',
+                                  onPressed: () => _openEditor(context, ref),
+                                  icon: const Icon(Icons.edit_rounded),
+                                  iconSize: 15,
+                                  visualDensity: VisualDensity.compact,
+                                  color: AppColors.muted,
+                                  padding: EdgeInsets.zero,
                                 ),
-                              ],
+                              ),
+                            ],
+                          ),
+                          Padding(
+                            padding: EdgeInsets.only(top: hasDetails ? 2 : 0),
+                            child: Text(
+                              event.title,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
+                          ),
+                          if (event.description.isNotEmpty)
                             Padding(
-                              padding: EdgeInsets.only(top: hasDetails ? 2 : 0),
+                              padding: const EdgeInsets.only(top: 1),
                               child: Text(
-                                event.title,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.w500,
+                                event.description,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: AppColors.muted,
+                                  fontSize: 12,
+                                  height: 1.3,
                                 ),
                               ),
                             ),
-                            if (event.description.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 1),
-                                child: Text(
-                                  event.description,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: AppColors.muted,
-                                    fontSize: 12,
-                                    height: 1.3,
-                                  ),
-                                ),
+                          if (event.tags.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Wrap(
+                                spacing: 6,
+                                runSpacing: 0,
+                                children: event.tags
+                                    .map(
+                                      (tag) => Text(
+                                        '#$tag',
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                              color: color.withAlpha(160),
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 10,
+                                            ),
+                                      ),
+                                    )
+                                    .toList(),
                               ),
-                            if (event.tags.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Wrap(
-                                  spacing: 6,
-                                  runSpacing: 0,
-                                  children: event.tags
-                                      .map(
-                                        (tag) => Text(
-                                          '#$tag',
-                                          style: theme.textTheme.labelSmall
-                                              ?.copyWith(
-                                                color: color.withAlpha(160),
-                                                fontWeight: FontWeight.w600,
-                                                fontSize: 10,
-                                              ),
-                                        ),
-                                      )
-                                      .toList(),
-                                ),
-                              ),
-                          ],
-                        ),
+                            ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 

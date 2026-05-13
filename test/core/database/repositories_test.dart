@@ -77,6 +77,42 @@ void main() {
     expect(await todosRepository.findByDate(today), isEmpty);
   });
 
+  test(
+    'finds agenda todos across overdue, today, and upcoming tasks',
+    () async {
+      final today = DateTime(2026, 4, 30);
+      final overdueId = await todosRepository.create(
+        date: today.subtract(const Duration(days: 1)),
+        title: 'Overdue task',
+      );
+      final todayId = await todosRepository.create(
+        date: today,
+        title: 'Today task',
+      );
+      final upcomingId = await todosRepository.create(
+        date: today.add(const Duration(days: 3)),
+        title: 'Upcoming task',
+      );
+      final farFutureId = await todosRepository.create(
+        date: today.add(const Duration(days: 10)),
+        title: 'Later task',
+      );
+      final completedPastId = await todosRepository.create(
+        date: today.subtract(const Duration(days: 2)),
+        title: 'Finished past task',
+      );
+
+      await todosRepository.complete(completedPastId, completedAt: today);
+
+      final agenda = await todosRepository.findAgenda(anchorDate: today);
+      final ids = agenda.map((todo) => todo['id']).toList();
+
+      expect(ids, containsAll([overdueId, todayId, upcomingId]));
+      expect(ids, isNot(contains(farFutureId)));
+      expect(ids, isNot(contains(completedPastId)));
+    },
+  );
+
   test('updates record details', () async {
     final today = DateTime(2026, 4, 30);
     final recordId = await recordsRepository.create(
