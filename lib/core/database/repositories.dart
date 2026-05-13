@@ -88,7 +88,7 @@ class RecordsRepository extends Repository {
     final db = await localDatabase.database;
     return db.query(
       tableName,
-      where: 'date = ?',
+      where: 'date = ? AND is_deleted = 0',
       whereArgs: [dateKey(date)],
       orderBy: 'created_at ASC, id ASC',
     );
@@ -97,10 +97,39 @@ class RecordsRepository extends Repository {
   Future<int> countByDate(DateTime date) async {
     final db = await localDatabase.database;
     final rows = await db.rawQuery(
-      'SELECT COUNT(*) AS cnt FROM records WHERE date = ?',
+      'SELECT COUNT(*) AS cnt FROM records WHERE date = ? AND is_deleted = 0',
       [dateKey(date)],
     );
     return (rows.single['cnt'] as int);
+  }
+
+  Future<int> softDelete(int id, {DateTime? updatedAt}) {
+    return update(id, {
+      'is_deleted': 1,
+      'updated_at': timestamp(updatedAt ?? DateTime.now()),
+    });
+  }
+
+  Future<int> restore(int id, {DateTime? updatedAt}) {
+    return update(id, {
+      'is_deleted': 0,
+      'updated_at': timestamp(updatedAt ?? DateTime.now()),
+    });
+  }
+
+  Future<List<DatabaseRow>> findDeleted({int limit = 50}) async {
+    final db = await localDatabase.database;
+    return db.query(
+      tableName,
+      where: 'is_deleted = 1',
+      orderBy: 'updated_at DESC, id DESC',
+      limit: limit,
+    );
+  }
+
+  Future<int> permanentDelete(int id) async {
+    final db = await localDatabase.database;
+    return db.delete(tableName, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<int> updateDetails(

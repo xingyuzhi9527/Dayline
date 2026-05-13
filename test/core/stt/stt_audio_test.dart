@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:dayline_app/core/stt/stt_audio.dart';
+import 'package:liflow_app/core/stt/stt_audio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

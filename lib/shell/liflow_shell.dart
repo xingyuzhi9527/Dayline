@@ -4,60 +4,97 @@ import 'package:go_router/go_router.dart';
 import '../app_routes.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_spacing.dart';
+import '../features/dashboard/dashboard_page.dart';
+import '../features/flash_record/flash_record_page.dart';
+import '../features/timeline/timeline_page.dart';
 
-class DaylineShell extends StatelessWidget {
-  const DaylineShell({required this.navigationShell, super.key});
+class LiflowShell extends StatefulWidget {
+  const LiflowShell({required this.navigationShell, super.key});
 
   final StatefulNavigationShell navigationShell;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+  State<LiflowShell> createState() => _LiflowShellState();
+}
 
-    return Scaffold(
-      resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        toolbarHeight: 64,
-        title: Text(
-          '我的日记',
-          style: theme.textTheme.headlineMedium?.copyWith(
-            color: AppColors.primary,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        centerTitle: true,
-        leadingWidth: 64,
-        leading: IconButton(
-          tooltip: '菜单',
-          onPressed: _releaseInputFocus,
-          icon: const Icon(Icons.menu_rounded),
-        ),
-        actions: [
-          IconButton(
-            tooltip: '设置',
-            onPressed: _releaseInputFocus,
-            icon: const Icon(Icons.settings_outlined),
-          ),
-          const SizedBox(width: AppSpacing.xs),
-        ],
-      ),
-      body: navigationShell,
-      bottomNavigationBar: _TripleNavBar(
-        currentIndex: navigationShell.currentIndex,
-        onSelected: (index) {
-          _releaseInputFocus();
-          navigationShell.goBranch(
-            index,
-            initialLocation: index == navigationShell.currentIndex,
-          );
-        },
-      ),
+class _LiflowShellState extends State<LiflowShell> {
+  late final PageController _pageController;
+  var _currentIndex = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.navigationShell.currentIndex;
+    _pageController = PageController(initialPage: _currentIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  var _fromNavTap = false;
+
+  void _onPageChanged(int index) {
+    if (index == _currentIndex) return;
+    if (_fromNavTap) {
+      _fromNavTap = false;
+      return;
+    }
+    setState(() => _currentIndex = index);
+    _releaseInputFocus();
+    widget.navigationShell.goBranch(index);
+  }
+
+  void _onNavTapped(int index) {
+    if (index == _currentIndex) {
+      widget.navigationShell.goBranch(index, initialLocation: true);
+      return;
+    }
+    setState(() => _currentIndex = index);
+    _releaseInputFocus();
+    widget.navigationShell.goBranch(index);
+    _fromNavTap = true;
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
     );
   }
 
   static void _releaseInputFocus() {
     FocusManager.instance.primaryFocus?.unfocus();
   }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      resizeToAvoidBottomInset: false,
+      body: PageView(
+        controller: _pageController,
+        onPageChanged: _onPageChanged,
+        physics: const PageScrollPhysics(),
+        children: [
+          for (var i = 0; i < 3; i++)
+            TickerMode(
+              enabled: i == _currentIndex,
+              child: _pageWidget(i),
+            ),
+        ],
+      ),
+      bottomNavigationBar: _TripleNavBar(
+        currentIndex: _currentIndex,
+        onSelected: _onNavTapped,
+      ),
+    );
+  }
+
+  Widget _pageWidget(int index) => switch (index) {
+    0 => const TimelinePage(),
+    1 => const FlashRecordPage(),
+    _ => const DashboardPage(),
+  };
 }
 
 class _TripleNavBar extends StatelessWidget {

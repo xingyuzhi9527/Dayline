@@ -1,5 +1,5 @@
-name: dayline_app
-description: A local-first life record app skeleton.
+name: liflow_app
+description: "Liflow local-first life record app skeleton."
 publish_to: 'none'
 
 version: 0.1.0+1

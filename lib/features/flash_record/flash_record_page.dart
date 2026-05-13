@@ -16,6 +16,7 @@ import 'flash_record_state.dart';
 import 'widgets/audio_waveform.dart';
 import 'widgets/flash_card.dart';
 import 'widgets/voice_button.dart';
+import '../long_note/long_note_editor_page.dart';
 
 final todayTodoPanelEventsProvider = FutureProvider<List<TimelineEvent>>((
   ref,
@@ -61,8 +62,8 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const double _intentPillWidth = 120;
   static const double _intentPillHeight = 48;
-  static const double _todoSwipeThreshold = 30;
-  static const double _todoSwipeHorizontalTolerance = 34;
+  static const double _todoSwipeThreshold = 18;
+  static const double _todoSwipeHorizontalTolerance = 52;
   static const Duration _intentSettleDuration = Duration(milliseconds: 340);
   static const Duration _intentContentSwapDuration = Duration(
     milliseconds: 180,
@@ -80,13 +81,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   bool _keyboardVisible = false;
   bool _keyboardLaunchExpanding = false;
   bool _keyboardHiding = false;
+  int _launchCompletedAt = 0;
   Offset _intentDragOffset = Offset.zero;
 
   void _logInput(String message) {
     final ts = DateTime.now().microsecondsSinceEpoch;
     final line = '[$ts] $message';
-    developer.log(line, name: 'DaylineKB');
-    debugPrint('DaylineKB $line');
+    developer.log(line, name: 'LiflowKB');
+    debugPrint('LiflowKB $line');
   }
 
   @override
@@ -115,31 +117,25 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
 
   @override
   void didChangeMetrics() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final viewInsets = WidgetsBinding.instance.platformDispatcher.views
-          .map((v) => v.viewInsets.bottom)
-          .toList();
-      final keyboardOpen = viewInsets.any((b) => b > 0);
-      if (keyboardOpen != _keyboardVisible) {
-        _logInput(
-          'metrics changed keyboardOpen=$keyboardOpen insets=$viewInsets expanded=$_intentExpanded focus=${_textFocusNode.hasFocus} launching=$_keyboardLaunchExpanding',
-        );
-      }
-      if (keyboardOpen && _keyboardLaunchExpanding) {
-        _logInput('metrics scheduling settle timer (40ms)');
-        _keyboardRevealTimer?.cancel();
-        _keyboardRevealTimer = Timer(
-          const Duration(milliseconds: 40),
-          () => _completeKeyboardLaunch('metrics-settled'),
-        );
-      }
-      if (_keyboardVisible && !keyboardOpen && _intentExpanded) {
-        _logInput('metrics keyboard closed while expanded, collapsing');
-        _collapseIntentInput(reason: 'metrics-keyboard-closed', unfocus: false);
-      }
-      _keyboardVisible = keyboardOpen;
-    });
+    final viewInsets = WidgetsBinding.instance.platformDispatcher.views
+        .map((v) => v.viewInsets.bottom)
+        .toList();
+    final keyboardOpen = viewInsets.any((b) => b > 0);
+    if (keyboardOpen != _keyboardVisible) {
+      _logInput(
+        'metrics changed keyboardOpen=$keyboardOpen insets=$viewInsets expanded=$_intentExpanded focus=${_textFocusNode.hasFocus} launching=$_keyboardLaunchExpanding',
+      );
+    }
+    if (keyboardOpen && _keyboardLaunchExpanding) {
+      _logInput('keyboard detected, completing launch now');
+      _keyboardRevealTimer?.cancel();
+      _completeKeyboardLaunch('metrics');
+    }
+    if (_keyboardVisible && !keyboardOpen && _intentExpanded) {
+      _logInput('metrics keyboard closed while expanded, collapsing');
+      _collapseIntentInput(reason: 'metrics-keyboard-closed', unfocus: false);
+    }
+    _keyboardVisible = keyboardOpen;
   }
 
   void _handleTextFocusChange() {
@@ -149,6 +145,11 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     if (!_textFocusNode.hasFocus && _intentExpanded) {
       if (_keyboardLaunchExpanding) {
         _logInput('focus lost ignored during keyboard launch');
+        return;
+      }
+      final sinceLaunch = DateTime.now().millisecondsSinceEpoch - _launchCompletedAt;
+      if (sinceLaunch < 400) {
+        _logInput('focus lost ignored, within $sinceLaunch ms of launch complete');
         return;
       }
       _collapseIntentInput(reason: 'focus-lost', unfocus: false);
@@ -161,6 +162,16 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     _textController.clear();
     _collapseIntentInput(reason: 'submit');
     unawaited(ref.read(flashRecordProvider.notifier).saveAsText(text));
+  }
+
+  static void _openLongNoteEditor(BuildContext context) {
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (context) => const LongNoteEditorPage(),
+      ),
+    );
   }
 
   void _expandIntentInput() {
@@ -192,14 +203,13 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       return;
     }
     if (!_intentExpanded) {
-      _logInput('expand starting launch');
+      _logInput('expand starting launch — waiting for keyboard');
       setState(() {
         _keyboardLaunchExpanding = true;
-        _intentExpanded = false;
       });
       _keyboardRevealTimer?.cancel();
       _keyboardRevealTimer = Timer(
-        const Duration(milliseconds: 260),
+        const Duration(milliseconds: 500),
         () => _completeKeyboardLaunch('fallback'),
       );
     } else {
@@ -223,10 +233,17 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     }
     _keyboardRevealTimer?.cancel();
     _logInput('launch_complete setting expanded=true');
+    _launchCompletedAt = DateTime.now().millisecondsSinceEpoch;
     setState(() {
       _keyboardLaunchExpanding = false;
       _intentExpanded = true;
     });
+    if (!_textFocusNode.hasFocus && reason == 'fallback') {
+      _logInput('launch_complete focus not acquired after fallback, retrying');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _textFocusNode.requestFocus();
+      });
+    }
   }
 
   void _collapseIntentInput({String reason = 'unknown', bool unfocus = true}) {
@@ -281,7 +298,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   void _handleIntentPanEnd(DragEndDetails details) {
     final verticalVelocity = details.velocity.pixelsPerSecond.dy;
     final isUpwardIntent =
-        _intentDragOffset.dy < -_todoSwipeThreshold || verticalVelocity < -420;
+        _intentDragOffset.dy < -_todoSwipeThreshold || verticalVelocity < -250;
     final isMostlyVertical =
         _intentDragOffset.dx.abs() <= _todoSwipeHorizontalTolerance;
 
@@ -551,14 +568,16 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                           width: double.infinity,
                           child: Opacity(
                             opacity: fade.clamp(0.0, 1.0).toDouble(),
-                            child: Transform.translate(
-                              offset: Offset(0, (1 - sheetProgress) * 44),
-                              child: Transform.scale(
-                                alignment: Alignment.bottomCenter,
-                                scaleY: 0.92 + sheetProgress * 0.08,
-                                child: _buildMemoryBottomSheet(
-                                  theme,
-                                  memoryEvents,
+                            child: RepaintBoundary(
+                              child: Transform.translate(
+                                offset: Offset(0, (1 - sheetProgress) * 44),
+                                child: Transform.scale(
+                                  alignment: Alignment.bottomCenter,
+                                  scaleY: 0.92 + sheetProgress * 0.08,
+                                  child: _buildMemoryBottomSheet(
+                                    theme,
+                                    memoryEvents,
+                                  ),
                                 ),
                               ),
                             ),
@@ -736,22 +755,24 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 
   Widget _buildFadedScrollable(Widget child) {
-    return ShaderMask(
-      shaderCallback: (bounds) {
-        return const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.transparent,
-            Colors.black,
-            Colors.black,
-            Colors.transparent,
-          ],
-          stops: [0, 0.08, 0.92, 1],
-        ).createShader(bounds);
-      },
-      blendMode: BlendMode.dstIn,
-      child: child,
+    return RepaintBoundary(
+      child: ShaderMask(
+        shaderCallback: (bounds) {
+          return const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.transparent,
+              Colors.black,
+              Colors.black,
+              Colors.transparent,
+            ],
+            stops: [0, 0.08, 0.92, 1],
+          ).createShader(bounds);
+        },
+        blendMode: BlendMode.dstIn,
+        child: child,
+      ),
     );
   }
 
@@ -1141,6 +1162,17 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               errorBorder: InputBorder.none,
               focusedErrorBorder: InputBorder.none,
             ),
+          ),
+        ),
+        Semantics(
+          label: 'open-long-note',
+          button: true,
+          child: IconButton(
+            key: const ValueKey('open-long-note'),
+            onPressed: () => _openLongNoteEditor(context),
+            icon: const Icon(Icons.edit_note_rounded,
+                color: AppColors.muted, size: 22),
+            tooltip: '长笔记',
           ),
         ),
         Semantics(

@@ -15,8 +15,8 @@ final localDatabaseProvider = Provider<LocalDatabase>((ref) {
 });
 
 class LocalDatabase {
-  static const _databaseName = 'dayline.db';
-  static const _databaseVersion = 1;
+  static const _databaseName = 'liflow.db';
+  static const _databaseVersion = 3;
 
   LocalDatabase({
     sqflite.DatabaseFactory? databaseFactory,
@@ -62,6 +62,7 @@ class LocalDatabase {
           await db.execute('PRAGMA foreign_keys = ON');
         },
         onCreate: _createSchema,
+        onUpgrade: _upgradeSchema,
       ),
     );
   }
@@ -81,6 +82,7 @@ CREATE TABLE records (
   time TEXT,
   tags TEXT NOT NULL DEFAULT '[]',
   metadata TEXT NOT NULL DEFAULT '{}',
+  is_deleted INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 )
@@ -185,5 +187,45 @@ CREATE TABLE app_settings (
     );
     await db.execute('CREATE INDEX idx_expenses_date ON expenses (date)');
     await db.execute('CREATE INDEX idx_body_logs_date ON body_logs (date)');
+
+    await db.execute('''
+CREATE TABLE daily_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL UNIQUE,
+  kept TEXT NOT NULL DEFAULT '',
+  adjust TEXT NOT NULL DEFAULT '',
+  next_action TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)
+''');
+
+    await db.execute(
+      'CREATE INDEX idx_daily_reviews_date ON daily_reviews (date)',
+    );
+  }
+
+  Future<void> _upgradeSchema(sqflite.Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('''
+CREATE TABLE daily_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL UNIQUE,
+  kept TEXT NOT NULL DEFAULT '',
+  adjust TEXT NOT NULL DEFAULT '',
+  next_action TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)
+''');
+      await db.execute(
+        'CREATE INDEX idx_daily_reviews_date ON daily_reviews (date)',
+      );
+    }
+    if (oldVersion < 3) {
+      await db.execute(
+        'ALTER TABLE records ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0',
+      );
+    }
   }
 }

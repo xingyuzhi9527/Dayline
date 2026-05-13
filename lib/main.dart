@@ -12,5 +12,5 @@ void main() {
     sherpa.initBindings();
   }
 
-  runApp(const ProviderScope(child: DaylineApp()));
+  runApp(const ProviderScope(child: LiflowApp()));
 }

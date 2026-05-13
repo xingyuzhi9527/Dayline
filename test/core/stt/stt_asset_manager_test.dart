@@ -2,14 +2,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
-import 'package:dayline_app/core/stt/stt_asset_manager.dart';
+import 'package:liflow_app/core/stt/stt_asset_manager.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test(
     'extractTarBz2Bytes extracts SenseVoice model files from package root',
     () async {
-      final dir = await Directory.systemTemp.createTemp('dayline-stt-assets-');
+      final dir = await Directory.systemTemp.createTemp('liflow-stt-assets-');
       addTearDown(() => dir.delete(recursive: true));
 
       final bytes = _tarBz2WithFiles({
@@ -33,7 +33,7 @@ void main() {
   test(
     'extractTarBz2Bytes fails when required SenseVoice files are missing',
     () async {
-      final dir = await Directory.systemTemp.createTemp('dayline-stt-assets-');
+      final dir = await Directory.systemTemp.createTemp('liflow-stt-assets-');
       addTearDown(() => dir.delete(recursive: true));
 
       final bytes = _tarBz2WithFiles({
@@ -51,7 +51,7 @@ void main() {
   test(
     'SttAssetManager installs bundled archive before falling back to network',
     () async {
-      final docsDir = await Directory.systemTemp.createTemp('dayline-stt-docs-');
+      final docsDir = await Directory.systemTemp.createTemp('liflow-stt-docs-');
       addTearDown(() => docsDir.delete(recursive: true));
 
       final bundledBytes = _tarBz2WithFiles({

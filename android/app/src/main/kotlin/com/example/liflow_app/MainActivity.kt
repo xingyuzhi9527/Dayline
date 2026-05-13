@@ -1,4 +1,4 @@
-package com.example.dayline_app
+package com.example.liflow_app
 
 import io.flutter.embedding.android.FlutterActivity
 

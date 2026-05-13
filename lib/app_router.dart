@@ -5,7 +5,7 @@ import 'app_routes.dart';
 import 'features/flash_record/flash_record_page.dart';
 import 'features/dashboard/dashboard_page.dart';
 import 'features/timeline/timeline_page.dart';
-import 'shell/dayline_shell.dart';
+import 'shell/liflow_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
@@ -20,7 +20,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
-          return DaylineShell(navigationShell: navigationShell);
+          return LiflowShell(navigationShell: navigationShell);
         },
         branches: [
           StatefulShellBranch(

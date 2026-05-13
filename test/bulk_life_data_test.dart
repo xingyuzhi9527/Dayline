@@ -4,7 +4,7 @@
 //
 // Run: flutter test test/bulk_life_data_test.dart
 
-import 'package:dayline_app/core/parser/lui_lite_parser.dart';
+import 'package:liflow_app/core/parser/lui_lite_parser.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // Each entry: (input, expected_type, expected_tags_contains, metadata_checks)

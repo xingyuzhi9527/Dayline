@@ -19,7 +19,7 @@ class SttPermissionException implements Exception {
   const SttPermissionException();
 
   @override
-  String toString() => '麦克风权限未开启，请允许 Dayline 使用麦克风。';
+  String toString() => '麦克风权限未开启，请允许 Liflow 使用麦克风。';
 }
 
 class LocalSttService implements SttEngine {
@@ -145,7 +145,7 @@ class LocalSttService implements SttEngine {
         'tokensPath': paths.tokens,
         'modelVersion': paths.modelVersion,
       },
-      debugName: 'DaylineSenseVoiceWorker',
+      debugName: 'LiflowSenseVoiceWorker',
       errorsAreFatal: true,
     );
 
@@ -178,7 +178,7 @@ class LocalSttService implements SttEngine {
     final wavFile = File(
       p.join(
         tempDir.path,
-        'dayline-stt-${DateTime.now().microsecondsSinceEpoch}.wav',
+        'liflow-stt-${DateTime.now().microsecondsSinceEpoch}.wav',
       ),
     );
 
