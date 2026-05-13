@@ -162,6 +162,26 @@ class TodosRepository extends Repository {
     );
   }
 
+  Future<List<DatabaseRow>> findAgenda({
+    required DateTime anchorDate,
+    int futureDays = 7,
+  }) async {
+    final db = await localDatabase.database;
+    final today = dateKey(anchorDate);
+    final future = dateKey(anchorDate.add(Duration(days: futureDays)));
+    return db.query(
+      tableName,
+      where: '''
+(is_completed = 0 AND date < ?)
+OR date = ?
+OR (is_completed = 0 AND date > ? AND date <= ?)
+''',
+      whereArgs: [today, today, today, future],
+      orderBy:
+          'date ASC, is_completed ASC, priority DESC, created_at ASC, id ASC',
+    );
+  }
+
   Future<int> countByDate(DateTime date) async {
     final db = await localDatabase.database;
     final rows = await db.rawQuery(
