@@ -18,6 +18,12 @@ skills-lock.json
 
 # Logs
 *.log
+logs/
+
+# Local screenshots and device-debug artifacts
+/dayline-*.png
+/timeline_preview_phone.png
+/voice_test_logcat.txt
 
 # Generated QA artifacts
 docs/qa/**/*.png

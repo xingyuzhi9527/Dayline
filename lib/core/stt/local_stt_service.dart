@@ -24,12 +24,17 @@ class SttPermissionException implements Exception {
 
 class LocalSttService implements SttEngine {
   LocalSttService({
-    SttAssetManager assetManager = const SttAssetManager(),
+    SttAssetManager? assetManager,
     AudioRecorder? recorder,
-  }) : _assetManager = assetManager,
+  }) : _assetManager = assetManager ?? SttAssetManager(),
        _recorder = recorder ?? AudioRecorder();
 
-  static final LocalSttService instance = LocalSttService();
+  static final LocalSttService instance = LocalSttService(
+    assetManager: SttAssetManager(
+      archiveSha256: senseVoiceModelArchiveSha256,
+      bundledArchiveSha256: senseVoiceModelArchiveSha256,
+    ),
+  );
 
   final SttAssetManager _assetManager;
   final AudioRecorder _recorder;

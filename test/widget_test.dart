@@ -89,6 +89,29 @@ void main() {
     expect(find.text('今天跑步30分钟'), findsOneWidget);
   });
 
+  testWidgets('底部胶囊保留键盘入口但不显示上滑箭头', (tester) async {
+    await tester.pumpWidget(const ProviderScope(child: DaylineApp()));
+    await tester.pumpAndSettle();
+
+    final pill = find.byKey(const ValueKey('collapsed-intent-pill'));
+
+    expect(pill, findsOneWidget);
+    expect(
+      find.descendant(
+        of: pill,
+        matching: find.byIcon(Icons.keyboard_alt_rounded),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: pill,
+        matching: find.byIcon(Icons.keyboard_arrow_up_rounded),
+      ),
+      findsNothing,
+    );
+  });
+
   testWidgets('文字胶囊点空白后收回小窗口', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 3;
@@ -145,6 +168,144 @@ void main() {
     await tester.pump();
 
     expect(sttEngine.stopCount, 1);
+  });
+
+  testWidgets('点击空白可以停止正在听写的大话筒', (tester) async {
+    final sttEngine = _HoldToTalkSttEngine();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sttEngineProvider.overrideWithValue(sttEngine),
+          todayTodoPanelEventsProvider.overrideWith((ref) async => const []),
+        ],
+        child: const MaterialApp(home: Scaffold(body: FlashRecordPage())),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1000));
+    await tester.pump();
+    await tester.tap(find.byType(VoiceButton));
+    await tester.pump();
+
+    expect(sttEngine.startCount, 1);
+
+    await tester.tapAt(const Offset(20, 20));
+    await tester.pump();
+
+    expect(sttEngine.stopCount, 1);
+  });
+
+  testWidgets('听写时底部胶囊不显示波形和上滑箭头', (tester) async {
+    final sttEngine = _HoldToTalkSttEngine();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sttEngineProvider.overrideWithValue(sttEngine),
+          todayTodoPanelEventsProvider.overrideWith((ref) async => const []),
+        ],
+        child: const MaterialApp(home: Scaffold(body: FlashRecordPage())),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1000));
+    await tester.pump();
+    await tester.tap(find.byType(VoiceButton));
+    await tester.pump();
+
+    final pill = find.byKey(const ValueKey('collapsed-intent-pill'));
+
+    expect(pill, findsOneWidget);
+    for (final icon in [
+      Icons.graphic_eq_rounded,
+      Icons.keyboard_arrow_up_rounded,
+    ]) {
+      expect(
+        find.descendant(of: pill, matching: find.byIcon(icon)),
+        findsNothing,
+      );
+    }
+  });
+
+  testWidgets(
+    'tapping the transparent edge of voice area does not start voice',
+    (tester) async {
+      final sttEngine = _HoldToTalkSttEngine();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sttEngineProvider.overrideWithValue(sttEngine),
+            todayTodoPanelEventsProvider.overrideWith((ref) async => const []),
+          ],
+          child: const MaterialApp(home: Scaffold(body: FlashRecordPage())),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1000));
+      await tester.pump();
+
+      final voiceRect = tester.getRect(find.byType(VoiceButton));
+      await tester.tapAt(voiceRect.center + const Offset(130, 0));
+      await tester.pump();
+
+      expect(sttEngine.startCount, 0);
+    },
+  );
+
+  testWidgets('text input sits close to the keyboard', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 900);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+
+    await tester.pumpWidget(const ProviderScope(child: DaylineApp()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('collapsed-intent-pill')));
+    await tester.pump(const Duration(milliseconds: 260));
+
+    final screenHeight =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    final keyboardTop = screenHeight - 300;
+    final inputRect = tester.getRect(
+      find.byKey(const ValueKey('expanded-intent-input')),
+    );
+
+    expect(inputRect.bottom, greaterThan(keyboardTop - 28));
+  });
+
+  testWidgets('listening pill does not open text input', (tester) async {
+    final sttEngine = _HoldToTalkSttEngine();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sttEngineProvider.overrideWithValue(sttEngine),
+          todayTodoPanelEventsProvider.overrideWith((ref) async => const []),
+        ],
+        child: const MaterialApp(home: Scaffold(body: FlashRecordPage())),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1000));
+    await tester.pump();
+    await tester.tap(find.byType(VoiceButton));
+    await tester.pump();
+
+    expect(sttEngine.startCount, 1);
+
+    await tester.tap(find.byKey(const ValueKey('collapsed-intent-pill')));
+    await tester.pump(const Duration(milliseconds: 260));
+
+    expect(find.byKey(const ValueKey('expanded-intent-input')), findsNothing);
   });
 
   testWidgets('voice long press waits for STT init and starts once ready', (
