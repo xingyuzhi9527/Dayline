@@ -49,8 +49,8 @@ abstract class Repository {
     return db.delete(tableName, where: 'id = ?', whereArgs: [id]);
   }
 
-  DatabaseRow withTimestamps(DatabaseRow values, {DateTime? now}) {
-    final writtenAt = timestamp(now ?? DateTime.now());
+  DatabaseRow withTimestamps(DatabaseRow values, {DateTime? createdAt}) {
+    final writtenAt = timestamp(createdAt ?? DateTime.now());
     return {
       ...values,
       'created_at': values['created_at'] ?? writtenAt,
@@ -70,6 +70,7 @@ class RecordsRepository extends Repository {
     String? time,
     List<String> tags = const [],
     Map<String, Object?> metadata = const {},
+    DateTime? createdAt,
   }) {
     return insert(
       withTimestamps({
@@ -79,7 +80,7 @@ class RecordsRepository extends Repository {
         'time': time,
         'tags': jsonEncode(tags),
         'metadata': jsonEncode(metadata),
-      }),
+      }, createdAt: createdAt),
     );
   }
 
@@ -138,6 +139,7 @@ class TodosRepository extends Repository {
     String? note,
     String? dueTime,
     int priority = 0,
+    DateTime? createdAt,
   }) {
     return insert(
       withTimestamps({
@@ -148,7 +150,7 @@ class TodosRepository extends Repository {
         'priority': priority,
         'is_completed': 0,
         'completed_at': null,
-      }),
+      }, createdAt: createdAt),
     );
   }
 
@@ -290,6 +292,7 @@ class TrackerLogsRepository extends Repository {
     required DateTime date,
     double value = 1,
     String? note,
+    DateTime? createdAt,
   }) {
     return insert(
       withTimestamps({
@@ -297,7 +300,7 @@ class TrackerLogsRepository extends Repository {
         'date': dateKey(date),
         'value': value,
         'note': note,
-      }),
+      }, createdAt: createdAt),
     );
   }
 
@@ -344,6 +347,7 @@ class FocusSessionsRepository extends Repository {
     required int durationMinutes,
     DateTime? endedAt,
     String? note,
+    DateTime? createdAt,
   }) {
     return insert(
       withTimestamps({
@@ -352,7 +356,7 @@ class FocusSessionsRepository extends Repository {
         'ended_at': endedAt == null ? null : timestamp(endedAt),
         'duration_minutes': durationMinutes,
         'note': note,
-      }),
+      }, createdAt: createdAt),
     );
   }
 
@@ -403,6 +407,7 @@ class ExpensesRepository extends Repository {
     required String category,
     String? note,
     String currency = 'CNY',
+    DateTime? createdAt,
   }) {
     return insert(
       withTimestamps({
@@ -411,7 +416,7 @@ class ExpensesRepository extends Repository {
         'category': category,
         'note': note,
         'currency': currency,
-      }),
+      }, createdAt: createdAt),
     );
   }
 
@@ -466,6 +471,7 @@ class BodyLogsRepository extends Repository {
     required double value,
     String? unit,
     String? note,
+    DateTime? createdAt,
   }) {
     return insert(
       withTimestamps({
@@ -474,7 +480,7 @@ class BodyLogsRepository extends Repository {
         'value': value,
         'unit': unit,
         'note': note,
-      }),
+      }, createdAt: createdAt),
     );
   }
 

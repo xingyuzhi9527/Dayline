@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repository_providers.dart';
 import '../../core/parser/lui_lite_parser.dart';
+import '../../core/parser/parsed_input_time.dart';
 import 'record_state.dart';
 
 final recordNotifierProvider = NotifierProvider<RecordNotifier, RecordState>(
@@ -96,6 +97,7 @@ class RecordNotifier extends Notifier<RecordState> {
 
   Future<void> _persist(ParsedInput parsed, {required bool asMemo}) async {
     final now = DateTime.now();
+    final createdAt = parsedInputTimeToDateTime(now, parsed.time) ?? now;
 
     if (asMemo) {
       await ref
@@ -107,6 +109,7 @@ class RecordNotifier extends Notifier<RecordState> {
             time: parsed.time,
             tags: parsed.tags,
             metadata: parsed.metadata,
+            createdAt: createdAt,
           );
       return;
     }
@@ -122,12 +125,18 @@ class RecordNotifier extends Notifier<RecordState> {
               time: parsed.time,
               tags: parsed.tags,
               metadata: parsed.metadata,
+              createdAt: createdAt,
             );
 
       case ParsedInputType.todo:
         await ref
             .read(todosRepositoryProvider)
-            .create(date: now, title: parsed.content, dueTime: parsed.time);
+            .create(
+              date: now,
+              title: parsed.content,
+              dueTime: parsed.time,
+              createdAt: createdAt,
+            );
 
       case ParsedInputType.focus:
         final durationMinutes =
@@ -136,9 +145,10 @@ class RecordNotifier extends Notifier<RecordState> {
             .read(focusSessionsRepositoryProvider)
             .create(
               date: now,
-              startedAt: now,
+              startedAt: createdAt,
               durationMinutes: durationMinutes,
               note: parsed.content,
+              createdAt: createdAt,
             );
 
       case ParsedInputType.expense:
@@ -151,6 +161,7 @@ class RecordNotifier extends Notifier<RecordState> {
               amount: amount,
               category: category,
               note: parsed.content,
+              createdAt: createdAt,
             );
 
       case ParsedInputType.body:
@@ -163,6 +174,7 @@ class RecordNotifier extends Notifier<RecordState> {
               metric: metric,
               value: value,
               note: parsed.content,
+              createdAt: createdAt,
             );
 
       case ParsedInputType.sleep:
@@ -175,6 +187,7 @@ class RecordNotifier extends Notifier<RecordState> {
               time: parsed.time,
               tags: parsed.tags,
               metadata: parsed.metadata,
+              createdAt: createdAt,
             );
 
       case ParsedInputType.mood:
@@ -187,14 +200,19 @@ class RecordNotifier extends Notifier<RecordState> {
               time: parsed.time,
               tags: parsed.tags,
               metadata: parsed.metadata,
+              createdAt: createdAt,
             );
 
       case ParsedInputType.tracker:
-        await _saveTrackerLog(parsed, now);
+        await _saveTrackerLog(parsed, now, createdAt);
     }
   }
 
-  Future<void> _saveTrackerLog(ParsedInput parsed, DateTime now) async {
+  Future<void> _saveTrackerLog(
+    ParsedInput parsed,
+    DateTime now,
+    DateTime createdAt,
+  ) async {
     final trackerName = parsed.content.isNotEmpty
         ? parsed.content
         : (parsed.tags.isNotEmpty ? parsed.tags.first : 'tracker');
@@ -223,6 +241,7 @@ class RecordNotifier extends Notifier<RecordState> {
           date: now,
           value: value,
           note: parsed.content,
+          createdAt: createdAt,
         );
   }
 

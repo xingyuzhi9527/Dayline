@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repository_providers.dart';
 import '../../core/parser/lui_lite_parser.dart';
+import '../../core/parser/parsed_input_time.dart';
 import '../../core/stt/stt_engine.dart';
 import '../../core/stt/stt_providers.dart';
 import 'flash_record_state.dart';
@@ -290,6 +291,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
 
   Future<void> _persist(ParsedInput parsed) async {
     final now = DateTime.now();
+    final createdAt = parsedInputTimeToDateTime(now, parsed.time) ?? now;
 
     switch (parsed.type) {
       case ParsedInputType.memo:
@@ -302,12 +304,18 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
               time: parsed.time,
               tags: parsed.tags,
               metadata: parsed.metadata,
+              createdAt: createdAt,
             );
 
       case ParsedInputType.todo:
         await ref
             .read(todosRepositoryProvider)
-            .create(date: now, title: parsed.content, dueTime: parsed.time);
+            .create(
+              date: now,
+              title: parsed.content,
+              dueTime: parsed.time,
+              createdAt: createdAt,
+            );
 
       case ParsedInputType.focus:
         final d = (parsed.metadata['durationMinutes'] as int?) ?? 25;
@@ -315,9 +323,10 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
             .read(focusSessionsRepositoryProvider)
             .create(
               date: now,
-              startedAt: now,
+              startedAt: createdAt,
               durationMinutes: d,
               note: parsed.content,
+              createdAt: createdAt,
             );
 
       case ParsedInputType.expense:
@@ -325,14 +334,26 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         final c = parsed.tags.isNotEmpty ? parsed.tags.first : 'other';
         await ref
             .read(expensesRepositoryProvider)
-            .create(date: now, amount: a, category: c, note: parsed.content);
+            .create(
+              date: now,
+              amount: a,
+              category: c,
+              note: parsed.content,
+              createdAt: createdAt,
+            );
 
       case ParsedInputType.body:
         final v = (parsed.metadata['value'] as num?)?.toDouble() ?? 0.0;
         final m = (parsed.metadata['metric'] as String?) ?? 'weight';
         await ref
             .read(bodyLogsRepositoryProvider)
-            .create(date: now, metric: m, value: v, note: parsed.content);
+            .create(
+              date: now,
+              metric: m,
+              value: v,
+              note: parsed.content,
+              createdAt: createdAt,
+            );
 
       case ParsedInputType.sleep:
         await ref
@@ -344,6 +365,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
               time: parsed.time,
               tags: parsed.tags,
               metadata: parsed.metadata,
+              createdAt: createdAt,
             );
 
       case ParsedInputType.mood:
@@ -356,14 +378,19 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
               time: parsed.time,
               tags: parsed.tags,
               metadata: parsed.metadata,
+              createdAt: createdAt,
             );
 
       case ParsedInputType.tracker:
-        await _saveTrackerLog(parsed, now);
+        await _saveTrackerLog(parsed, now, createdAt);
     }
   }
 
-  Future<void> _saveTrackerLog(ParsedInput parsed, DateTime now) async {
+  Future<void> _saveTrackerLog(
+    ParsedInput parsed,
+    DateTime now,
+    DateTime createdAt,
+  ) async {
     final trackerName = parsed.content.isNotEmpty
         ? parsed.content
         : (parsed.tags.isNotEmpty ? parsed.tags.first : 'tracker');
@@ -392,6 +419,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
           date: now,
           value: value,
           note: parsed.content,
+          createdAt: createdAt,
         );
   }
 }

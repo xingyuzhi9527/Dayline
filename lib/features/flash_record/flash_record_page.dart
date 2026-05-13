@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -62,16 +63,31 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   static const double _intentPillHeight = 48;
   static const double _todoSwipeThreshold = 30;
   static const double _todoSwipeHorizontalTolerance = 34;
+  static const Duration _intentSettleDuration = Duration(milliseconds: 340);
+  static const Duration _intentContentSwapDuration = Duration(
+    milliseconds: 180,
+  );
+  static const Curve _intentMotionCurve = Cubic(0.16, 1.0, 0.3, 1.0);
 
   final _textController = TextEditingController();
   final _recognizedTextController = TextEditingController();
   final _textFocusNode = FocusNode();
   late final AnimationController _memoryController;
+  Timer? _keyboardRevealTimer;
   bool _memoryExpanded = false;
   bool _intentExpanded = false;
   bool _intentLongPressActive = false;
   bool _keyboardVisible = false;
+  bool _keyboardLaunchExpanding = false;
+  bool _keyboardHiding = false;
   Offset _intentDragOffset = Offset.zero;
+
+  void _logInput(String message) {
+    final ts = DateTime.now().microsecondsSinceEpoch;
+    final line = '[$ts] $message';
+    developer.log(line, name: 'DaylineKB');
+    debugPrint('DaylineKB $line');
+  }
 
   @override
   void initState() {
@@ -92,6 +108,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     _textController.dispose();
     _recognizedTextController.dispose();
     _textFocusNode.dispose();
+    _keyboardRevealTimer?.cancel();
     _memoryController.dispose();
     super.dispose();
   }
@@ -100,23 +117,41 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   void didChangeMetrics() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final keyboardOpen = WidgetsBinding.instance.platformDispatcher.views.any(
-        (view) => view.viewInsets.bottom > 0,
-      );
+      final viewInsets = WidgetsBinding.instance.platformDispatcher.views
+          .map((v) => v.viewInsets.bottom)
+          .toList();
+      final keyboardOpen = viewInsets.any((b) => b > 0);
+      if (keyboardOpen != _keyboardVisible) {
+        _logInput(
+          'metrics changed keyboardOpen=$keyboardOpen insets=$viewInsets expanded=$_intentExpanded focus=${_textFocusNode.hasFocus} launching=$_keyboardLaunchExpanding',
+        );
+      }
+      if (keyboardOpen && _keyboardLaunchExpanding) {
+        _logInput('metrics scheduling settle timer (40ms)');
+        _keyboardRevealTimer?.cancel();
+        _keyboardRevealTimer = Timer(
+          const Duration(milliseconds: 40),
+          () => _completeKeyboardLaunch('metrics-settled'),
+        );
+      }
       if (_keyboardVisible && !keyboardOpen && _intentExpanded) {
-        _collapseIntentInput();
+        _logInput('metrics keyboard closed while expanded, collapsing');
+        _collapseIntentInput(reason: 'metrics-keyboard-closed', unfocus: false);
       }
       _keyboardVisible = keyboardOpen;
     });
   }
 
   void _handleTextFocusChange() {
+    _logInput(
+      'focus_change hasFocus=${_textFocusNode.hasFocus} expanded=$_intentExpanded launching=$_keyboardLaunchExpanding',
+    );
     if (!_textFocusNode.hasFocus && _intentExpanded) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_textFocusNode.hasFocus) {
-          _collapseIntentInput();
-        }
-      });
+      if (_keyboardLaunchExpanding) {
+        _logInput('focus lost ignored during keyboard launch');
+        return;
+      }
+      _collapseIntentInput(reason: 'focus-lost', unfocus: false);
     }
   }
 
@@ -124,32 +159,108 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     final text = _textController.text.trim();
     if (text.isEmpty) return;
     _textController.clear();
-    _collapseIntentInput();
+    _collapseIntentInput(reason: 'submit');
     unawaited(ref.read(flashRecordProvider.notifier).saveAsText(text));
   }
 
   void _expandIntentInput() {
+    final phase = ref.read(flashRecordProvider).phase;
+    _logInput(
+      'expand_tap phase=${phase.name} expanded=$_intentExpanded launching=$_keyboardLaunchExpanding kbVis=$_keyboardVisible focus=${_textFocusNode.hasFocus}',
+    );
+    if (phase == FlashPhase.listening) {
+      _logInput('expand ignored while listening');
+      return;
+    }
+    if (_keyboardHiding) {
+      _logInput('expand deferred — keyboard still hiding, retrying once');
+      Future.delayed(const Duration(milliseconds: 180), () {
+        if (!mounted) return;
+        _keyboardHiding = false;
+        _expandIntentInput();
+      });
+      return;
+    }
+    if (_keyboardLaunchExpanding) {
+      _logInput('expand repeat-tap kbVis=$_keyboardVisible');
+      if (_keyboardVisible) {
+        _completeKeyboardLaunch('repeat-tap');
+      } else {
+        _logInput('repeat tap while waiting for keyboard metrics');
+      }
+      _textFocusNode.requestFocus();
+      return;
+    }
     if (!_intentExpanded) {
-      setState(() => _intentExpanded = true);
+      _logInput('expand starting launch');
+      setState(() {
+        _keyboardLaunchExpanding = true;
+        _intentExpanded = false;
+      });
+      _keyboardRevealTimer?.cancel();
+      _keyboardRevealTimer = Timer(
+        const Duration(milliseconds: 260),
+        () => _completeKeyboardLaunch('fallback'),
+      );
+    } else {
+      _logInput('expand already expanded, re-focusing');
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
+        _logInput('expand requestFocus in postFrame');
         _textFocusNode.requestFocus();
       }
     });
   }
 
-  void _collapseIntentInput() {
+  void _completeKeyboardLaunch(String reason) {
+    _logInput(
+      'launch_complete reason=$reason mounted=$mounted launching=$_keyboardLaunchExpanding expanded=$_intentExpanded focus=${_textFocusNode.hasFocus}',
+    );
+    if (!mounted || !_keyboardLaunchExpanding) {
+      _logInput('launch_complete ABORT mounted=$mounted launching=$_keyboardLaunchExpanding');
+      return;
+    }
+    _keyboardRevealTimer?.cancel();
+    _logInput('launch_complete setting expanded=true');
+    setState(() {
+      _keyboardLaunchExpanding = false;
+      _intentExpanded = true;
+    });
+  }
+
+  void _collapseIntentInput({String reason = 'unknown', bool unfocus = true}) {
+    final hadFocus = _textFocusNode.hasFocus;
+    _logInput(
+      'collapse reason=$reason expanded=$_intentExpanded focus=$hadFocus keyboard=$_keyboardVisible launching=$_keyboardLaunchExpanding',
+    );
+    if (!_intentExpanded && (!unfocus || !hadFocus)) {
+      _logInput('collapse SKIP nothing to do');
+      return;
+    }
+    _keyboardRevealTimer?.cancel();
+    if (_keyboardLaunchExpanding) {
+      _logInput('collapse aborting launch');
+      _keyboardLaunchExpanding = false;
+    }
     if (_intentExpanded) {
+      _logInput('collapse setting expanded=false');
       setState(() => _intentExpanded = false);
     }
-    _textFocusNode.unfocus();
+    if (unfocus && hadFocus) {
+      _logInput('collapse unfocusing');
+      _keyboardHiding = true;
+      _textFocusNode.unfocus();
+      Future.delayed(const Duration(milliseconds: 350), () {
+        if (mounted) _keyboardHiding = false;
+      });
+    }
   }
 
   void _handleIntentLongPress(FlashRecordState state) {
     _intentLongPressActive = true;
     HapticFeedback.lightImpact();
-    _collapseIntentInput();
+    _collapseIntentInput(reason: 'intent-long-press');
     unawaited(ref.read(flashRecordProvider.notifier).startListening());
   }
 
@@ -184,12 +295,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   void _openMemoryScatter() {
     FocusScope.of(context).unfocus();
     if (_memoryExpanded) return;
+    _logInput('memory panel opened');
     setState(() => _memoryExpanded = true);
     _memoryController.forward(from: 0);
   }
 
   void _closeMemoryScatter() {
     if (!_memoryExpanded) return;
+    _logInput('memory panel closing');
     unawaited(
       _memoryController.reverse().then((_) {
         if (mounted) {
@@ -197,6 +310,23 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         }
       }),
     );
+  }
+
+  void _dismissAmbientState(FlashRecordState state) {
+    _logInput(
+      'ambient_dismiss phase=${state.phase.name} expanded=$_intentExpanded focus=${_textFocusNode.hasFocus} launching=$_keyboardLaunchExpanding hiding=$_keyboardHiding kbVis=$_keyboardVisible',
+    );
+    if (_keyboardLaunchExpanding) {
+      _logInput('ambient_dismiss ignored during keyboard launch');
+      return;
+    }
+    _collapseIntentInput(reason: 'ambient-tap');
+    _closeMemoryScatter();
+    FocusScope.of(context).unfocus();
+    if (state.phase == FlashPhase.listening) {
+      _handleIntentLongPressEnd();
+      unawaited(ref.read(flashRecordProvider.notifier).stopListening());
+    }
   }
 
   @override
@@ -229,17 +359,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     return SafeArea(
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onTap: () {
-          _collapseIntentInput();
-          FocusScope.of(context).unfocus();
-        },
+        onTap: () => _dismissAmbientState(state),
         child: Stack(
           fit: StackFit.expand,
           children: [
             // Main content
             Positioned.fill(
               child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 180),
+                duration: const Duration(milliseconds: 120),
                 opacity: MediaQuery.viewInsetsOf(context).bottom > 0 ? 0.38 : 1,
                 child: Align(
                   alignment: const Alignment(0, -0.03),
@@ -254,7 +381,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                   key: const ValueKey('intent-dismiss-layer'),
                   color: Colors.transparent,
                   dismissible: true,
-                  onDismiss: _collapseIntentInput,
+                  onDismiss: () => _collapseIntentInput(reason: 'barrier'),
                 ),
               ),
 
@@ -362,10 +489,15 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
 
   Widget _buildTextInputDock(FlashRecordState state, ThemeData theme) {
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
-    final bottomOffset = keyboardInset > 0 ? 72.0 : AppSpacing.lg;
+    final reduceMotion = _keyboardLaunchExpanding;
+    final bottomOffset = keyboardInset > 0
+        ? math.max(AppSpacing.sm, keyboardInset - 72)
+        : AppSpacing.lg;
 
     return AnimatedPositioned(
-      duration: const Duration(milliseconds: 220),
+      duration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 140),
       curve: Curves.easeOutCubic,
       left: 0,
       right: 0,
@@ -854,13 +986,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     ThemeData theme, {
     bool compact = false,
   }) {
-    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
-    _keyboardVisible = keyboardOpen;
     final expanded = _intentExpanded;
     final horizontalPadding = expanded ? AppSpacing.containerMargin + 12 : 0.0;
     final isListening = state.phase == FlashPhase.listening;
+    final keyboardMotion = _keyboardLaunchExpanding;
 
-    return Padding(
+    return AnimatedPadding(
+      duration: keyboardMotion ? Duration.zero : _intentSettleDuration,
+      curve: _intentMotionCurve,
       padding: EdgeInsets.fromLTRB(
         horizontalPadding,
         0,
@@ -877,10 +1010,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             alignment: Alignment.bottomCenter,
             child: AnimatedContainer(
               key: const ValueKey('unified-intent-pill'),
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
+              duration: keyboardMotion ? Duration.zero : _intentSettleDuration,
+              curve: _intentMotionCurve,
               width: expanded ? expandedWidth : _intentPillWidth,
-              height: expanded ? 54 : _intentPillHeight,
+              height: _intentPillHeight,
               decoration: BoxDecoration(
                 color: (isListening ? AppColors.primary : AppColors.surface)
                     .withAlpha(isListening ? 232 : 218),
@@ -901,9 +1034,27 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                 ],
               ),
               child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 160),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
+                duration: keyboardMotion
+                    ? Duration.zero
+                    : _intentContentSwapDuration,
+                switchInCurve: _intentMotionCurve,
+                switchOutCurve: Curves.easeOutCubic,
+                transitionBuilder: (child, animation) {
+                  final curved = CurvedAnimation(
+                    parent: animation,
+                    curve: _intentMotionCurve,
+                  );
+                  return FadeTransition(
+                    opacity: curved,
+                    child: ScaleTransition(
+                      scale: Tween<double>(
+                        begin: 0.985,
+                        end: 1,
+                      ).animate(curved),
+                      child: child,
+                    ),
+                  );
+                },
                 child: expanded
                     ? _buildExpandedIntentInput(state, theme)
                     : _buildCollapsedIntentPill(state, theme),
@@ -926,10 +1077,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       onPointerCancel: (_) => _handleIntentLongPressEnd(),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: _expandIntentInput,
-        onLongPress: () => _handleIntentLongPress(state),
-        onLongPressEnd: (_) => _handleIntentLongPressEnd(),
-        onLongPressUp: _handleIntentLongPressEnd,
+        onTap: isListening ? null : _expandIntentInput,
+        onLongPress: isListening ? null : () => _handleIntentLongPress(state),
+        onLongPressEnd: isListening ? null : (_) => _handleIntentLongPressEnd(),
+        onLongPressUp: isListening ? null : _handleIntentLongPressEnd,
         onPanStart: _handleIntentPanStart,
         onPanUpdate: _handleIntentPanUpdate,
         onPanEnd: _handleIntentPanEnd,
@@ -954,21 +1105,8 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                 ),
               ),
             ),
-            Icon(
-              isListening
-                  ? Icons.graphic_eq_rounded
-                  : Icons.keyboard_alt_rounded,
-              color: foreground,
-              size: isListening ? 24 : 21,
-            ),
-            Positioned(
-              top: 6,
-              child: Icon(
-                Icons.keyboard_arrow_up_rounded,
-                color: foreground.withAlpha(isListening ? 170 : 105),
-                size: 16,
-              ),
-            ),
+            if (!isListening)
+              Icon(Icons.keyboard_alt_rounded, color: foreground, size: 21),
           ],
         ),
       ),
@@ -985,7 +1123,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             key: const ValueKey('record-text-input'),
             focusNode: _textFocusNode,
             controller: _textController,
-            onTapOutside: (_) => _collapseIntentInput(),
+            onTapOutside: (_) => _collapseIntentInput(reason: 'tap-outside'),
             textInputAction: TextInputAction.send,
             onSubmitted: (_) => _submitText(),
             maxLines: 1,

@@ -138,9 +138,18 @@ class TimelineBody extends ConsumerWidget {
               return const _TimelineEndMarker();
             }
 
+            final nextEvent = index < events.length - 1
+                ? events[index + 1]
+                : null;
             return _TimelineTile(
               event: events[index],
               isLast: index == events.length - 1,
+              gapAfter: nextEvent == null
+                  ? null
+                  : Duration(
+                      milliseconds:
+                          nextEvent.timestamp - events[index].timestamp,
+                    ),
             );
           },
         );
@@ -150,168 +159,77 @@ class TimelineBody extends ConsumerWidget {
 }
 
 class _TimelineTile extends ConsumerWidget {
-  const _TimelineTile({required this.event, required this.isLast});
+  const _TimelineTile({
+    required this.event,
+    required this.isLast,
+    required this.gapAfter,
+  });
 
   final TimelineEvent event;
   final bool isLast;
+  final Duration? gapAfter;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final color = _colorForType(event.type);
+    final isTodo = event.source == TimelineEventSource.todo;
     final theme = Theme.of(context);
-    final hasDetails = event.description.isNotEmpty || event.tags.isNotEmpty;
+    final card = _TimelineEventCard(
+      event: event,
+      color: color,
+      theme: theme,
+      onEdit: () => _openEditor(context, ref),
+    );
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
       children: [
-        SizedBox(
-          width: 32,
-          child: Column(
-            children: [
-              Container(
-                width: 20,
-                height: 20,
-                margin: const EdgeInsets.only(bottom: 4),
-                decoration: BoxDecoration(
-                  color: color.withAlpha(25),
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: color,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-              ),
-              Container(
-                width: 1.5,
-                height: 72,
-                color: isLast
-                    ? Colors.transparent
-                    : AppColors.muted.withAlpha(35),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
+        IntrinsicHeight(
           child: Padding(
-            padding: const EdgeInsets.only(left: AppSpacing.xs, bottom: 6),
-            child: Container(
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surface,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(
-                  color: theme.colorScheme.outlineVariant.withAlpha(55),
-                ),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(width: 3, height: 72, color: color),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.xs,
-                        8,
-                        AppSpacing.xs,
-                        8,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                _formatTime(event.timestamp),
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: AppColors.muted,
-                                  fontSize: 11,
-                                ),
-                              ),
-                              const SizedBox(width: AppSpacing.xs),
-                              Text(
-                                _labelForType(event.type),
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: color,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 11,
-                                ),
-                              ),
-                              const Spacer(),
-                              SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: IconButton(
-                                  key: ValueKey('edit-${event.id}'),
-                                  tooltip: '修改',
-                                  onPressed: () => _openEditor(context, ref),
-                                  icon: const Icon(Icons.edit_rounded),
-                                  iconSize: 15,
-                                  visualDensity: VisualDensity.compact,
-                                  color: AppColors.muted,
-                                  padding: EdgeInsets.zero,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Padding(
-                            padding: EdgeInsets.only(top: hasDetails ? 2 : 0),
-                            child: Text(
-                              event.title,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          if (event.description.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 1),
-                              child: Text(
-                                event.description,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: AppColors.muted,
-                                  fontSize: 12,
-                                  height: 1.3,
-                                ),
-                              ),
-                            ),
-                          if (event.tags.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Wrap(
-                                spacing: 6,
-                                runSpacing: 0,
-                                children: event.tags
-                                    .map(
-                                      (tag) => Text(
-                                        '#$tag',
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(
-                                              color: color.withAlpha(160),
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 10,
-                                            ),
-                                      ),
-                                    )
-                                    .toList(),
-                              ),
-                            ),
-                        ],
-                      ),
+            padding: EdgeInsets.zero,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                      left: AppSpacing.sm,
+                      right: AppSpacing.md,
                     ),
+                    child: isTodo
+                        ? const SizedBox.shrink()
+                        : Align(
+                            alignment: Alignment.topRight,
+                            child: KeyedSubtree(
+                              key: ValueKey('timeline-left-card-${event.id}'),
+                              child: card,
+                            ),
+                          ),
                   ),
-                ],
-              ),
+                ),
+                _TimelineRail(color: color, isLast: isLast),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                      left: AppSpacing.md,
+                      right: AppSpacing.sm,
+                    ),
+                    child: isTodo
+                        ? Align(
+                            alignment: Alignment.topLeft,
+                            child: KeyedSubtree(
+                              key: ValueKey('timeline-right-card-${event.id}'),
+                              child: card,
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
+        if (gapAfter != null && gapAfter!.inMinutes > 0)
+          _TimelineGap(gapAfter!),
       ],
     );
   }
@@ -335,6 +253,231 @@ class _TimelineTile extends ConsumerWidget {
           duration: Duration(seconds: 1),
         ),
       );
+  }
+}
+
+class _TimelineRail extends StatelessWidget {
+  const _TimelineRail({required this.color, required this.isLast});
+
+  final Color color;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 30,
+      child: Stack(
+        alignment: Alignment.topCenter,
+        children: [
+          Positioned.fill(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Container(
+                width: 1.4,
+                margin: const EdgeInsets.only(top: 14),
+                color: isLast
+                    ? Colors.transparent
+                    : AppColors.muted.withAlpha(26),
+              ),
+            ),
+          ),
+          Container(
+            width: 16,
+            height: 16,
+            margin: const EdgeInsets.only(top: 2),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              shape: BoxShape.circle,
+              border: Border.all(color: color.withAlpha(50), width: 1.4),
+            ),
+            child: Center(
+              child: Container(
+                width: 5,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: color.withAlpha(200),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineGap extends StatelessWidget {
+  const _TimelineGap(this.gap);
+
+  final Duration gap;
+
+  @override
+  Widget build(BuildContext context) {
+    final height = _gapHeightForDuration(gap);
+    if (height <= 0) return const SizedBox.shrink();
+
+    return SizedBox(
+      height: height,
+      child: Row(
+        children: [
+          const Expanded(child: SizedBox.shrink()),
+          SizedBox(
+            width: 30,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  width: 1.4,
+                  height: height,
+                  color: AppColors.muted.withAlpha(18),
+                ),
+              ],
+            ),
+          ),
+          const Expanded(child: SizedBox.shrink()),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineEventCard extends StatelessWidget {
+  const _TimelineEventCard({
+    required this.event,
+    required this.color,
+    required this.theme,
+    required this.onEdit,
+  });
+
+  final TimelineEvent event;
+  final Color color;
+  final ThemeData theme;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasDetails = event.description.isNotEmpty || event.tags.isNotEmpty;
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 72),
+      child: Container(
+        width: double.infinity,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withAlpha(70),
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: AppColors.softShadow,
+              blurRadius: 16,
+              offset: Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: Container(width: 4, color: color.withAlpha(190)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.sm,
+                AppSpacing.xs,
+                AppSpacing.xs,
+                AppSpacing.xs,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          '${_formatTime(event.timestamp)} · ${_labelForType(event.type)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: color,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.xxs),
+                      SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: IconButton(
+                          key: ValueKey('edit-${event.id}'),
+                          tooltip: '修改',
+                          onPressed: onEdit,
+                          icon: const Icon(Icons.edit_rounded),
+                          iconSize: 15,
+                          visualDensity: VisualDensity.compact,
+                          color: AppColors.muted,
+                          padding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Padding(
+                    padding: EdgeInsets.only(top: hasDetails ? 2 : 0),
+                    child: Text(
+                      event.title,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        height: 1.28,
+                      ),
+                    ),
+                  ),
+                  if (event.description.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.xxs),
+                      child: Text(
+                        event.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: AppColors.muted,
+                          fontSize: 12,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  if (event.tags.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.xxs),
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 0,
+                        children: event.tags
+                            .map(
+                              (tag) => Text(
+                                '#$tag',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: color.withAlpha(160),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -906,3 +1049,14 @@ Color _colorForType(String type) => switch (type) {
   'mood' => const Color(0xFFD5952F),
   _ => AppColors.muted,
 };
+
+double _gapHeightForDuration(Duration gap) {
+  final minutes = gap.inMinutes;
+  if (minutes <= 0) return 0;
+  if (minutes < 10) return 22;
+  if (minutes < 30) return 34;
+  if (minutes < 60) return 48;
+  if (minutes < 120) return 72;
+  if (minutes < 240) return 100;
+  return 132;
+}

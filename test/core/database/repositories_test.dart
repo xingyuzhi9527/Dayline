@@ -53,6 +53,22 @@ void main() {
     expect(todayRecords.single['content'], 'Morning note');
   });
 
+  test('creates a record with an explicit created_at timestamp', () async {
+    final today = DateTime(2026, 4, 30, 9);
+    final createdAt = DateTime(2026, 4, 30, 8, 5);
+
+    final recordId = await recordsRepository.create(
+      date: today,
+      type: 'memo',
+      content: 'Morning note',
+      createdAt: createdAt,
+    );
+
+    final record = await recordsRepository.findById(recordId);
+
+    expect(record?['created_at'], timestamp(createdAt));
+  });
+
   test('creates, completes, and deletes a todo', () async {
     final today = DateTime(2026, 4, 30);
 
