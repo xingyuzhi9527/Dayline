@@ -1,4 +1,4 @@
-import 'package:dayline_app/core/stt/stt_text_post_processor.dart';
+import 'package:liflow_app/core/stt/stt_text_post_processor.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

@@ -1,5 +1,5 @@
-import 'package:dayline_app/core/database/local_database.dart';
-import 'package:dayline_app/core/database/repositories.dart';
+import 'package:liflow_app/core/database/local_database.dart';
+import 'package:liflow_app/core/database/repositories.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 

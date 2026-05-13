@@ -1,10 +1,11 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../../../core/theme/app_colors.dart';
 
-class AudioWaveform extends StatelessWidget {
+class AudioWaveform extends StatefulWidget {
   const AudioWaveform({
     required this.level,
     required this.active,
@@ -15,14 +16,69 @@ class AudioWaveform extends StatelessWidget {
   final bool active;
 
   @override
+  State<AudioWaveform> createState() => _AudioWaveformState();
+}
+
+class _AudioWaveformState extends State<AudioWaveform>
+    with SingleTickerProviderStateMixin {
+  late Ticker _ticker;
+  double _smoothLevel = 0;
+  double _targetLevel = 0;
+  bool _active = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker(_tick);
+    _targetLevel = widget.level;
+    _active = widget.active;
+    _smoothLevel = _targetLevel;
+    if (_active) _ticker.start();
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant AudioWaveform oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _targetLevel = widget.level;
+    if (widget.active != _active) {
+      _active = widget.active;
+      if (_active) {
+        _ticker.start();
+      } else {
+        _ticker.stop();
+        _smoothLevel = 0;
+      }
+    }
+  }
+
+  void _tick(Duration elapsed) {
+    final delta = _targetLevel - _smoothLevel;
+    if (delta.abs() < 0.005) {
+      _smoothLevel = _targetLevel;
+      return;
+    }
+    setState(() {
+      _smoothLevel += delta * 0.18;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: 220,
       height: 36,
-      child: CustomPaint(
-        painter: _AudioWaveformPainter(
-          level: level.clamp(0.0, 1.0).toDouble(),
-          active: active,
+      child: RepaintBoundary(
+        child: CustomPaint(
+          painter: _AudioWaveformPainter(
+            level: _smoothLevel.clamp(0.0, 1.0).toDouble(),
+            active: _active,
+          ),
         ),
       ),
     );

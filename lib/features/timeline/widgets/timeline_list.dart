@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/database/repository_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../long_note/long_note_editor_page.dart';
+import '../../long_note/long_note_reader_page.dart';
 import '../timeline_providers.dart';
 
 extension _AsyncValueX<T> on AsyncValue<T> {
@@ -54,6 +57,8 @@ class TimelineDateBar extends ConsumerWidget {
             children: [
               Text('时间线', style: theme.textTheme.headlineMedium),
               const Spacer(),
+              _TrashButton(),
+              const SizedBox(width: AppSpacing.xs),
               if (!isToday)
                 TextButton(
                   onPressed: notifier.goToToday,
@@ -172,12 +177,16 @@ class _TimelineTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final color = _colorForType(event.type);
-    final isTodo = event.source == TimelineEventSource.todo;
+    final isRight = event.source == TimelineEventSource.todo ||
+        event.type == 'long_note';
     final theme = Theme.of(context);
     final card = _TimelineEventCard(
       event: event,
       color: color,
       theme: theme,
+      onTap: event.type == 'long_note'
+          ? () => _openReader(context, ref)
+          : null,
       onEdit: () => _openEditor(context, ref),
     );
 
@@ -195,7 +204,7 @@ class _TimelineTile extends ConsumerWidget {
                       left: AppSpacing.sm,
                       right: AppSpacing.md,
                     ),
-                    child: isTodo
+                    child: isRight
                         ? const SizedBox.shrink()
                         : Align(
                             alignment: Alignment.topRight,
@@ -213,7 +222,7 @@ class _TimelineTile extends ConsumerWidget {
                       left: AppSpacing.md,
                       right: AppSpacing.sm,
                     ),
-                    child: isTodo
+                    child: isRight
                         ? Align(
                             alignment: Alignment.topLeft,
                             child: KeyedSubtree(
@@ -234,7 +243,95 @@ class _TimelineTile extends ConsumerWidget {
     );
   }
 
+  Future<void> _openReader(BuildContext context, WidgetRef ref) async {
+    final rawMeta = event.data['metadata'];
+    Map<String, Object?>? meta;
+    if (rawMeta is String) {
+      try { meta = Map<String, Object?>.from(jsonDecode(rawMeta)); } catch (_) {}
+    } else if (rawMeta is Map) {
+      meta = Map<String, Object?>.from(rawMeta);
+    }
+    final path = meta?['path'] as String?;
+    final file = path != null ? File(path) : null;
+    var body = '';
+    if (file != null && await file.exists()) {
+      final raw = await file.readAsString();
+      final start = raw.indexOf('---\n');
+      if (start == 0) {
+        final end = raw.indexOf('\n---\n', start + 4);
+        if (end != -1) body = raw.substring(end + 5).trim();
+      }
+      final firstNewline = body.indexOf('\n');
+      if (body.startsWith('# ') && firstNewline != -1) {
+        body = body.substring(firstNewline + 1).trim();
+      }
+    }
+    if (!context.mounted) return;
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => LongNoteReaderPage(
+          title: event.title,
+          filePath: path ?? '',
+          body: body,
+          recordId: event.sourceId,
+        ),
+      ),
+    );
+    if (saved == true && context.mounted) {
+      ref.invalidate(timelineEventsProvider);
+    }
+  }
+
   Future<void> _openEditor(BuildContext context, WidgetRef ref) async {
+    if (event.type == 'long_note') {
+      Map<String, Object?>? meta;
+      final rawMeta = event.data['metadata'];
+      if (rawMeta is String) {
+        try { meta = Map<String, Object?>.from(jsonDecode(rawMeta)); } catch (_) {}
+      } else if (rawMeta is Map) {
+        meta = Map<String, Object?>.from(rawMeta as Map);
+      }
+      final path = meta?['path'] as String?;
+      final file = path != null ? File(path) : null;
+      var body = '';
+      if (file != null && await file.exists()) {
+        final raw = await file.readAsString();
+        // Strip YAML front matter
+        final start = raw.indexOf('---\n');
+        if (start == 0) {
+          final end = raw.indexOf('\n---\n', start + 4);
+          if (end != -1) {
+            body = raw.substring(end + 5).trim();
+          } else {
+            body = raw;
+          }
+        } else {
+          body = raw;
+        }
+        // Strip leading "# Title" line
+        final firstNewline = body.indexOf('\n');
+        if (body.startsWith('# ') && firstNewline != -1) {
+          body = body.substring(firstNewline + 1).trim();
+        }
+      }
+      if (!context.mounted) return;
+      final saved = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => LongNoteEditorPage(
+            initialTitle: event.title,
+            initialBody: body,
+            existingPath: path,
+            recordId: event.sourceId,
+          ),
+        ),
+      );
+      if (saved == true && context.mounted) {
+        ref.invalidate(timelineEventsProvider);
+      }
+      return;
+    }
+
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -347,19 +444,21 @@ class _TimelineEventCard extends StatelessWidget {
     required this.event,
     required this.color,
     required this.theme,
+    this.onTap,
     required this.onEdit,
   });
 
   final TimelineEvent event;
   final Color color;
   final ThemeData theme;
+  final VoidCallback? onTap;
   final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
     final hasDetails = event.description.isNotEmpty || event.tags.isNotEmpty;
 
-    return ConstrainedBox(
+    final card = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 72),
       child: Container(
         width: double.infinity,
@@ -431,6 +530,8 @@ class _TimelineEventCard extends StatelessWidget {
                     padding: EdgeInsets.only(top: hasDetails ? 2 : 0),
                     child: Text(
                       event.title,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w600,
                         height: 1.28,
@@ -478,6 +579,15 @@ class _TimelineEventCard extends StatelessWidget {
         ),
       ),
     );
+
+    if (onTap != null) {
+      return GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: card,
+      );
+    }
+    return card;
   }
 }
 
@@ -636,6 +746,21 @@ class _TimelineEventEditSheetState
                         child: const Text('取消'),
                       ),
                     ),
+                    if (widget.event.source == TimelineEventSource.record) ...[
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _saving ? null : _deleteRecord,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.accent,
+                            side: const BorderSide(color: AppColors.accent),
+                          ),
+                          icon: const Icon(Icons.delete_outline_rounded,
+                              size: 18),
+                          label: const Text('删除'),
+                        ),
+                      ),
+                    ],
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: FilledButton.icon(
@@ -672,7 +797,6 @@ class _TimelineEventEditSheetState
           minLines: 2,
           maxLines: 4,
         ),
-        _textField(controller: _timeController, label: '时间'),
         _textField(controller: _tagsController, label: '标签'),
       ],
       TimelineEventSource.todo => [
@@ -765,6 +889,7 @@ class _TimelineEventEditSheetState
     int minLines = 1,
     int maxLines = 1,
   }) {
+    final isMultiline = maxLines > 1;
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: TextField(
@@ -773,6 +898,9 @@ class _TimelineEventEditSheetState
         keyboardType: keyboardType,
         minLines: minLines,
         maxLines: maxLines,
+        textInputAction: isMultiline
+            ? TextInputAction.newline
+            : TextInputAction.done,
         decoration: InputDecoration(labelText: label),
       ),
     );
@@ -791,6 +919,25 @@ class _TimelineEventEditSheetState
     );
   }
 
+  Future<void> _deleteRecord() async {
+    setState(() {
+      _saving = true;
+      _errorText = null;
+    });
+    try {
+      await ref
+          .read(recordsRepositoryProvider)
+          .softDelete(widget.event.sourceId);
+      ref.read(dataVersionProvider.notifier).increment();
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      setState(() {
+        _saving = false;
+        _errorText = '删除失败：$e';
+      });
+    }
+  }
+
   Future<void> _save() async {
     setState(() {
       _saving = true;
@@ -807,7 +954,6 @@ class _TimelineEventEditSheetState
               .updateDetails(
                 widget.event.sourceId,
                 content: content,
-                time: _optionalText(_timeController),
                 tags: _parseTagInput(_tagsController.text),
                 metadata: _decodeMetadata(widget.event.data['metadata']),
               );
@@ -1028,6 +1174,7 @@ List<String> _parseTagInput(String raw) {
 
 String _labelForType(String type) => switch (type) {
   'memo' => '备忘',
+  'long_note' => '长笔记',
   'todo' => '待办',
   'tracker' => '打卡',
   'focus' => '专注',
@@ -1040,6 +1187,7 @@ String _labelForType(String type) => switch (type) {
 
 Color _colorForType(String type) => switch (type) {
   'memo' => AppColors.primary,
+  'long_note' => const Color(0xFF2E7D32),
   'todo' => const Color(0xFF4A90D9),
   'tracker' => const Color(0xFF7CB342),
   'focus' => const Color(0xFFE67E22),
@@ -1049,6 +1197,155 @@ Color _colorForType(String type) => switch (type) {
   'mood' => const Color(0xFFD5952F),
   _ => AppColors.muted,
 };
+
+class _TrashButton extends ConsumerWidget {
+  const _TrashButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final deletedAsync = ref.watch(deletedRecordsProvider);
+    final count = deletedAsync.valueOrNull?.length ?? 0;
+
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      tooltip: '回收站',
+      onPressed: () => _showTrashSheet(context, ref),
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Icon(
+            Icons.delete_outline_rounded,
+            size: 22,
+            color: count > 0
+                ? AppColors.accent.withAlpha(180)
+                : AppColors.muted.withAlpha(120),
+          ),
+          if (count > 0)
+            Positioned(
+              right: -4,
+              top: -2,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                decoration: BoxDecoration(
+                  color: AppColors.accent,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$count',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showTrashSheet(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        final deletedAsync = ref.watch(deletedRecordsProvider);
+        return deletedAsync.when(
+          data: (deleted) {
+            if (deleted.isEmpty) {
+              return const SizedBox(
+                height: 120,
+                child: Center(
+                  child: Text('回收站是空的', style: TextStyle(color: AppColors.muted)),
+                ),
+              );
+            }
+            return SizedBox(
+              height: 320,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.delete_outline_rounded, size: 18, color: AppColors.accent),
+                        const SizedBox(width: AppSpacing.xs),
+                        Text('回收站 (${deleted.length})',
+                            style: Theme.of(context).textTheme.titleSmall),
+                        const Spacer(),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                          onPressed: () => Navigator.of(ctx).pop(),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                      itemCount: deleted.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (ctx, i) {
+                        final row = deleted[i];
+                        final content = row['content'] as String? ?? '';
+                        final id = row['id'] as int;
+                        return ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            content,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                iconSize: 18,
+                                tooltip: '恢复',
+                                icon: const Icon(Icons.restore_rounded, color: AppColors.tracker),
+                                onPressed: () async {
+                                  await ref.read(recordsRepositoryProvider).restore(id);
+                                  ref.invalidate(deletedRecordsProvider);
+                                  ref.invalidate(timelineEventsProvider);
+                                  ref.read(dataVersionProvider.notifier).increment();
+                                },
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                iconSize: 18,
+                                tooltip: '彻底删除',
+                                icon: Icon(Icons.delete_forever_rounded,
+                                    color: AppColors.accent.withAlpha(180)),
+                                onPressed: () async {
+                                  await ref.read(recordsRepositoryProvider).permanentDelete(id);
+                                  ref.invalidate(deletedRecordsProvider);
+                                  ref.read(dataVersionProvider.notifier).increment();
+                                },
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+          loading: () => const SizedBox(
+            height: 80, child: Center(child: CircularProgressIndicator())),
+          error: (_, __) => const SizedBox(
+            height: 80, child: Center(child: Text('加载失败'))),
+        );
+      },
+    );
+  }
+}
 
 double _gapHeightForDuration(Duration gap) {
   final minutes = gap.inMinutes;

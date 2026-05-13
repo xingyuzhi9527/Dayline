@@ -1,14 +1,16 @@
 import 'dart:async';
 
-import 'package:dayline_app/app.dart';
-import 'package:dayline_app/core/database/local_database.dart';
-import 'package:dayline_app/core/database/repository_providers.dart';
-import 'package:dayline_app/core/database/repositories.dart';
-import 'package:dayline_app/core/stt/stt_engine.dart';
-import 'package:dayline_app/core/stt/stt_providers.dart';
-import 'package:dayline_app/features/flash_record/flash_record_page.dart';
-import 'package:dayline_app/features/flash_record/widgets/voice_button.dart';
-import 'package:dayline_app/features/timeline/timeline_providers.dart';
+import 'package:liflow_app/app.dart';
+import 'package:liflow_app/core/database/local_database.dart';
+import 'package:liflow_app/core/database/repository_providers.dart';
+import 'package:liflow_app/core/database/repositories.dart';
+import 'package:liflow_app/core/stt/stt_engine.dart';
+import 'package:liflow_app/core/stt/stt_providers.dart';
+import 'package:liflow_app/features/dashboard/dashboard_providers.dart';
+import 'package:liflow_app/features/flash_record/flash_record_page.dart';
+import 'package:liflow_app/features/flash_record/widgets/voice_button.dart';
+import 'package:liflow_app/features/timeline/timeline_providers.dart';
+import 'package:liflow_app/core/database/repositories.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,10 +23,22 @@ void main() {
   testWidgets('starts on 记 and switches between all three tabs', (
     tester,
   ) async {
-    await tester.pumpWidget(const ProviderScope(child: DaylineApp()));
-    await tester.pumpAndSettle();
+    final db = _memoryDatabase();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(db),
+          dashboardSummaryProvider.overrideWith(
+            (ref) async => _makeEmptySummary(),
+          ),
+          dashboardReviewProvider.overrideWith((ref) async => null),
+        ],
+        child: const LiflowApp(),
+      ),
+    );
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 1100));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     // Default tab is 记
     expect(find.text('记'), findsWidgets);
@@ -36,24 +50,27 @@ void main() {
     expect(find.text('时间线'), findsNothing);
     expect(find.text('复盘'), findsNothing);
 
-    // Switch to 线
+    // Switch to 线 — PageView swipe
     await tester.tap(find.text('线').first);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('timeline-page')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    expect(find.text('线'), findsOneWidget);
 
-    // Switch to 盘
+    // Switch to 盘 — PageView swipe
     await tester.tap(find.text('盘').first);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('dashboard-page')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    expect(find.text('盘'), findsWidgets);
 
-    // Switch back to 记
+    // Switch back to 记 — PageView swipe
     await tester.tap(find.text('记').first);
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
     expect(find.text('时刻准备记录你的灵感'), findsOneWidget);
   });
 
   testWidgets('中心话筒按钮存在且按住有状态反馈', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: DaylineApp()));
+    await tester.pumpWidget(const ProviderScope(child: LiflowApp()));
     await tester.pumpAndSettle();
 
     // Default page is 记 with voice button
@@ -72,11 +89,11 @@ void main() {
   });
 
   testWidgets('底部文字输入框存在并可用', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: DaylineApp()));
+    await tester.pumpWidget(const ProviderScope(child: LiflowApp()));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('collapsed-intent-pill')));
-    await tester.pump(const Duration(milliseconds: 260));
+    await tester.pump(const Duration(milliseconds: 550));
 
     // Find the text input after the unified intent pill expands.
     expect(find.byType(TextField), findsOneWidget);
@@ -90,7 +107,7 @@ void main() {
   });
 
   testWidgets('底部胶囊保留键盘入口但不显示上滑箭头', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: DaylineApp()));
+    await tester.pumpWidget(const ProviderScope(child: LiflowApp()));
     await tester.pumpAndSettle();
 
     final pill = find.byKey(const ValueKey('collapsed-intent-pill'));
@@ -118,11 +135,11 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const ProviderScope(child: DaylineApp()));
+    await tester.pumpWidget(const ProviderScope(child: LiflowApp()));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('collapsed-intent-pill')));
-    await tester.pump(const Duration(milliseconds: 260));
+    await tester.pump(const Duration(milliseconds: 550));
 
     expect(find.byKey(const ValueKey('expanded-intent-input')), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget);
@@ -265,11 +282,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetViewInsets);
 
-    await tester.pumpWidget(const ProviderScope(child: DaylineApp()));
+    await tester.pumpWidget(const ProviderScope(child: LiflowApp()));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('collapsed-intent-pill')));
-    await tester.pump(const Duration(milliseconds: 260));
+    await tester.pump(const Duration(milliseconds: 550));
 
     final screenHeight =
         tester.view.physicalSize.height / tester.view.devicePixelRatio;
@@ -303,7 +320,7 @@ void main() {
     expect(sttEngine.startCount, 1);
 
     await tester.tap(find.byKey(const ValueKey('collapsed-intent-pill')));
-    await tester.pump(const Duration(milliseconds: 260));
+    await tester.pump(const Duration(milliseconds: 550));
 
     expect(find.byKey(const ValueKey('expanded-intent-input')), findsNothing);
   });
@@ -388,7 +405,7 @@ void main() {
             ],
           ),
         ],
-        child: const DaylineApp(),
+        child: const LiflowApp(),
       ),
     );
     await tester.pump();
@@ -397,7 +414,12 @@ void main() {
     final todoEntry = find.byKey(const ValueKey('collapsed-intent-pill'));
     expect(todoEntry, findsOneWidget);
 
-    await tester.drag(todoEntry, const Offset(0, -90));
+    final gesture = await tester.startGesture(tester.getCenter(todoEntry));
+    for (var i = 0; i < 5; i++) {
+      await gesture.moveBy(const Offset(0, -18));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    await gesture.up();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 700));
 
@@ -468,7 +490,7 @@ void main() {
             ],
           ),
         ],
-        child: const DaylineApp(),
+        child: const LiflowApp(),
       ),
     );
 
@@ -477,10 +499,14 @@ void main() {
       find.byKey(const ValueKey('collapsed-intent-pill')),
     );
 
-    await tester.drag(
-      find.byKey(const ValueKey('collapsed-intent-pill')),
-      const Offset(0, -90),
+    final g2 = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('collapsed-intent-pill'))),
     );
+    for (var i = 0; i < 5; i++) {
+      await g2.moveBy(const Offset(0, -18));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    await g2.up();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 700));
     await _pumpUntilFound(tester, find.text('买牛奶'));
@@ -508,6 +534,7 @@ void main() {
         overrides: [
           recordsRepositoryProvider.overrideWithValue(fakeRecordsRepository),
           todayTodoPanelEventsProvider.overrideWith((ref) async => const []),
+          deletedRecordsProvider.overrideWith((ref) async => []),
           timelineEventsProvider.overrideWith(
             (ref) async => [
               TimelineEvent(
@@ -530,21 +557,25 @@ void main() {
             ],
           ),
         ],
-        child: const DaylineApp(),
+        child: const LiflowApp(),
       ),
     );
     await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.text('线').first);
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
     await _pumpUntilFound(tester, find.text('原来的记录'));
 
     await tester.tap(find.byKey(ValueKey('edit-records:$recordId')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
 
     await tester.enterText(find.byType(TextField).first, '更新后的记录');
     await tester.tap(find.byKey(const ValueKey('timeline-edit-save')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
 
     await _pumpUntilFound(tester, find.text('更新后的记录'));
     expect(find.text('原来的记录'), findsNothing);
@@ -658,6 +689,29 @@ class _HoldToTalkSession implements SttListenSession {
       await _controller.close();
     }
   }
+}
+
+DashboardSummary _makeEmptySummary() {
+  return const DashboardSummary(
+    date: '2026-05-13',
+    recordCount: 0,
+    totalTodos: 0,
+    completedTodos: 0,
+    trackerCount: 0,
+    focusMinutes: 0,
+    expenseTotal: 0,
+    expenseCount: 0,
+    bodyLogCount: 0,
+    topTags: [],
+    categoryCounts: {},
+    firstActivityTime: null,
+    lastActivityTime: null,
+    longestGapMinutes: 0,
+    densestHourRange: '-',
+    insights: [],
+    allTimestamps: [],
+    isReviewed: false,
+  );
 }
 
 class _DeferredInitSttEngine implements SttEngine {

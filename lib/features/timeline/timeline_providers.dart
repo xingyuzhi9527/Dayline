@@ -69,6 +69,13 @@ final timelineDateProvider = NotifierProvider<TimelineDateNotifier, DateTime>(
   TimelineDateNotifier.new,
 );
 
+final deletedRecordsProvider = FutureProvider<List<Map<String, Object?>>>((
+  ref,
+) async {
+  ref.watch(dataVersionProvider);
+  return ref.read(recordsRepositoryProvider).findDeleted();
+});
+
 final timelineEventsProvider = FutureProvider<List<TimelineEvent>>((ref) async {
   final date = ref.watch(timelineDateProvider);
   ref.watch(dataVersionProvider);
@@ -233,6 +240,7 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
 
 IconData _iconForType(String type) => switch (type) {
   'memo' => Icons.notes_rounded,
+  'long_note' => Icons.edit_note_rounded,
   'todo' => Icons.check_circle_outline,
   'tracker' => Icons.check_rounded,
   'focus' => Icons.timer_rounded,

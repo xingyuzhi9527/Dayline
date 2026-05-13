@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'daily_reviews_repository.dart';
 import 'local_database.dart';
 import 'repositories.dart';
 
@@ -37,6 +38,10 @@ final bodyLogsRepositoryProvider = Provider<BodyLogsRepository>((ref) {
 
 final appSettingsRepositoryProvider = Provider<AppSettingsRepository>((ref) {
   return AppSettingsRepository(ref.watch(localDatabaseProvider));
+});
+
+final dailyReviewsRepositoryProvider = Provider<DailyReviewsRepository>((ref) {
+  return DailyReviewsRepository(ref.watch(localDatabaseProvider));
 });
 
 class DataVersionNotifier extends Notifier<int> {

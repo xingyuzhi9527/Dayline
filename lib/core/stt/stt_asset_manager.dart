@@ -77,7 +77,7 @@ class SttAssetManager {
   }
 
   Future<String?> _installBundledArchive(Directory outputDir) async {
-    final tempDir = await Directory.systemTemp.createTemp('dayline-stt-asset-');
+    final tempDir = await Directory.systemTemp.createTemp('liflow-stt-asset-');
     try {
       final bytes = await _assetBytesLoader(bundledArchiveAssetPath);
       final sha256Hex = sha256.convert(bytes).toString();
@@ -115,7 +115,7 @@ class SttAssetManager {
   }
 
   Future<String> _downloadArchive(Directory outputDir) async {
-    final tempDir = await Directory.systemTemp.createTemp('dayline-stt-');
+    final tempDir = await Directory.systemTemp.createTemp('liflow-stt-');
     try {
       final archiveFile = File(p.join(tempDir.path, 'sense_voice.tar.bz2'));
       await SttModelDownloader.download(

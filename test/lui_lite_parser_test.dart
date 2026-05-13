@@ -1,4 +1,4 @@
-import 'package:dayline_app/core/parser/lui_lite_parser.dart';
+import 'package:liflow_app/core/parser/lui_lite_parser.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

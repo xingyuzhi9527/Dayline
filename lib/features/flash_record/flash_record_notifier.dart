@@ -183,7 +183,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   String _friendlySttError(Object error) {
     final message = error.toString();
     if (message.contains('麦克风权限')) {
-      return '麦克风权限未开启，请允许 Dayline 使用麦克风。';
+      return '麦克风权限未开启，请允许 Liflow 使用麦克风。';
     }
     return message;
   }

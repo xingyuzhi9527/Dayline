@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:sqflite/sqflite.dart' as sqflite;
+import 'package:path_provider/path_provider.dart';
 
 import '../../features/review/review_providers.dart';
 import '../database/repositories.dart';
@@ -7,7 +7,9 @@ import '../database/repository_providers.dart';
 import 'export_service.dart';
 
 final exportDirectoryProvider = FutureProvider<String>((ref) async {
-  return sqflite.databaseFactory.getDatabasesPath();
+  final dir = await getExternalStorageDirectory() ??
+      await getApplicationDocumentsDirectory();
+  return dir.path;
 });
 
 Future<String> exportMarkdownToFile(WidgetRef ref, DateTime date) async {
@@ -45,7 +47,7 @@ Future<String> exportMarkdownToFile(WidgetRef ref, DateTime date) async {
   );
 
   final dir = await ref.read(exportDirectoryProvider.future);
-  final filename = 'dayline_$dateStr.md';
+  final filename = 'liflow_$dateStr.md';
   return ExportService.saveFile(md, filename, dir);
 }
 
@@ -87,6 +89,6 @@ Future<String> exportJsonToFile(WidgetRef ref, DateTime date) async {
   );
 
   final dir = await ref.read(exportDirectoryProvider.future);
-  final filename = 'dayline_$dateStr.json';
+  final filename = 'liflow_$dateStr.json';
   return ExportService.saveFile(json, filename, dir);
 }

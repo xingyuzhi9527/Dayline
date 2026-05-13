@@ -1,8 +1,8 @@
-import 'package:dayline_app/core/database/local_database.dart';
-import 'package:dayline_app/core/database/repository_providers.dart';
-import 'package:dayline_app/core/stt/stt_engine.dart';
-import 'package:dayline_app/core/stt/stt_providers.dart';
-import 'package:dayline_app/features/flash_record/flash_record_notifier.dart';
+import 'package:liflow_app/core/database/local_database.dart';
+import 'package:liflow_app/core/database/repository_providers.dart';
+import 'package:liflow_app/core/stt/stt_engine.dart';
+import 'package:liflow_app/core/stt/stt_providers.dart';
+import 'package:liflow_app/features/flash_record/flash_record_notifier.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
