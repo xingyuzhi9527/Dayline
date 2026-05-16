@@ -153,6 +153,7 @@ DashboardSummary _dashboardSummary() => DashboardSummary(
   trackerCount: 2,
   focusMinutes: 45,
   expenseTotal: 20,
+  monthExpenseTotal: 120,
   expenseCount: 1,
   bodyLogCount: 0,
   topTags: ['日常', '健康'],

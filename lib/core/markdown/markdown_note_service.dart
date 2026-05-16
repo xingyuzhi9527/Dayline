@@ -1,27 +1,30 @@
-import 'dart:io';
-
 import 'package:path/path.dart' as p;
 
 import 'markdown_directory_service.dart';
 import 'markdown_filename.dart';
+import 'markdown_storage_service.dart';
 
 class MarkdownNoteService {
-  MarkdownNoteService(this._dirService);
+  MarkdownNoteService(this._dirService)
+    : _storage = MarkdownStorageService(_dirService);
 
   final MarkdownDirectoryService _dirService;
+  final MarkdownStorageService _storage;
 
-  Future<String> saveDailyNote(
-    DateTime date,
-    String markdownContent,
-  ) async {
-    final dir = await _dirService.ensureDailyDir(date);
+  Future<String> saveDailyNote(DateTime date, String markdownContent) async {
     final filename = MarkdownFilename.generate(
       date,
       mode: MarkdownNamingMode.date,
     );
-    final file = File(p.join(dir, filename));
-    await file.writeAsString(markdownContent);
-    return file.path;
+    final relativePath = p.posix.join(
+      'daily',
+      MarkdownFilename.monthDir(date),
+      filename,
+    );
+    return _storage.writeRelativeTextFile(
+      relativePath: relativePath,
+      content: markdownContent,
+    );
   }
 
   Future<String> saveLongNote({
@@ -29,14 +32,11 @@ class MarkdownNoteService {
     required String body,
     required DateTime dateTime,
   }) async {
-    final dir = await _dirService.ensureNotesDir(dateTime);
     final filename = MarkdownFilename.generate(
       dateTime,
       title: title,
       mode: _dirService.namingMode,
     );
-    final file = File(p.join(dir, filename));
-
     final dateStr = _fmtDate(dateTime);
     final timeStr = _fmtTime(dateTime);
     final resolvedTitle = (title != null && title.trim().isNotEmpty)
@@ -49,9 +49,15 @@ class MarkdownNoteService {
       dateTime: dateTime,
     );
     final content = '$front\n# $resolvedTitle\n\n$body\n';
-
-    await file.writeAsString(content);
-    return file.path;
+    final relativePath = p.posix.join(
+      'notes',
+      MarkdownFilename.monthDir(dateTime),
+      filename,
+    );
+    return _storage.writeRelativeTextFile(
+      relativePath: relativePath,
+      content: content,
+    );
   }
 
   String _buildFrontMatter({

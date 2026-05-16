@@ -1,31 +1,67 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app_routes.dart';
+import '../core/database/repository_providers.dart';
+import '../core/markdown/markdown_directory_service.dart';
+import '../core/markdown/markdown_storage_service.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_spacing.dart';
 import '../features/dashboard/dashboard_page.dart';
 import '../features/flash_record/flash_record_page.dart';
+import '../features/markdown_setup/markdown_directory_dialog.dart';
 import '../features/timeline/timeline_page.dart';
+import '../features/timeline/timeline_providers.dart';
 
-class LiflowShell extends StatefulWidget {
+class LiflowShell extends ConsumerStatefulWidget {
   const LiflowShell({required this.navigationShell, super.key});
 
   final StatefulNavigationShell navigationShell;
 
   @override
-  State<LiflowShell> createState() => _LiflowShellState();
+  ConsumerState<LiflowShell> createState() => _LiflowShellState();
 }
 
-class _LiflowShellState extends State<LiflowShell> {
+class _LiflowShellState extends ConsumerState<LiflowShell> {
   late final PageController _pageController;
   var _currentIndex = 1;
+
+  var _onboardingChecked = false;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.navigationShell.currentIndex;
     _pageController = PageController(initialPage: _currentIndex);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkOnboarding());
+  }
+
+  Future<void> _checkOnboarding() async {
+    if (_onboardingChecked) return;
+    _onboardingChecked = true;
+    try {
+      final settings = ref.read(appSettingsRepositoryProvider);
+      final dirService = MarkdownDirectoryService(settings);
+      final treeUri = await dirService.getTreeRootUri();
+      final lostTreeAccess =
+          treeUri != null &&
+          treeUri.isNotEmpty &&
+          !await MarkdownStorageService(dirService).hasTreeAccess(treeUri);
+      final needsAndroidVisibleFolder =
+          Platform.isAndroid && (treeUri == null || treeUri.isEmpty);
+      if (!await dirService.isConfigured() ||
+          needsAndroidVisibleFolder ||
+          lostTreeAccess) {
+        if (!mounted) return;
+        await showMarkdownDirectoryDialog(context, dirService);
+      }
+    } catch (_) {
+      // Keep startup resilient when storage/config providers are unavailable,
+      // such as during lightweight widget tests or transient init failures.
+    }
   }
 
   @override
@@ -45,16 +81,25 @@ class _LiflowShellState extends State<LiflowShell> {
     setState(() => _currentIndex = index);
     _releaseInputFocus();
     widget.navigationShell.goBranch(index);
+    if (index == 0) {
+      ref.read(timelineScrollToLatestSignalProvider.notifier).request();
+    }
   }
 
   void _onNavTapped(int index) {
     if (index == _currentIndex) {
       widget.navigationShell.goBranch(index, initialLocation: true);
+      if (index == 0) {
+        ref.read(timelineScrollToLatestSignalProvider.notifier).request();
+      }
       return;
     }
     setState(() => _currentIndex = index);
     _releaseInputFocus();
     widget.navigationShell.goBranch(index);
+    if (index == 0) {
+      ref.read(timelineScrollToLatestSignalProvider.notifier).request();
+    }
     _fromNavTap = true;
     _pageController.animateToPage(
       index,
@@ -70,6 +115,7 @@ class _LiflowShellState extends State<LiflowShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surface,
       resizeToAvoidBottomInset: false,
       body: PageView(
         controller: _pageController,
@@ -77,10 +123,7 @@ class _LiflowShellState extends State<LiflowShell> {
         physics: const PageScrollPhysics(),
         children: [
           for (var i = 0; i < 3; i++)
-            TickerMode(
-              enabled: i == _currentIndex,
-              child: _pageWidget(i),
-            ),
+            TickerMode(enabled: i == _currentIndex, child: _pageWidget(i)),
         ],
       ),
       bottomNavigationBar: _TripleNavBar(
@@ -98,10 +141,7 @@ class _LiflowShellState extends State<LiflowShell> {
 }
 
 class _TripleNavBar extends StatelessWidget {
-  const _TripleNavBar({
-    required this.currentIndex,
-    required this.onSelected,
-  });
+  const _TripleNavBar({required this.currentIndex, required this.onSelected});
 
   final int currentIndex;
   final ValueChanged<int> onSelected;
@@ -209,8 +249,7 @@ class _NavItem extends StatelessWidget {
                     route.label,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: color.withAlpha(selected ? 255 : 150),
-                      fontWeight:
-                          selected ? FontWeight.w700 : FontWeight.w500,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     ),
                   ),
                 ],

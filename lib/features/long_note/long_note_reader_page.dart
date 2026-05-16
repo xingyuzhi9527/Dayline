@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/database/repository_providers.dart';
+import '../../core/markdown/markdown_directory_service.dart';
+import '../../core/markdown/markdown_document_parser.dart';
+import '../../core/markdown/markdown_storage_service.dart';
 import 'long_note_editor_page.dart';
 import 'widgets/markdown_reader.dart';
 
-class LongNoteReaderPage extends StatelessWidget {
+class LongNoteReaderPage extends ConsumerStatefulWidget {
   const LongNoteReaderPage({
     required this.title,
     required this.filePath,
@@ -18,6 +23,21 @@ class LongNoteReaderPage extends StatelessWidget {
   final int recordId;
 
   @override
+  ConsumerState<LongNoteReaderPage> createState() => _LongNoteReaderPageState();
+}
+
+class _LongNoteReaderPageState extends ConsumerState<LongNoteReaderPage> {
+  late String _title;
+  late String _body;
+
+  @override
+  void initState() {
+    super.initState();
+    _title = widget.title;
+    _body = widget.body;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
@@ -27,18 +47,18 @@ class LongNoteReaderPage extends StatelessWidget {
           icon: const Icon(Icons.close_rounded),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: Text(title, style: theme.textTheme.titleMedium),
+        title: Text(_title, style: theme.textTheme.titleMedium),
         centerTitle: true,
         actions: [
           IconButton(
-            tooltip: '编辑',
+            tooltip: '缂栬緫',
             icon: const Icon(Icons.edit_rounded, size: 20),
             onPressed: () => _openEditor(context),
           ),
         ],
       ),
       body: MarkdownReader(
-        text: body,
+        text: _body,
         onDoubleTap: () => _openEditor(context),
       ),
     );
@@ -49,15 +69,27 @@ class LongNoteReaderPage extends StatelessWidget {
       MaterialPageRoute(
         fullscreenDialog: true,
         builder: (_) => LongNoteEditorPage(
-          initialTitle: title,
-          initialBody: body,
-          existingPath: filePath,
-          recordId: recordId,
+          initialTitle: _title,
+          initialBody: _body,
+          existingPath: widget.filePath,
+          recordId: widget.recordId,
         ),
       ),
     );
-    if (saved == true && context.mounted) {
-      Navigator.of(context).pop(true);
+    if (saved == true && mounted) {
+      await _reloadFromStorage();
     }
+  }
+
+  Future<void> _reloadFromStorage() async {
+    final settings = ref.read(appSettingsRepositoryProvider);
+    final storage = MarkdownStorageService(MarkdownDirectoryService(settings));
+    final raw = await storage.readTextFileLocation(widget.filePath);
+    final parsed = parseMarkdownDocument(raw, fallbackTitle: _title);
+    if (!mounted) return;
+    setState(() {
+      _title = parsed.title.isNotEmpty ? parsed.title : _title;
+      _body = parsed.body;
+    });
   }
 }

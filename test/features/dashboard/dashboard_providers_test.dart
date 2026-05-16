@@ -28,6 +28,7 @@ void main() {
         trackerCount: 0,
         focusMinutes: 0,
         expenseTotal: 0,
+        monthExpenseTotal: 0,
         expenseCount: 0,
         bodyLogCount: 0,
         topTags: [],
@@ -54,6 +55,7 @@ void main() {
         trackerCount: 0,
         focusMinutes: 0,
         expenseTotal: 0,
+        monthExpenseTotal: 0,
         expenseCount: 0,
         bodyLogCount: 0,
         topTags: ['运动'],
@@ -80,6 +82,7 @@ void main() {
         trackerCount: 0,
         focusMinutes: 0,
         expenseTotal: 0,
+        monthExpenseTotal: 0,
         expenseCount: 0,
         bodyLogCount: 0,
         topTags: [],
@@ -98,32 +101,30 @@ void main() {
   });
 
   group('Dashboard providers', () {
-    test('dashboardSummaryProvider returns empty summary when no data', () async {
-      final db = _memoryDatabase();
-      final container = ProviderContainer(
-        overrides: [
-          localDatabaseProvider.overrideWithValue(db),
-        ],
-      );
+    test(
+      'dashboardSummaryProvider returns empty summary when no data',
+      () async {
+        final db = _memoryDatabase();
+        final container = ProviderContainer(
+          overrides: [localDatabaseProvider.overrideWithValue(db)],
+        );
 
-      final summary =
-          await container.read(dashboardSummaryProvider.future);
+        final summary = await container.read(dashboardSummaryProvider.future);
 
-      expect(summary.hasData, isFalse);
-      expect(summary.recordCount, 0);
-      expect(summary.topTags, isEmpty);
-      expect(summary.insights, isEmpty);
-      expect(summary.isReviewed, isFalse);
+        expect(summary.hasData, isFalse);
+        expect(summary.recordCount, 0);
+        expect(summary.topTags, isEmpty);
+        expect(summary.insights, isEmpty);
+        expect(summary.isReviewed, isFalse);
 
-      container.dispose();
-    });
+        container.dispose();
+      },
+    );
 
     test('dashboardSummaryProvider aggregates real data', () async {
       final db = _memoryDatabase();
       final container = ProviderContainer(
-        overrides: [
-          localDatabaseProvider.overrideWithValue(db),
-        ],
+        overrides: [localDatabaseProvider.overrideWithValue(db)],
       );
 
       final now = DateTime.now();
@@ -144,8 +145,7 @@ void main() {
       final todosRepo = container.read(todosRepositoryProvider);
       await todosRepo.create(date: now, title: '交报告');
 
-      final summary =
-          await container.read(dashboardSummaryProvider.future);
+      final summary = await container.read(dashboardSummaryProvider.future);
 
       expect(summary.hasData, isTrue);
       expect(summary.recordCount, 2);
@@ -157,20 +157,20 @@ void main() {
       container.dispose();
     });
 
-    test('dashboardReviewProvider returns null when no review exists', () async {
-      final db = _memoryDatabase();
-      final container = ProviderContainer(
-        overrides: [
-          localDatabaseProvider.overrideWithValue(db),
-        ],
-      );
+    test(
+      'dashboardReviewProvider returns null when no review exists',
+      () async {
+        final db = _memoryDatabase();
+        final container = ProviderContainer(
+          overrides: [localDatabaseProvider.overrideWithValue(db)],
+        );
 
-      final review =
-          await container.read(dashboardReviewProvider.future);
-      expect(review, isNull);
+        final review = await container.read(dashboardReviewProvider.future);
+        expect(review, isNull);
 
-      container.dispose();
-    });
+        container.dispose();
+      },
+    );
 
     test('DailyReviewsRepository upsert creates and updates', () async {
       final db = _memoryDatabase();

@@ -11,13 +11,16 @@ class TimelinePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(dataVersionProvider);
 
-    return SafeArea(
-      child: Column(
-        key: const ValueKey('timeline-page'),
-        children: [
-          const TimelineDateBar(),
-          const Expanded(child: TimelineBody()),
-        ],
+    return Container(
+      color: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        child: Column(
+          key: const ValueKey('timeline-page'),
+          children: [
+            const TimelineDateBar(),
+            const Expanded(child: TimelineBody()),
+          ],
+        ),
       ),
     );
   }

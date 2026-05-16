@@ -30,7 +30,7 @@ class DashboardExpandedView extends StatelessWidget {
     }
 
     return SingleChildScrollView(
-      key: const ValueKey('dashboard-expanded'),
+      key: const PageStorageKey<String>('dashboard-expanded-scroll'),
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.containerMargin,
         AppSpacing.lg,
@@ -94,9 +94,7 @@ class _ExpandedHeader extends StatelessWidget {
         const SizedBox(width: AppSpacing.xs),
         Text(
           summary.date,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: AppColors.muted,
-          ),
+          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
         ),
         const SizedBox(width: AppSpacing.sm),
         _CompactStreakBadge(recordCount: summary.recordCount),
@@ -120,7 +118,10 @@ class _CompactStreakBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: 2),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xs,
+        vertical: 2,
+      ),
       decoration: BoxDecoration(
         color: AppColors.secondaryContainer.withAlpha(64),
         borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
@@ -161,16 +162,25 @@ class _EmptyExpanded extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.auto_awesome_rounded,
-                size: 48, color: AppColors.primary.withAlpha(80)),
+            Icon(
+              Icons.auto_awesome_rounded,
+              size: 48,
+              color: AppColors.primary.withAlpha(80),
+            ),
             const SizedBox(height: AppSpacing.md),
-            Text('今天还没有内容',
-                style: theme.textTheme.titleMedium
-                    ?.copyWith(color: AppColors.primary)),
+            Text(
+              '今天还没有内容',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: AppColors.primary,
+              ),
+            ),
             const SizedBox(height: AppSpacing.sm),
-            Text('先去「记」里留下第一句话。',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: AppColors.muted)),
+            Text(
+              '先去「记」里留下第一句话。',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: AppColors.muted,
+              ),
+            ),
             const SizedBox(height: AppSpacing.lg),
             OutlinedButton(onPressed: onBack, child: const Text('返回')),
           ],
@@ -205,30 +215,46 @@ class _TodayStatusCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
-            Text(_buildStatusText(),
-                style: theme.textTheme.bodyLarge?.copyWith(height: 1.6)),
+            Text(
+              _buildStatusText(),
+              style: theme.textTheme.bodyLarge?.copyWith(height: 1.6),
+            ),
             const SizedBox(height: AppSpacing.md),
             Row(
               children: [
                 _StatTile(
-                    icon: Icons.notes_rounded,
-                    label: '记录',
-                    value: '${summary.recordCount}'),
+                  icon: Icons.notes_rounded,
+                  label: '记录',
+                  value: '${summary.recordCount}',
+                ),
                 const SizedBox(width: AppSpacing.xs),
                 _StatTile(
-                    icon: Icons.check_circle_outline,
-                    label: '待办',
-                    value: '${summary.completedTodos}/${summary.totalTodos}'),
+                  icon: Icons.check_circle_outline,
+                  label: '待办',
+                  value: '${summary.completedTodos}/${summary.totalTodos}',
+                ),
                 const SizedBox(width: AppSpacing.xs),
                 _StatTile(
-                    icon: Icons.timer_rounded,
-                    label: '专注',
-                    value: '${summary.focusMinutes}min'),
+                  icon: Icons.timer_rounded,
+                  label: '专注',
+                  value: '${summary.focusMinutes}min',
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Row(
+              children: [
+                _StatTile(
+                  icon: Icons.payments_rounded,
+                  label: '日消费',
+                  value: '¥${summary.expenseTotal.toStringAsFixed(1)}',
+                ),
                 const SizedBox(width: AppSpacing.xs),
                 _StatTile(
-                    icon: Icons.payments_rounded,
-                    label: '消费',
-                    value: '¥${summary.expenseTotal.toStringAsFixed(0)}'),
+                  icon: Icons.calendar_month_rounded,
+                  label: '月消费',
+                  value: '¥${summary.monthExpenseTotal.toStringAsFixed(1)}',
+                ),
               ],
             ),
           ],
@@ -241,8 +267,7 @@ class _TodayStatusCard extends StatelessWidget {
     final buf = StringBuffer();
     buf.write('今天留下了 ${summary.recordCount} 条记录');
     if (summary.totalTodos > 0) {
-      buf.write(
-          '，完成 ${summary.completedTodos}/${summary.totalTodos} 个待办');
+      buf.write('，完成 ${summary.completedTodos}/${summary.totalTodos} 个待办');
     }
     if (summary.focusMinutes > 0) {
       buf.write('，专注 ${summary.focusMinutes} 分钟');
@@ -277,7 +302,9 @@ class _StatTile extends StatelessWidget {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(
-            vertical: AppSpacing.xs, horizontal: AppSpacing.sm),
+          vertical: AppSpacing.xs,
+          horizontal: AppSpacing.sm,
+        ),
         decoration: BoxDecoration(
           color: AppColors.surfaceLow.withAlpha(120),
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
@@ -286,12 +313,18 @@ class _StatTile extends StatelessWidget {
           children: [
             Icon(icon, size: 18, color: AppColors.primary.withAlpha(180)),
             const SizedBox(height: AppSpacing.xxs),
-            Text(value,
-                style: theme.textTheme.labelLarge
-                    ?.copyWith(color: AppColors.primary)),
-            Text(label,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: AppColors.muted)),
+            Text(
+              value,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: AppColors.primary,
+              ),
+            ),
+            Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppColors.muted,
+              ),
+            ),
           ],
         ),
       ),
@@ -371,7 +404,8 @@ class _DayRhythmBar extends StatelessWidget {
               decoration: BoxDecoration(
                 color: count > 0
                     ? AppColors.primary.withAlpha(
-                        (60 + (intensity * 195).round()).clamp(60, 255))
+                        (60 + (intensity * 195).round()).clamp(60, 255),
+                      )
                     : AppColors.border.withAlpha(100),
                 borderRadius: BorderRadius.circular(2),
               ),
@@ -400,11 +434,14 @@ class _RhythmLabel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted)),
-        Text(value,
-            style: theme.textTheme.labelLarge
-                ?.copyWith(color: AppColors.primary)),
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+        ),
+        Text(
+          value,
+          style: theme.textTheme.labelLarge?.copyWith(color: AppColors.primary),
+        ),
       ],
     );
   }
@@ -426,8 +463,7 @@ class _CompositionCapsules extends StatelessWidget {
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
-          child: Text('暂无分类数据',
-              style: TextStyle(color: AppColors.muted)),
+          child: Text('暂无分类数据', style: TextStyle(color: AppColors.muted)),
         ),
       );
     }
@@ -469,8 +505,10 @@ class _TodayInsights extends StatelessWidget {
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
-          child: Text('多记录几条，就能看到今日洞察。',
-              style: TextStyle(color: AppColors.muted)),
+          child: Text(
+            '多记录几条，就能看到今日洞察。',
+            style: TextStyle(color: AppColors.muted),
+          ),
         ),
       );
     }
@@ -487,13 +525,19 @@ class _TodayInsights extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.lightbulb_outline_rounded,
-                        size: 16, color: AppColors.body),
+                    Icon(
+                      Icons.lightbulb_outline_rounded,
+                      size: 16,
+                      color: AppColors.body,
+                    ),
                     const SizedBox(width: AppSpacing.xs),
                     Expanded(
-                      child: Text(insight,
-                          style: theme.textTheme.bodyMedium
-                              ?.copyWith(height: 1.5)),
+                      child: Text(
+                        insight,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          height: 1.5,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -546,7 +590,9 @@ class _EveningReviewInputState extends ConsumerState<_EveningReviewInput> {
     setState(() => _saving = true);
     try {
       final today = DateTime.now();
-      await ref.read(dailyReviewsRepositoryProvider).upsert(
+      await ref
+          .read(dailyReviewsRepositoryProvider)
+          .upsert(
             date: dateKey(today),
             kept: _keptController.text.trim(),
             adjust: _adjustController.text.trim(),
@@ -667,9 +713,12 @@ class _ReviewField extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(question,
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w500)),
+              Text(
+                question,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
               const SizedBox(height: 4),
               TextField(
                 controller: controller,
@@ -724,23 +773,30 @@ class _GenerateNoteSection extends ConsumerWidget {
           children: [
             Row(
               children: [
-                Text('生成今日笔记',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w600)),
+                Text(
+                  '生成今日笔记',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const Spacer(),
                 if (summary.isReviewed)
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.xs, vertical: 2),
+                      horizontal: AppSpacing.xs,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.tracker.withAlpha(20),
-                      borderRadius:
-                          BorderRadius.circular(AppSpacing.radiusSm),
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
                     ),
-                    child: Text('已复盘',
-                        style: theme.textTheme.labelSmall
-                            ?.copyWith(color: AppColors.tracker)),
+                    child: Text(
+                      '已复盘',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: AppColors.tracker,
+                      ),
+                    ),
                   ),
               ],
             ),
@@ -750,8 +806,7 @@ class _GenerateNoteSection extends ConsumerWidget {
               child: FilledButton.icon(
                 onPressed: () => _generateMarkdown(context, ref),
                 icon: const Icon(Icons.description_outlined, size: 18),
-                label:
-                    Text(summary.isReviewed ? '生成今日笔记' : '生成草稿'),
+                label: Text(summary.isReviewed ? '生成今日笔记' : '生成草稿'),
               ),
             ),
           ],
@@ -761,16 +816,17 @@ class _GenerateNoteSection extends ConsumerWidget {
   }
 
   Future<void> _generateMarkdown(BuildContext context, WidgetRef ref) async {
+    final scaffold = ScaffoldMessenger.of(context);
     final settings = ref.read(appSettingsRepositoryProvider);
     final dirService = MarkdownDirectoryService(settings);
     if (!await dirService.isConfigured()) {
       if (!context.mounted) return;
       final configured = await showMarkdownDirectoryDialog(context, dirService);
       if (!configured) return;
+      if (!context.mounted) return;
     }
 
     try {
-      final scaffold = ScaffoldMessenger.of(context);
       scaffold.showSnackBar(
         const SnackBar(
           content: Text('正在生成…'),
@@ -782,9 +838,10 @@ class _GenerateNoteSection extends ConsumerWidget {
       final path = await _exportDashboardMarkdown(ref);
       if (!context.mounted) return;
 
-      final displayPath = path.contains('LiflowNotes')
-          ? 'LiflowNotes/${path.split('LiflowNotes/').last}'
-          : path;
+      final normalizedPath = path.replaceAll('\\', '/');
+      final displayPath = normalizedPath.contains('Liflow/')
+          ? 'Liflow/${normalizedPath.split('Liflow/').last}'
+          : normalizedPath;
       scaffold
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -840,7 +897,8 @@ class _GenerateNoteSection extends ConsumerWidget {
     statusBuf.write('今天留下了 ${summary.recordCount} 条记录');
     if (summary.totalTodos > 0) {
       statusBuf.write(
-          '，完成 ${summary.completedTodos}/${summary.totalTodos} 个待办');
+        '，完成 ${summary.completedTodos}/${summary.totalTodos} 个待办',
+      );
     }
     if (summary.focusMinutes > 0) {
       statusBuf.write('，专注 ${summary.focusMinutes} 分钟');
@@ -936,9 +994,13 @@ class _DividerLabel extends StatelessWidget {
     final theme = Theme.of(context);
     return Row(
       children: [
-        Text(label,
-            style: theme.textTheme.titleSmall?.copyWith(
-                color: AppColors.primary, fontWeight: FontWeight.w600)),
+        Text(
+          label,
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: AppColors.primary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(width: AppSpacing.sm),
         const Expanded(child: Divider()),
       ],

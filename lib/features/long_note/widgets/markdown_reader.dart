@@ -4,18 +4,14 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 
 class MarkdownReader extends StatelessWidget {
-  const MarkdownReader({
-    required this.text,
-    this.onDoubleTap,
-    super.key,
-  });
+  const MarkdownReader({required this.text, this.onDoubleTap, super.key});
 
   final String text;
   final VoidCallback? onDoubleTap;
 
   @override
   Widget build(BuildContext context) {
-    final blocks = _parseBlocks(text);
+    final blocks = _MarkdownBlockParser(text).parse();
     return GestureDetector(
       onDoubleTap: onDoubleTap,
       child: ListView.builder(
@@ -32,10 +28,14 @@ class MarkdownReader extends StatelessWidget {
     switch (block.type) {
       case _MdType.h1:
         return Padding(
-          padding: const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.xs),
-          child: Text(
+          padding: const EdgeInsets.only(
+            top: AppSpacing.md,
+            bottom: AppSpacing.xs,
+          ),
+          child: _renderInline(
+            context,
             block.content,
-            style: theme.textTheme.headlineMedium?.copyWith(
+            baseStyle: theme.textTheme.headlineMedium?.copyWith(
               fontWeight: FontWeight.w700,
               color: AppColors.primary,
             ),
@@ -43,18 +43,30 @@ class MarkdownReader extends StatelessWidget {
         );
       case _MdType.h2:
         return Padding(
-          padding: const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.xxs),
-          child: Text(
+          padding: const EdgeInsets.only(
+            top: AppSpacing.md,
+            bottom: AppSpacing.xxs,
+          ),
+          child: _renderInline(
+            context,
             block.content,
-            style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+            baseStyle: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
           ),
         );
       case _MdType.h3:
         return Padding(
-          padding: const EdgeInsets.only(top: AppSpacing.sm, bottom: AppSpacing.xxs),
-          child: Text(
+          padding: const EdgeInsets.only(
+            top: AppSpacing.sm,
+            bottom: AppSpacing.xxs,
+          ),
+          child: _renderInline(
+            context,
             block.content,
-            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            baseStyle: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
           ),
         );
       case _MdType.quote:
@@ -62,11 +74,17 @@ class MarkdownReader extends StatelessWidget {
           margin: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
           padding: const EdgeInsets.only(left: AppSpacing.sm),
           decoration: BoxDecoration(
-            border: Border(left: BorderSide(color: AppColors.primary.withAlpha(100), width: 3)),
+            border: Border(
+              left: BorderSide(
+                color: AppColors.primary.withAlpha(100),
+                width: 3,
+              ),
+            ),
           ),
-          child: Text(
+          child: _renderInline(
+            context,
             block.content,
-            style: theme.textTheme.bodyMedium?.copyWith(
+            baseStyle: theme.textTheme.bodyMedium?.copyWith(
               color: AppColors.muted,
               fontStyle: FontStyle.italic,
             ),
@@ -81,72 +99,94 @@ class MarkdownReader extends StatelessWidget {
             color: AppColors.surfaceLow,
             borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
           ),
-          child: Text(
-            block.content,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 13,
-              height: 1.5,
-            ),
-          ),
-        );
-      case _MdType.listItem:
-        return Padding(
-          padding: const EdgeInsets.only(left: AppSpacing.sm, top: 2, bottom: 2),
-          child: Row(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('• ', style: TextStyle(fontSize: 14)),
-              Expanded(child: _renderInline(block.content, theme)),
+              if (block.meta != null && block.meta!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                  child: Text(
+                    block.meta!,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: AppColors.muted,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              SelectableText(
+                block.content,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  height: 1.5,
+                ),
+              ),
             ],
+          ),
+        );
+      case _MdType.bullet:
+        return _ListRow(
+          leading: const Text('•', style: TextStyle(fontSize: 14)),
+          child: _renderInline(context, block.content),
+        );
+      case _MdType.ordered:
+        return _ListRow(
+          leading: Text(
+            block.meta ?? '1.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          child: _renderInline(context, block.content),
+        );
+      case _MdType.task:
+        final checked = block.meta == 'checked';
+        return _ListRow(
+          leading: Icon(
+            checked ? Icons.check_box_rounded : Icons.check_box_outline_blank,
+            size: 18,
+            color: checked ? AppColors.primary : AppColors.muted,
+          ),
+          child: _renderInline(
+            context,
+            block.content,
+            baseStyle: theme.textTheme.bodyLarge?.copyWith(
+              height: 1.7,
+              decoration: checked ? TextDecoration.lineThrough : null,
+              color: checked ? AppColors.muted : null,
+            ),
           ),
         );
       case _MdType.table:
         return _renderTable(context, block);
+      case _MdType.rule:
+        return const Padding(
+          padding: EdgeInsets.symmetric(vertical: AppSpacing.sm),
+          child: Divider(height: 1),
+        );
       case _MdType.paragraph:
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
-          child: _renderInline(block.content, theme),
+          child: _renderInline(context, block.content),
         );
     }
   }
 
-  Widget _renderInline(String text, ThemeData theme) {
-    final spans = <InlineSpan>[];
-    final regex = RegExp(r'(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)');
-    var lastEnd = 0;
+  Widget _renderInline(
+    BuildContext context,
+    String text, {
+    TextStyle? baseStyle,
+  }) {
+    final theme = Theme.of(context);
+    final effectiveStyle =
+        baseStyle ?? theme.textTheme.bodyLarge?.copyWith(height: 1.7);
+    final spans = _MarkdownInlineParser(
+      text,
+      effectiveStyle ?? const TextStyle(),
+    ).parse();
 
-    for (final match in regex.allMatches(text)) {
-      if (match.start > lastEnd) {
-        spans.add(TextSpan(text: text.substring(lastEnd, match.start)));
-      }
-      if (match.group(2) != null) {
-        spans.add(TextSpan(
-          text: match.group(2),
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ));
-      } else if (match.group(3) != null) {
-        spans.add(TextSpan(
-          text: match.group(3),
-          style: const TextStyle(fontStyle: FontStyle.italic),
-        ));
-      } else if (match.group(4) != null) {
-        spans.add(TextSpan(
-          text: match.group(4),
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-        ));
-      }
-      lastEnd = match.end;
-    }
-    if (lastEnd < text.length) {
-      spans.add(TextSpan(text: text.substring(lastEnd)));
-    }
-
-    return RichText(
-      text: TextSpan(
-        style: theme.textTheme.bodyLarge?.copyWith(height: 1.7),
-        children: spans,
-      ),
+    return SelectableText.rich(
+      TextSpan(style: effectiveStyle, children: spans),
     );
   }
 
@@ -163,7 +203,10 @@ class MarkdownReader extends StatelessWidget {
       ),
       child: Table(
         border: TableBorder.all(color: AppColors.border.withAlpha(80)),
-        columnWidths: {for (var i = 0; i < rows.first.length; i++) i: const FlexColumnWidth()},
+        columnWidths: {
+          for (var i = 0; i < rows.first.length; i++)
+            i: const FlexColumnWidth(),
+        },
         children: rows.asMap().entries.map((entry) {
           final isHeader = entry.key == 0;
           return TableRow(
@@ -173,7 +216,7 @@ class MarkdownReader extends StatelessWidget {
             children: entry.value.map((cell) {
               return Padding(
                 padding: const EdgeInsets.all(AppSpacing.xs),
-                child: Text(
+                child: SelectableText(
                   cell,
                   style: theme.textTheme.bodySmall?.copyWith(
                     fontWeight: isHeader ? FontWeight.w700 : FontWeight.w400,
@@ -186,105 +229,302 @@ class MarkdownReader extends StatelessWidget {
       ),
     );
   }
+}
 
-  List<_MdBlock> _parseBlocks(String text) {
+class _ListRow extends StatelessWidget {
+  const _ListRow({required this.leading, required this.child});
+
+  final Widget leading;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: AppSpacing.sm, top: 2, bottom: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 24, child: Center(child: leading)),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+}
+
+class _MarkdownBlockParser {
+  _MarkdownBlockParser(this.text);
+
+  final String text;
+
+  List<_MdBlock> parse() {
     final blocks = <_MdBlock>[];
     final lines = text.split('\n');
     var i = 0;
-    var tableActive = false;
-    var tableRows = <List<String>>[];
+    final paragraph = StringBuffer();
+
+    void flushParagraph() {
+      final content = paragraph.toString().trim();
+      if (content.isNotEmpty) {
+        blocks.add(_MdBlock.paragraph(content));
+      }
+      paragraph.clear();
+    }
 
     while (i < lines.length) {
-      var line = lines[i].trim();
+      final rawLine = lines[i];
+      final line = rawLine.trimRight();
+      final trimmed = line.trim();
 
-      if (tableActive) {
-        if (line.startsWith('|') && line.endsWith('|')) {
-          final cells = line
-              .substring(1, line.length - 1)
-              .split('|')
-              .map((c) => c.trim())
-              .toList();
-          tableRows.add(cells);
-          i++;
-          continue;
-        } else {
-          blocks.add(_MdBlock.table(tableRows));
-          tableRows = [];
-          tableActive = false;
-        }
-      }
-
-      if (line.startsWith('|') && line.endsWith('|')) {
-        final cells = line
-            .substring(1, line.length - 1)
-            .split('|')
-            .map((c) => c.trim())
-            .toList();
-        // Check if next line is separator
-        if (i + 1 < lines.length && _isTableSeparator(lines[i + 1].trim())) {
-          tableActive = true;
-          tableRows.add(cells);
-          i += 2; // skip separator
-          continue;
-        }
-      }
-
-      if (line.isEmpty) {
+      if (trimmed.isEmpty) {
+        flushParagraph();
         i++;
         continue;
       }
 
-      if (line.startsWith('### ')) {
-        blocks.add(_MdBlock.h3(line.substring(4)));
-      } else if (line.startsWith('## ')) {
-        blocks.add(_MdBlock.h2(line.substring(3)));
-      } else if (line.startsWith('# ')) {
-        blocks.add(_MdBlock.h1(line.substring(2)));
-      } else if (line.startsWith('> ')) {
-        blocks.add(_MdBlock.quote(line.substring(2)));
-      } else if (line.startsWith('- ') || line.startsWith('* ')) {
-        blocks.add(_MdBlock.listItem(line.substring(2)));
-      } else if (line.startsWith('```')) {
-        final buf = StringBuffer();
+      if (trimmed.startsWith('```')) {
+        flushParagraph();
+        final language = trimmed.substring(3).trim();
+        final buffer = StringBuffer();
         i++;
         while (i < lines.length && !lines[i].trim().startsWith('```')) {
-          buf.writeln(lines[i]);
+          buffer.writeln(lines[i]);
           i++;
         }
-        blocks.add(_MdBlock.code(buf.toString().trim()));
-      } else {
-        blocks.add(_MdBlock.paragraph(line));
+        blocks.add(
+          _MdBlock.code(buffer.toString().trimRight(), meta: language),
+        );
+        i++;
+        continue;
       }
+
+      if (_isTableHeader(trimmed, i, lines)) {
+        flushParagraph();
+        final rows = <List<String>>[_parseTableRow(trimmed)];
+        i += 2;
+        while (i < lines.length) {
+          final candidate = lines[i].trim();
+          if (!candidate.startsWith('|') || !candidate.endsWith('|')) break;
+          rows.add(_parseTableRow(candidate));
+          i++;
+        }
+        blocks.add(_MdBlock.table(rows));
+        continue;
+      }
+
+      final headingMatch = RegExp(r'^(#{1,3})\s+(.+)$').firstMatch(trimmed);
+      if (headingMatch != null) {
+        flushParagraph();
+        final level = headingMatch.group(1)!.length;
+        final content = headingMatch.group(2)!;
+        blocks.add(switch (level) {
+          1 => _MdBlock.h1(content),
+          2 => _MdBlock.h2(content),
+          _ => _MdBlock.h3(content),
+        });
+        i++;
+        continue;
+      }
+
+      if (trimmed.startsWith('> ')) {
+        flushParagraph();
+        blocks.add(_MdBlock.quote(trimmed.substring(2).trim()));
+        i++;
+        continue;
+      }
+
+      final taskMatch = RegExp(
+        r'^[-*]\s+\[( |x|X)\]\s+(.+)$',
+      ).firstMatch(trimmed);
+      if (taskMatch != null) {
+        flushParagraph();
+        blocks.add(
+          _MdBlock.task(
+            taskMatch.group(2)!,
+            checked: taskMatch.group(1)!.toLowerCase() == 'x',
+          ),
+        );
+        i++;
+        continue;
+      }
+
+      final orderedMatch = RegExp(r'^(\d+)\.\s+(.+)$').firstMatch(trimmed);
+      if (orderedMatch != null) {
+        flushParagraph();
+        blocks.add(
+          _MdBlock.ordered(
+            orderedMatch.group(2)!,
+            number: '${orderedMatch.group(1)}.',
+          ),
+        );
+        i++;
+        continue;
+      }
+
+      if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        flushParagraph();
+        blocks.add(_MdBlock.bullet(trimmed.substring(2).trim()));
+        i++;
+        continue;
+      }
+
+      if (RegExp(r'^([-*_])\1{2,}$').hasMatch(trimmed)) {
+        flushParagraph();
+        blocks.add(const _MdBlock.rule());
+        i++;
+        continue;
+      }
+
+      if (paragraph.isNotEmpty) {
+        paragraph.write('\n');
+      }
+      paragraph.write(trimmed);
       i++;
     }
 
-    if (tableActive && tableRows.isNotEmpty) {
-      blocks.add(_MdBlock.table(tableRows));
-    }
-
+    flushParagraph();
     return blocks;
   }
 
-  bool _isTableSeparator(String line) {
-    return RegExp(r'^\|[\s\-:]+\|').hasMatch(line);
+  bool _isTableHeader(String line, int index, List<String> lines) {
+    if (!(line.startsWith('|') && line.endsWith('|'))) return false;
+    if (index + 1 >= lines.length) return false;
+    return RegExp(r'^\|(?:\s*:?-+:?\s*\|)+$').hasMatch(lines[index + 1].trim());
+  }
+
+  List<String> _parseTableRow(String line) {
+    return line
+        .substring(1, line.length - 1)
+        .split('|')
+        .map((cell) => cell.trim())
+        .toList();
   }
 }
 
-enum _MdType { h1, h2, h3, paragraph, quote, code, listItem, table }
+class _MarkdownInlineParser {
+  _MarkdownInlineParser(this.text, this.baseStyle);
+
+  final String text;
+  final TextStyle baseStyle;
+
+  List<InlineSpan> parse() {
+    final spans = <InlineSpan>[];
+    var index = 0;
+
+    while (index < text.length) {
+      final remaining = text.substring(index);
+
+      final linkMatch = RegExp(
+        r'^\[([^\]]+)\]\(([^)]+)\)',
+      ).firstMatch(remaining);
+      if (linkMatch != null) {
+        spans.add(
+          TextSpan(
+            text: linkMatch.group(1),
+            style: baseStyle.copyWith(
+              color: AppColors.primary,
+              decoration: TextDecoration.underline,
+            ),
+          ),
+        );
+        index += linkMatch.group(0)!.length;
+        continue;
+      }
+
+      final boldMatch = RegExp(r'^\*\*(.+?)\*\*').firstMatch(remaining);
+      if (boldMatch != null) {
+        spans.add(
+          TextSpan(
+            text: boldMatch.group(1),
+            style: baseStyle.copyWith(fontWeight: FontWeight.w700),
+          ),
+        );
+        index += boldMatch.group(0)!.length;
+        continue;
+      }
+
+      final inlineCodeMatch = RegExp(r'^`(.+?)`').firstMatch(remaining);
+      if (inlineCodeMatch != null) {
+        spans.add(
+          TextSpan(
+            text: inlineCodeMatch.group(1),
+            style: baseStyle.copyWith(
+              fontFamily: 'monospace',
+              backgroundColor: AppColors.surfaceLow,
+            ),
+          ),
+        );
+        index += inlineCodeMatch.group(0)!.length;
+        continue;
+      }
+
+      final italicMatch = RegExp(r'^\*(.+?)\*').firstMatch(remaining);
+      if (italicMatch != null) {
+        spans.add(
+          TextSpan(
+            text: italicMatch.group(1),
+            style: baseStyle.copyWith(fontStyle: FontStyle.italic),
+          ),
+        );
+        index += italicMatch.group(0)!.length;
+        continue;
+      }
+
+      final strikeMatch = RegExp(r'^~~(.+?)~~').firstMatch(remaining);
+      if (strikeMatch != null) {
+        spans.add(
+          TextSpan(
+            text: strikeMatch.group(1),
+            style: baseStyle.copyWith(decoration: TextDecoration.lineThrough),
+          ),
+        );
+        index += strikeMatch.group(0)!.length;
+        continue;
+      }
+
+      spans.add(TextSpan(text: text[index]));
+      index++;
+    }
+
+    return spans;
+  }
+}
+
+enum _MdType {
+  h1,
+  h2,
+  h3,
+  paragraph,
+  quote,
+  code,
+  bullet,
+  ordered,
+  task,
+  table,
+  rule,
+}
 
 class _MdBlock {
-  _MdBlock(this.type, this.content, [this.rows = const []]);
+  const _MdBlock(this.type, this.content, {this.meta, this.rows = const []});
 
-  _MdBlock.h1(this.content) : type = _MdType.h1, rows = const [];
-  _MdBlock.h2(this.content) : type = _MdType.h2, rows = const [];
-  _MdBlock.h3(this.content) : type = _MdType.h3, rows = const [];
-  _MdBlock.quote(this.content) : type = _MdType.quote, rows = const [];
-  _MdBlock.code(this.content) : type = _MdType.code, rows = const [];
-  _MdBlock.listItem(this.content) : type = _MdType.listItem, rows = const [];
-  _MdBlock.paragraph(this.content) : type = _MdType.paragraph, rows = const [];
-  _MdBlock.table(this.rows) : type = _MdType.table, content = '';
+  const _MdBlock.h1(String content) : this(_MdType.h1, content);
+  const _MdBlock.h2(String content) : this(_MdType.h2, content);
+  const _MdBlock.h3(String content) : this(_MdType.h3, content);
+  const _MdBlock.quote(String content) : this(_MdType.quote, content);
+  const _MdBlock.code(String content, {String? meta})
+    : this(_MdType.code, content, meta: meta);
+  const _MdBlock.bullet(String content) : this(_MdType.bullet, content);
+  const _MdBlock.ordered(String content, {required String number})
+    : this(_MdType.ordered, content, meta: number);
+  const _MdBlock.task(String content, {required bool checked})
+    : this(_MdType.task, content, meta: checked ? 'checked' : 'unchecked');
+  const _MdBlock.paragraph(String content) : this(_MdType.paragraph, content);
+  const _MdBlock.table(List<List<String>> rows)
+    : this(_MdType.table, '', rows: rows);
+  const _MdBlock.rule() : this(_MdType.rule, '');
 
   final _MdType type;
   final String content;
+  final String? meta;
   final List<List<String>> rows;
 }

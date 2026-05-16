@@ -1,10 +1,14 @@
 import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/database/repositories.dart';
 import '../../../core/database/repository_providers.dart';
+import '../../../core/markdown/markdown_directory_service.dart';
+import '../../../core/markdown/markdown_document_parser.dart';
+import '../../../core/markdown/markdown_storage_service.dart';
+import '../../../core/parser/expense_note_cleaner.dart';
+import '../../../core/parser/lui_lite_parser.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../long_note/long_note_editor_page.dart';
@@ -115,51 +119,110 @@ class TimelineDateBar extends ConsumerWidget {
   }
 }
 
-class TimelineBody extends ConsumerWidget {
+class TimelineBody extends ConsumerStatefulWidget {
   const TimelineBody({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TimelineBody> createState() => _TimelineBodyState();
+}
+
+class _TimelineBodyState extends ConsumerState<TimelineBody> {
+  final _scrollController = ScrollController();
+  List<TimelineEvent>? _cachedEvents;
+  String? _cachedDateKey;
+  String? _autoScrolledDateKey;
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final date = ref.watch(timelineDateProvider);
+    final currentDateKey = dateKey(date);
     final eventsAsync = ref.watch(timelineEventsProvider);
 
-    return eventsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('加载失败：$e')),
-      data: (events) {
-        if (events.isEmpty) {
-          return _EmptyTimeline(date: ref.watch(timelineDateProvider));
+    ref.listen<int>(timelineScrollToLatestSignalProvider, (previous, next) {
+      if (previous == next) return;
+      _scrollToLatest(animated: true);
+    });
+
+    switch (eventsAsync) {
+      case AsyncData(value: final events):
+        _cachedEvents = events;
+        _cachedDateKey = currentDateKey;
+        if (_autoScrolledDateKey != currentDateKey) {
+          _autoScrolledDateKey = currentDateKey;
+          _scrollToLatest(animated: false);
+        }
+        return _buildEvents(date, events);
+      case AsyncError(error: final error):
+        final cached = _eventsForCurrentDate(currentDateKey);
+        if (cached != null) return _buildEvents(date, cached);
+        return Center(child: Text('加载失败：$error'));
+      default:
+        final cached = _eventsForCurrentDate(currentDateKey);
+        if (cached != null) return _buildEvents(date, cached);
+        return const Center(child: CircularProgressIndicator());
+    }
+  }
+
+  List<TimelineEvent>? _eventsForCurrentDate(String dateKey) {
+    if (_cachedDateKey != dateKey) return null;
+    return _cachedEvents;
+  }
+
+  Widget _buildEvents(DateTime date, List<TimelineEvent> events) {
+    if (events.isEmpty) {
+      return _EmptyTimeline(date: date);
+    }
+
+    return ListView.builder(
+      key: PageStorageKey('timeline-body-${dateKey(date)}'),
+      controller: _scrollController,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.sm,
+        AppSpacing.xs,
+        AppSpacing.sm,
+        AppSpacing.xl,
+      ),
+      itemCount: events.length + 1,
+      itemBuilder: (context, index) {
+        if (index == events.length) {
+          return const _TimelineEndMarker();
         }
 
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.sm,
-            AppSpacing.xs,
-            AppSpacing.sm,
-            AppSpacing.xl,
-          ),
-          itemCount: events.length + 1,
-          itemBuilder: (context, index) {
-            if (index == events.length) {
-              return const _TimelineEndMarker();
-            }
-
-            final nextEvent = index < events.length - 1
-                ? events[index + 1]
-                : null;
-            return _TimelineTile(
-              event: events[index],
-              isLast: index == events.length - 1,
-              gapAfter: nextEvent == null
-                  ? null
-                  : Duration(
-                      milliseconds:
-                          nextEvent.timestamp - events[index].timestamp,
-                    ),
-            );
-          },
+        final nextEvent = index < events.length - 1 ? events[index + 1] : null;
+        return _TimelineTile(
+          event: events[index],
+          isLast: index == events.length - 1,
+          gapAfter: nextEvent == null
+              ? null
+              : Duration(
+                  milliseconds: nextEvent.timestamp - events[index].timestamp,
+                ),
         );
       },
     );
+  }
+
+  void _scrollToLatest({required bool animated}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final target = _scrollController.position.maxScrollExtent;
+      if (target <= 0) return;
+      if (animated) {
+        _scrollController.animateTo(
+          target,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+        );
+      } else {
+        _scrollController.jumpTo(target);
+      }
+    });
   }
 }
 
@@ -177,17 +240,21 @@ class _TimelineTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final color = _colorForType(event.type);
-    final isRight = event.source == TimelineEventSource.todo ||
-        event.type == 'long_note';
+    final isRight =
+        event.source == TimelineEventSource.todo || event.type == 'long_note';
     final theme = Theme.of(context);
     final card = _TimelineEventCard(
       event: event,
       color: color,
       theme: theme,
-      onTap: event.type == 'long_note'
-          ? () => _openReader(context, ref)
-          : null,
+      onTap: event.type == 'long_note' ? () => _openReader(context, ref) : null,
       onEdit: () => _openEditor(context, ref),
+      onConvertExpense: event.source == TimelineEventSource.record
+          ? () => _convertRecordToExpense(context, ref)
+          : null,
+      onConvertTodo: event.source == TimelineEventSource.record
+          ? () => _convertRecordToTodo(context, ref)
+          : null,
     );
 
     return Column(
@@ -247,32 +314,21 @@ class _TimelineTile extends ConsumerWidget {
     final rawMeta = event.data['metadata'];
     Map<String, Object?>? meta;
     if (rawMeta is String) {
-      try { meta = Map<String, Object?>.from(jsonDecode(rawMeta)); } catch (_) {}
+      try {
+        meta = Map<String, Object?>.from(jsonDecode(rawMeta));
+      } catch (_) {}
     } else if (rawMeta is Map) {
       meta = Map<String, Object?>.from(rawMeta);
     }
     final path = meta?['path'] as String?;
-    final file = path != null ? File(path) : null;
-    var body = '';
-    if (file != null && await file.exists()) {
-      final raw = await file.readAsString();
-      final start = raw.indexOf('---\n');
-      if (start == 0) {
-        final end = raw.indexOf('\n---\n', start + 4);
-        if (end != -1) body = raw.substring(end + 5).trim();
-      }
-      final firstNewline = body.indexOf('\n');
-      if (body.startsWith('# ') && firstNewline != -1) {
-        body = body.substring(firstNewline + 1).trim();
-      }
-    }
+    final document = await _readLongNoteDocument(ref, path, event.title);
     if (!context.mounted) return;
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => LongNoteReaderPage(
-          title: event.title,
+          title: document.title,
           filePath: path ?? '',
-          body: body,
+          body: document.body,
           recordId: event.sourceId,
         ),
       ),
@@ -287,40 +343,21 @@ class _TimelineTile extends ConsumerWidget {
       Map<String, Object?>? meta;
       final rawMeta = event.data['metadata'];
       if (rawMeta is String) {
-        try { meta = Map<String, Object?>.from(jsonDecode(rawMeta)); } catch (_) {}
+        try {
+          meta = Map<String, Object?>.from(jsonDecode(rawMeta));
+        } catch (_) {}
       } else if (rawMeta is Map) {
-        meta = Map<String, Object?>.from(rawMeta as Map);
+        meta = Map<String, Object?>.from(rawMeta);
       }
       final path = meta?['path'] as String?;
-      final file = path != null ? File(path) : null;
-      var body = '';
-      if (file != null && await file.exists()) {
-        final raw = await file.readAsString();
-        // Strip YAML front matter
-        final start = raw.indexOf('---\n');
-        if (start == 0) {
-          final end = raw.indexOf('\n---\n', start + 4);
-          if (end != -1) {
-            body = raw.substring(end + 5).trim();
-          } else {
-            body = raw;
-          }
-        } else {
-          body = raw;
-        }
-        // Strip leading "# Title" line
-        final firstNewline = body.indexOf('\n');
-        if (body.startsWith('# ') && firstNewline != -1) {
-          body = body.substring(firstNewline + 1).trim();
-        }
-      }
+      final document = await _readLongNoteDocument(ref, path, event.title);
       if (!context.mounted) return;
       final saved = await Navigator.of(context).push<bool>(
         MaterialPageRoute(
           fullscreenDialog: true,
           builder: (_) => LongNoteEditorPage(
-            initialTitle: event.title,
-            initialBody: body,
+            initialTitle: document.title,
+            initialBody: document.body,
             existingPath: path,
             recordId: event.sourceId,
           ),
@@ -350,6 +387,106 @@ class _TimelineTile extends ConsumerWidget {
           duration: Duration(seconds: 1),
         ),
       );
+  }
+
+  Future<void> _convertRecordToExpense(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final metadata = _decodeMetadata(event.data['metadata']);
+    if (metadata['linkedExpenseId'] != null) return;
+
+    final parsed = LuiLiteParser.parse(event.title);
+    final amount = (parsed.metadata['amount'] as num?)?.toDouble();
+    if (amount == null) {
+      _showTimelineSnack(context, '没有识别到金额，先把记录改成类似“午饭 35元”。');
+      return;
+    }
+
+    final tags = _addTag(event.tags, '消费');
+    final category = _expenseCategory(parsed.tags, tags);
+    final note = cleanExpenseNote(
+      parsed.content.isNotEmpty ? parsed.content : event.title,
+    );
+    final createdAt = DateTime.fromMillisecondsSinceEpoch(event.timestamp);
+    final expenseId = await ref
+        .read(expensesRepositoryProvider)
+        .create(
+          date: _dateFromKey(event.date),
+          amount: amount,
+          category: category,
+          note: note,
+          createdAt: createdAt,
+        );
+
+    await ref
+        .read(recordsRepositoryProvider)
+        .updateDetails(
+          event.sourceId,
+          content: event.title,
+          time: event.data['time'] as String?,
+          tags: tags,
+          metadata: {
+            ...metadata,
+            'linkedExpenseId': expenseId,
+            'linkedExpenseAmount': amount,
+          },
+        );
+
+    ref.read(dataVersionProvider.notifier).increment();
+    if (!context.mounted) return;
+    ref.invalidate(timelineEventsProvider);
+    _showTimelineSnack(context, '已转成消费，盘页面会计入统计。');
+  }
+
+  Future<void> _convertRecordToTodo(BuildContext context, WidgetRef ref) async {
+    final metadata = _decodeMetadata(event.data['metadata']);
+    if (metadata['linkedTodoId'] != null) return;
+
+    final parsed = LuiLiteParser.parse('待办 ${event.title}');
+    final title = parsed.content.isNotEmpty ? parsed.content : event.title;
+    final createdAt = DateTime.fromMillisecondsSinceEpoch(event.timestamp);
+    final todoId = await ref
+        .read(todosRepositoryProvider)
+        .create(
+          date: _dateFromKey(event.date),
+          title: title,
+          dueTime: parsed.time ?? event.data['time'] as String?,
+          createdAt: createdAt,
+        );
+    await ref
+        .read(recordsRepositoryProvider)
+        .updateDetails(
+          event.sourceId,
+          content: event.title,
+          time: event.data['time'] as String?,
+          tags: _addTag(event.tags, '待办'),
+          metadata: {...metadata, 'linkedTodoId': todoId},
+        );
+
+    ref.read(dataVersionProvider.notifier).increment();
+    if (!context.mounted) return;
+    ref.invalidate(timelineEventsProvider);
+    _showTimelineSnack(context, '已转成待办。');
+  }
+}
+
+Future<MarkdownDocumentContent> _readLongNoteDocument(
+  WidgetRef ref,
+  String? location,
+  String fallbackTitle,
+) async {
+  if (location == null || location.isEmpty) {
+    return MarkdownDocumentContent(title: fallbackTitle, body: '');
+  }
+
+  try {
+    final settings = ref.read(appSettingsRepositoryProvider);
+    final storage = MarkdownStorageService(MarkdownDirectoryService(settings));
+    final raw = await storage.readTextFileLocation(location);
+    return parseMarkdownDocument(raw, fallbackTitle: fallbackTitle);
+  } catch (_) {
+    return MarkdownDocumentContent(title: fallbackTitle, body: '');
   }
 }
 
@@ -446,6 +583,8 @@ class _TimelineEventCard extends StatelessWidget {
     required this.theme,
     this.onTap,
     required this.onEdit,
+    this.onConvertExpense,
+    this.onConvertTodo,
   });
 
   final TimelineEvent event;
@@ -453,6 +592,8 @@ class _TimelineEventCard extends StatelessWidget {
   final ThemeData theme;
   final VoidCallback? onTap;
   final VoidCallback onEdit;
+  final VoidCallback? onConvertExpense;
+  final VoidCallback? onConvertTodo;
 
   @override
   Widget build(BuildContext context) {
@@ -572,6 +713,15 @@ class _TimelineEventCard extends StatelessWidget {
                             .toList(),
                       ),
                     ),
+                  if (event.source == TimelineEventSource.record)
+                    Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.xs),
+                      child: _RecordQuickActions(
+                        metadata: _decodeMetadata(event.data['metadata']),
+                        onConvertExpense: onConvertExpense,
+                        onConvertTodo: onConvertTodo,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -588,6 +738,90 @@ class _TimelineEventCard extends StatelessWidget {
       );
     }
     return card;
+  }
+}
+
+class _RecordQuickActions extends StatelessWidget {
+  const _RecordQuickActions({
+    required this.metadata,
+    required this.onConvertExpense,
+    required this.onConvertTodo,
+  });
+
+  final Map<String, Object?> metadata;
+  final VoidCallback? onConvertExpense;
+  final VoidCallback? onConvertTodo;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasExpense = metadata['linkedExpenseId'] != null;
+    final hasTodo = metadata['linkedTodoId'] != null;
+    final theme = Theme.of(context);
+
+    return Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      children: [
+        _QuickActionChip(
+          icon: Icons.payments_rounded,
+          label: hasExpense ? '已转消费' : '消费',
+          color: AppColors.accent,
+          onPressed: hasExpense ? null : onConvertExpense,
+        ),
+        _QuickActionChip(
+          icon: Icons.check_circle_outline,
+          label: hasTodo ? '已转待办' : '待办',
+          color: const Color(0xFF4A90D9),
+          onPressed: hasTodo ? null : onConvertTodo,
+        ),
+        if (hasExpense || hasTodo)
+          Text(
+            '已同步',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: AppColors.muted.withAlpha(160),
+              fontSize: 10,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _QuickActionChip extends StatelessWidget {
+  const _QuickActionChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    return ActionChip(
+      avatar: Icon(
+        icon,
+        size: 14,
+        color: enabled ? color : AppColors.muted.withAlpha(150),
+      ),
+      label: Text(label),
+      labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
+        color: enabled ? color : AppColors.muted,
+        fontWeight: FontWeight.w700,
+        fontSize: 10,
+      ),
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      side: BorderSide(color: color.withAlpha(enabled ? 70 : 24)),
+      backgroundColor: color.withAlpha(enabled ? 18 : 8),
+      onPressed: onPressed,
+    );
   }
 }
 
@@ -755,8 +989,10 @@ class _TimelineEventEditSheetState
                             foregroundColor: AppColors.accent,
                             side: const BorderSide(color: AppColors.accent),
                           ),
-                          icon: const Icon(Icons.delete_outline_rounded,
-                              size: 18),
+                          icon: const Icon(
+                            Icons.delete_outline_rounded,
+                            size: 18,
+                          ),
                           label: const Text('删除'),
                         ),
                       ),
@@ -855,7 +1091,7 @@ class _TimelineEventEditSheetState
           label: '金额',
           keyboardType: TextInputType.number,
         ),
-        _textField(controller: _categoryController, label: '分类'),
+        _textField(controller: _categoryController, label: '分类（可选）'),
         _textField(controller: _currencyController, label: '币种'),
         _textField(
           controller: _noteController,
@@ -949,14 +1185,26 @@ class _TimelineEventEditSheetState
         case TimelineEventSource.record:
           final content = _requiredText(_contentController, '内容');
           if (content == null) return;
+          final tags = _parseTagInput(_tagsController.text);
+          var metadata = _decodeMetadata(widget.event.data['metadata']);
+          final linkedExpenseId = _metadataInt(metadata['linkedExpenseId']);
+          if (linkedExpenseId != null) {
+            final amount =
+                (LuiLiteParser.parse(content).metadata['amount'] as num?)
+                    ?.toDouble();
+            if (amount != null) {
+              metadata = {...metadata, 'linkedExpenseAmount': amount};
+            }
+          }
           await ref
               .read(recordsRepositoryProvider)
               .updateDetails(
                 widget.event.sourceId,
                 content: content,
-                tags: _parseTagInput(_tagsController.text),
-                metadata: _decodeMetadata(widget.event.data['metadata']),
+                tags: tags,
+                metadata: metadata,
               );
+          await _syncLinkedRecordTargets(content, tags, metadata);
 
         case TimelineEventSource.todo:
           final title = _requiredText(_contentController, '标题');
@@ -996,16 +1244,25 @@ class _TimelineEventEditSheetState
               );
 
         case TimelineEventSource.expense:
-          final amount = _requiredDouble(_amountController, '金额');
-          final category = _requiredText(_categoryController, '分类');
-          if (amount == null || category == null) return;
+          final amount = _amountController.text.trim().isEmpty
+              ? (widget.event.data['amount'] as num?)?.toDouble()
+              : _requiredDouble(_amountController, '金额');
+          if (amount == null) return;
+          final category = _categoryController.text.trim().isNotEmpty
+              ? _categoryController.text.trim()
+              : ((widget.event.data['category'] as String?)
+                        ?.trim()
+                        .isNotEmpty ??
+                    false)
+              ? (widget.event.data['category'] as String).trim()
+              : 'other';
           await ref
               .read(expensesRepositoryProvider)
               .updateDetails(
                 widget.event.sourceId,
                 amount: amount,
                 category: category,
-                note: _optionalText(_noteController),
+                note: cleanExpenseNote(_optionalText(_noteController)),
                 currency: _optionalText(_currencyController) ?? 'CNY',
               );
 
@@ -1062,6 +1319,64 @@ class _TimelineEventEditSheetState
       _saving = false;
       _errorText = message;
     });
+  }
+
+  Future<void> _syncLinkedRecordTargets(
+    String content,
+    List<String> tags,
+    Map<String, Object?> metadata,
+  ) async {
+    final parsed = LuiLiteParser.parse(content);
+    final expenseId = _metadataInt(metadata['linkedExpenseId']);
+    if (expenseId != null) {
+      final existing = await ref
+          .read(expensesRepositoryProvider)
+          .findById(expenseId);
+      if (existing != null) {
+        final amount =
+            (parsed.metadata['amount'] as num?)?.toDouble() ??
+            (metadata['linkedExpenseAmount'] as num?)?.toDouble() ??
+            (existing['amount'] as num?)?.toDouble();
+        if (amount != null) {
+          await ref
+              .read(expensesRepositoryProvider)
+              .updateDetails(
+                expenseId,
+                amount: amount,
+                category: _expenseCategory(
+                  parsed.tags,
+                  tags,
+                  fallback: (existing['category'] as String?) ?? 'other',
+                ),
+                note: cleanExpenseNote(
+                  parsed.content.isNotEmpty ? parsed.content : content,
+                ),
+                currency: (existing['currency'] as String?) ?? 'CNY',
+              );
+        }
+      }
+    }
+
+    final todoId = _metadataInt(metadata['linkedTodoId']);
+    if (todoId != null) {
+      final existing = await ref.read(todosRepositoryProvider).findById(todoId);
+      if (existing != null) {
+        final todoParsed = LuiLiteParser.parse('待办 $content');
+        await ref
+            .read(todosRepositoryProvider)
+            .updateDetails(
+              todoId,
+              title: todoParsed.content.isNotEmpty
+                  ? todoParsed.content
+                  : content,
+              note: existing['note'] as String?,
+              dueTime: todoParsed.time ?? existing['due_time'] as String?,
+              priority: (existing['priority'] as int?) ?? 0,
+              isCompleted: ((existing['is_completed'] as int?) ?? 0) == 1,
+              completedAt: existing['completed_at'] as int?,
+            );
+      }
+    }
   }
 }
 
@@ -1172,6 +1487,58 @@ List<String> _parseTagInput(String raw) {
       .toList();
 }
 
+int? _metadataInt(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value);
+  return null;
+}
+
+DateTime _dateFromKey(String key) {
+  final parts = key.split('-');
+  if (parts.length == 3) {
+    final year = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final day = int.tryParse(parts[2]);
+    if (year != null && month != null && day != null) {
+      return DateTime(year, month, day);
+    }
+  }
+  return DateTime.now();
+}
+
+List<String> _addTag(List<String> tags, String tag) {
+  if (tags.contains(tag)) return tags;
+  return [...tags, tag];
+}
+
+String _expenseCategory(
+  List<String> parsedTags,
+  List<String> recordTags, {
+  String fallback = 'other',
+}) {
+  for (final tag in [...parsedTags, ...recordTags]) {
+    final trimmed = tag.trim();
+    if (trimmed.isEmpty) continue;
+    if (trimmed == '消费' || trimmed == '支出' || trimmed == '待办') continue;
+    return trimmed;
+  }
+  return fallback.trim().isNotEmpty ? fallback.trim() : 'other';
+}
+
+void _showTimelineSnack(BuildContext context, String message) {
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 1),
+      ),
+    );
+}
+
 String _labelForType(String type) => switch (type) {
   'memo' => '备忘',
   'long_note' => '长笔记',
@@ -1256,7 +1623,10 @@ class _TrashButton extends ConsumerWidget {
               return const SizedBox(
                 height: 120,
                 child: Center(
-                  child: Text('回收站是空的', style: TextStyle(color: AppColors.muted)),
+                  child: Text(
+                    '回收站是空的',
+                    style: TextStyle(color: AppColors.muted),
+                  ),
                 ),
               );
             }
@@ -1268,10 +1638,16 @@ class _TrashButton extends ConsumerWidget {
                     padding: const EdgeInsets.all(AppSpacing.md),
                     child: Row(
                       children: [
-                        const Icon(Icons.delete_outline_rounded, size: 18, color: AppColors.accent),
+                        const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 18,
+                          color: AppColors.accent,
+                        ),
                         const SizedBox(width: AppSpacing.xs),
-                        Text('回收站 (${deleted.length})',
-                            style: Theme.of(context).textTheme.titleSmall),
+                        Text(
+                          '回收站 (${deleted.length})',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
                         const Spacer(),
                         IconButton(
                           visualDensity: VisualDensity.compact,
@@ -1284,7 +1660,9 @@ class _TrashButton extends ConsumerWidget {
                   const Divider(height: 1),
                   Expanded(
                     child: ListView.separated(
-                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                      ),
                       itemCount: deleted.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (ctx, i) {
@@ -1307,24 +1685,37 @@ class _TrashButton extends ConsumerWidget {
                                 visualDensity: VisualDensity.compact,
                                 iconSize: 18,
                                 tooltip: '恢复',
-                                icon: const Icon(Icons.restore_rounded, color: AppColors.tracker),
+                                icon: const Icon(
+                                  Icons.restore_rounded,
+                                  color: AppColors.tracker,
+                                ),
                                 onPressed: () async {
-                                  await ref.read(recordsRepositoryProvider).restore(id);
+                                  await ref
+                                      .read(recordsRepositoryProvider)
+                                      .restore(id);
                                   ref.invalidate(deletedRecordsProvider);
                                   ref.invalidate(timelineEventsProvider);
-                                  ref.read(dataVersionProvider.notifier).increment();
+                                  ref
+                                      .read(dataVersionProvider.notifier)
+                                      .increment();
                                 },
                               ),
                               IconButton(
                                 visualDensity: VisualDensity.compact,
                                 iconSize: 18,
                                 tooltip: '彻底删除',
-                                icon: Icon(Icons.delete_forever_rounded,
-                                    color: AppColors.accent.withAlpha(180)),
+                                icon: Icon(
+                                  Icons.delete_forever_rounded,
+                                  color: AppColors.accent.withAlpha(180),
+                                ),
                                 onPressed: () async {
-                                  await ref.read(recordsRepositoryProvider).permanentDelete(id);
+                                  await ref
+                                      .read(recordsRepositoryProvider)
+                                      .permanentDelete(id);
                                   ref.invalidate(deletedRecordsProvider);
-                                  ref.read(dataVersionProvider.notifier).increment();
+                                  ref
+                                      .read(dataVersionProvider.notifier)
+                                      .increment();
                                 },
                               ),
                             ],
@@ -1338,9 +1729,11 @@ class _TrashButton extends ConsumerWidget {
             );
           },
           loading: () => const SizedBox(
-            height: 80, child: Center(child: CircularProgressIndicator())),
-          error: (_, __) => const SizedBox(
-            height: 80, child: Center(child: Text('加载失败'))),
+            height: 80,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (_, __) =>
+              const SizedBox(height: 80, child: Center(child: Text('加载失败'))),
         );
       },
     );

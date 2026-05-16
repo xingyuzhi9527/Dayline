@@ -414,22 +414,39 @@ class TodayTrackersCard extends ConsumerWidget {
   }
 }
 
-class TodayTodosCard extends ConsumerWidget {
+class TodayTodosCard extends ConsumerStatefulWidget {
   const TodayTodosCard({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TodayTodosCard> createState() => _TodayTodosCardState();
+}
+
+class _TodayTodosCardState extends ConsumerState<TodayTodosCard> {
+  List<Map<String, Object?>> _lastTodoList = const [];
+
+  @override
+  Widget build(BuildContext context) {
     final todos = ref.watch(todayTodoListProvider);
-    final todoList = todos.valueOrNull ?? [];
+    final freshTodos = todos.valueOrNull;
+    if (freshTodos != null) {
+      _lastTodoList = freshTodos;
+    }
+    final todoList = [..._lastTodoList]
+      ..sort((a, b) {
+        final createdA = a['created_at'] as int? ?? 0;
+        final createdB = b['created_at'] as int? ?? 0;
+        return createdA.compareTo(createdB);
+      });
 
     return _SectionCard(
       title: '今日待办',
       icon: Icons.check_circle_outline,
-      child: todoList.isEmpty
+      child: todoList.isEmpty && !todos.isLoading
           ? const _EmptyText('今天还没有待办。')
           : Column(
               children: todoList.map((t) {
                 return _TodoRow(
+                  key: ValueKey('dashboard-todo-${t['id']}'),
                   id: t['id'] as int,
                   title: t['title'] as String,
                   isCompleted: (t['is_completed'] as int) == 1,
@@ -440,8 +457,9 @@ class TodayTodosCard extends ConsumerWidget {
   }
 }
 
-class _TodoRow extends ConsumerWidget {
+class _TodoRow extends ConsumerStatefulWidget {
   const _TodoRow({
+    super.key,
     required this.id,
     required this.title,
     required this.isCompleted,
@@ -452,37 +470,78 @@ class _TodoRow extends ConsumerWidget {
   final bool isCompleted;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_TodoRow> createState() => _TodoRowState();
+}
+
+class _TodoRowState extends ConsumerState<_TodoRow> {
+  late bool _completed;
+  var _toggling = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _completed = widget.isCompleted;
+  }
+
+  @override
+  void didUpdateWidget(covariant _TodoRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isCompleted != widget.isCompleted &&
+        widget.isCompleted != _completed) {
+      _completed = widget.isCompleted;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(
-        isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
-        color: isCompleted ? const Color(0xFF4A90D9) : AppColors.muted,
+        _completed ? Icons.check_circle : Icons.radio_button_unchecked,
+        color: _completed ? const Color(0xFF4A90D9) : AppColors.muted,
       ),
       title: Text(
-        title,
+        widget.title,
         style: theme.textTheme.bodyLarge?.copyWith(
-          decoration: isCompleted ? TextDecoration.lineThrough : null,
-          color: isCompleted ? AppColors.muted : null,
+          decoration: _completed ? TextDecoration.lineThrough : null,
+          color: _completed ? AppColors.muted : null,
         ),
       ),
       dense: true,
-      onTap: () => _toggle(ref),
+      enabled: !_toggling,
+      onTap: _toggle,
     );
   }
 
-  Future<void> _toggle(WidgetRef ref) async {
-    final repo = ref.read(todosRepositoryProvider);
-    if (isCompleted) {
-      await repo.reopen(id);
-    } else {
-      await repo.complete(id);
+  Future<void> _toggle() async {
+    if (_toggling) return;
+    final wasCompleted = _completed;
+    setState(() {
+      _completed = !wasCompleted;
+      _toggling = true;
+    });
+
+    try {
+      final repo = ref.read(todosRepositoryProvider);
+      if (wasCompleted) {
+        await repo.reopen(widget.id);
+      } else {
+        await repo.complete(widget.id);
+      }
+      ref.invalidate(todayTodoStatsProvider);
+      ref.read(dataVersionProvider.notifier).increment();
+    } catch (_) {
+      // Revert on failure
+      if (mounted) {
+        setState(() => _completed = wasCompleted);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _toggling = false);
+      }
     }
-    ref.invalidate(todayTodoListProvider);
-    ref.invalidate(todayTodoStatsProvider);
-    ref.read(dataVersionProvider.notifier).increment();
   }
 }
 
