@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/database/repository_providers.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import 'dashboard_providers.dart';
@@ -17,35 +16,56 @@ class DashboardPage extends ConsumerStatefulWidget {
 
 class _DashboardPageState extends ConsumerState<DashboardPage> {
   bool _expanded = false;
+  DashboardSummary? _lastSummary;
 
   @override
   Widget build(BuildContext context) {
-    ref.watch(dataVersionProvider);
     final summaryAsync = ref.watch(dashboardSummaryProvider);
+    final freshSummary = summaryAsync.valueOrNull;
+    if (freshSummary != null) {
+      _lastSummary = freshSummary;
+    }
+    final visibleSummary = freshSummary ?? _lastSummary;
 
-    return SafeArea(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          summaryAsync.when(
-            data: (summary) => _expanded
-                ? DashboardExpandedView(
-                    summary: summary,
-                    onCollapse: () => setState(() => _expanded = false),
-                  )
-                : _CollapsedView(
-                    summary: summary,
-                    onExpand: () => setState(() => _expanded = true),
+    return Container(
+      color: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (visibleSummary != null)
+              _expanded
+                  ? DashboardExpandedView(
+                      summary: visibleSummary,
+                      onCollapse: () => setState(() => _expanded = false),
+                    )
+                  : _CollapsedView(
+                      summary: visibleSummary,
+                      onExpand: () => setState(() => _expanded = true),
+                    )
+            else
+              summaryAsync.when(
+                data: (_) => const SizedBox.shrink(),
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => Center(
+                  child: Text(
+                    '加载失败：$e',
+                    style: TextStyle(color: AppColors.muted),
                   ),
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => Center(
-              child: Text('加载失败：$e', style: TextStyle(color: AppColors.muted)),
-            ),
-          ),
-        ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
+}
+
+extension _AsyncValueNullable<T> on AsyncValue<T> {
+  T? get valueOrNull => switch (this) {
+    AsyncData(value: final value) => value,
+    _ => null,
+  };
 }
 
 class _CollapsedView extends StatelessWidget {

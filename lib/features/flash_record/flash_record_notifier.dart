@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repository_providers.dart';
+import '../../core/parser/expense_note_cleaner.dart';
 import '../../core/parser/lui_lite_parser.dart';
 import '../../core/parser/parsed_input_time.dart';
 import '../../core/stt/stt_engine.dart';
@@ -338,7 +339,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
               date: now,
               amount: a,
               category: c,
-              note: parsed.content,
+              note: cleanExpenseNote(parsed.content),
               createdAt: createdAt,
             );
 

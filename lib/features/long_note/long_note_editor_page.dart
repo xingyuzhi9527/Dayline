@@ -1,10 +1,10 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repository_providers.dart';
+import '../../core/markdown/markdown_directory_service.dart';
 import '../../core/markdown/markdown_filename.dart';
+import '../../core/markdown/markdown_storage_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import 'long_note_notifier.dart';
@@ -25,14 +25,14 @@ class LongNoteEditorPage extends ConsumerStatefulWidget {
   final int? recordId;
 
   @override
-  ConsumerState<LongNoteEditorPage> createState() =>
-      _LongNoteEditorPageState();
+  ConsumerState<LongNoteEditorPage> createState() => _LongNoteEditorPageState();
 }
 
 class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
   final _titleController = TextEditingController();
   final _bodyController = TextEditingController();
   bool _isEditMode = false;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -54,29 +54,33 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
   }
 
   Future<void> _save() async {
-    final notifier = ref.read(longNoteProvider.notifier);
-    notifier.updateTitle(_titleController.text);
-    notifier.updateBody(_bodyController.text);
+    if (_saving) return;
+    setState(() => _saving = true);
 
     if (_isEditMode && widget.existingPath != null) {
-      // Overwrite existing file
       try {
-        final file = File(widget.existingPath!);
         final now = DateTime.now();
         final title = _titleController.text.trim().isNotEmpty
             ? _titleController.text.trim()
             : '${now.year}-${_pad(now.month)}-${_pad(now.day)} ${_pad(now.hour)}:${_pad(now.minute)}';
-        // Update front matter timestamp
         final content = _buildContent(title, now);
-        await file.writeAsString(content);
-        // Update record index
+        final settings = ref.read(appSettingsRepositoryProvider);
+        final storage = MarkdownStorageService(
+          MarkdownDirectoryService(settings),
+        );
+        await storage.writeTextFileLocation(widget.existingPath!, content);
         if (widget.recordId != null) {
-          await ref.read(recordsRepositoryProvider).updateDetails(
+          await ref
+              .read(recordsRepositoryProvider)
+              .updateDetails(
                 widget.recordId!,
                 content: title,
                 metadata: {
                   'path': widget.existingPath!,
                   'title': title,
+                  'displayPath': MarkdownStorageService.displayPathForLocation(
+                    widget.existingPath!,
+                  ),
                 },
               );
           ref.read(dataVersionProvider.notifier).increment();
@@ -92,9 +96,9 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
             ),
           );
         Navigator.of(context).pop(true);
-        return;
       } catch (e) {
         if (!mounted) return;
+        setState(() => _saving = false);
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
@@ -103,11 +107,15 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
               behavior: SnackBarBehavior.floating,
             ),
           );
-        return;
       }
+      return;
     }
 
-    final saved = await notifier.save();
+    final notifier = ref.read(longNoteProvider.notifier);
+    final saved = await notifier.save(
+      _titleController.text,
+      _bodyController.text,
+    );
     if (!mounted) return;
 
     if (saved) {
@@ -122,6 +130,7 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
         );
       Navigator.of(context).pop(true);
     } else {
+      setState(() => _saving = false);
       final error = ref.read(longNoteProvider).errorMessage;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -159,10 +168,9 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
   }
 
   bool get _canSave {
-    final state = ref.read(longNoteProvider);
     return (_titleController.text.trim().isNotEmpty ||
             _bodyController.text.trim().isNotEmpty) &&
-        !state.isSaving;
+        !_saving;
   }
 
   String _filenamePreview() {
@@ -177,14 +185,12 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(longNoteProvider);
-
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
         final shouldPop = await _onWillPop();
-        if (shouldPop && mounted) {
+        if (shouldPop && context.mounted) {
           Navigator.of(context).pop();
         }
       },
@@ -194,7 +200,7 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
           leading: TextButton(
             onPressed: () async {
               final shouldPop = await _onWillPop();
-              if (shouldPop && mounted) {
+              if (shouldPop && context.mounted) {
                 Navigator.of(context).pop();
               }
             },
@@ -203,7 +209,7 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
           title: const Text('长笔记'),
           centerTitle: true,
           actions: [
-            if (state.isSaving)
+            if (_saving)
               const Padding(
                 padding: EdgeInsets.only(right: 16),
                 child: SizedBox(
@@ -229,11 +235,13 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
                 0,
               ),
               child: TextField(
+                key: const ValueKey('long-note-title-field'),
                 controller: _titleController,
                 onChanged: (_) => setState(() {}),
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                textInputAction: TextInputAction.next,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
                 decoration: const InputDecoration(
                   hintText: '笔记标题',
                   border: InputBorder.none,
@@ -246,16 +254,19 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
             const Divider(height: 1),
             Expanded(
               child: TextField(
+                key: const ValueKey('long-note-body-field'),
                 controller: _bodyController,
                 onChanged: (_) => setState(() {}),
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
                 maxLines: null,
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      height: 1.7,
-                      fontFamily: 'monospace',
-                      fontSize: 15,
-                    ),
+                  height: 1.7,
+                  fontFamily: 'monospace',
+                  fontSize: 15,
+                ),
                 decoration: const InputDecoration(
                   hintText: 'Markdown 正文…',
                   border: InputBorder.none,
@@ -269,26 +280,24 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
                 vertical: AppSpacing.xs,
               ),
               decoration: const BoxDecoration(
-                border: Border(
-                  top: BorderSide(color: AppColors.border),
-                ),
+                border: Border(top: BorderSide(color: AppColors.border)),
               ),
               child: Row(
                 children: [
                   Text(
                     '${_bodyController.text.length} 字',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.muted,
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: AppColors.muted),
                   ),
                   const Spacer(),
                   Text(
                     _filenamePreview(),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.muted,
-                          fontFamily: 'monospace',
-                          fontSize: 11,
-                        ),
+                      color: AppColors.muted,
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                    ),
                   ),
                 ],
               ),

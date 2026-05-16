@@ -700,6 +700,7 @@ DashboardSummary _makeEmptySummary() {
     trackerCount: 0,
     focusMinutes: 0,
     expenseTotal: 0,
+    monthExpenseTotal: 0,
     expenseCount: 0,
     bodyLogCount: 0,
     topTags: [],

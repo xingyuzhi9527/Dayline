@@ -462,6 +462,21 @@ WHERE date = ?
     return (rows.single['total'] as num).toDouble();
   }
 
+  Future<double> sumAmountByMonth(DateTime date) async {
+    final db = await localDatabase.database;
+    final start = DateTime(date.year, date.month);
+    final next = DateTime(date.year, date.month + 1);
+    final rows = await db.rawQuery(
+      '''
+SELECT COALESCE(SUM(amount), 0) AS total
+FROM expenses
+WHERE date >= ? AND date < ?
+''',
+      [dateKey(start), dateKey(next)],
+    );
+    return (rows.single['total'] as num).toDouble();
+  }
+
   Future<List<DatabaseRow>> findByDate(DateTime date) async {
     final db = await localDatabase.database;
     return db.query(

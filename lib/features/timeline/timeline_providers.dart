@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repositories.dart';
 import '../../core/database/repository_providers.dart';
+import '../../core/parser/expense_note_cleaner.dart';
 
 enum TimelineEventSource {
   record,
@@ -68,6 +69,18 @@ class TimelineDateNotifier extends Notifier<DateTime> {
 final timelineDateProvider = NotifierProvider<TimelineDateNotifier, DateTime>(
   TimelineDateNotifier.new,
 );
+
+class TimelineScrollToLatestSignalNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void request() => state = state + 1;
+}
+
+final timelineScrollToLatestSignalProvider =
+    NotifierProvider<TimelineScrollToLatestSignalNotifier, int>(
+      TimelineScrollToLatestSignalNotifier.new,
+    );
 
 final deletedRecordsProvider = FutureProvider<List<Map<String, Object?>>>((
   ref,
@@ -192,13 +205,14 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
     for (final e in expenses) {
       final amount = e['amount'] as num;
       final category = e['category'] as String;
+      final note = cleanExpenseNote(e['note'] as String?);
       events.add(
         TimelineEvent(
           source: TimelineEventSource.expense,
           sourceId: e['id'] as int,
           type: 'expense',
           title: '$category ¥${amount.toStringAsFixed(2)}',
-          description: (e['note'] as String?) ?? '',
+          description: note,
           timestamp: e['created_at'] as int,
           date: dateStr,
           icon: Icons.payments_rounded,

@@ -12,8 +12,9 @@ class MarkdownDirectoryService {
   final AppSettingsRepository _settings;
 
   static const _keyRootPath = 'markdown_root_path';
+  static const _keyRootTreeUri = 'markdown_root_tree_uri';
   static const _keyConfigured = 'markdown_root_configured';
-  static const _defaultDirName = 'LiflowNotes';
+  static const defaultDirName = 'Liflow';
 
   Future<String> getRootPath() async {
     final row = await _settings.findByKey(_keyRootPath);
@@ -22,10 +23,11 @@ class MarkdownDirectoryService {
       if (await dir.exists()) return dir.path;
     }
     final docs = await getApplicationDocumentsDirectory();
-    return p.join(docs.path, _defaultDirName);
+    return p.join(docs.path, defaultDirName);
   }
 
   Future<void> setRootPath(String path) async {
+    await _settings.delete(_keyRootTreeUri);
     final existing = await _settings.findByKey(_keyRootPath);
     if (existing != null) {
       await _settings.update(_keyRootPath, path);
@@ -35,9 +37,27 @@ class MarkdownDirectoryService {
     await _markConfigured();
   }
 
+  Future<String?> getTreeRootUri() async {
+    final row = await _settings.findByKey(_keyRootTreeUri);
+    final value = row?['value'] as String?;
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  Future<void> setTreeRootUri(String treeUri) async {
+    await _settings.delete(_keyRootPath);
+    final existing = await _settings.findByKey(_keyRootTreeUri);
+    if (existing != null) {
+      await _settings.update(_keyRootTreeUri, treeUri);
+    } else {
+      await _settings.create(key: _keyRootTreeUri, value: treeUri);
+    }
+    await _markConfigured();
+  }
+
   Future<void> useDefaultRoot() async {
     final docs = await getApplicationDocumentsDirectory();
-    final path = p.join(docs.path, _defaultDirName);
+    final path = p.join(docs.path, defaultDirName);
     await setRootPath(path);
   }
 

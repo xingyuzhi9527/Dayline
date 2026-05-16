@@ -2,13 +2,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/markdown/markdown_directory_service.dart';
 import '../../core/markdown/markdown_note_service.dart';
+import '../../core/markdown/markdown_storage_service.dart';
 import '../../core/database/repository_providers.dart';
 import 'long_note_state.dart';
 
-final longNoteProvider =
-    NotifierProvider<LongNoteNotifier, LongNoteState>(
-      LongNoteNotifier.new,
-    );
+final longNoteProvider = NotifierProvider<LongNoteNotifier, LongNoteState>(
+  LongNoteNotifier.new,
+);
 
 class LongNoteNotifier extends Notifier<LongNoteState> {
   @override
@@ -22,41 +22,47 @@ class LongNoteNotifier extends Notifier<LongNoteState> {
     state = state.copyWith(body: body, errorMessage: null);
   }
 
-  Future<bool> save() async {
-    if (!state.canSave) return false;
+  Future<bool> save(String title, String body) async {
+    final trimmedTitle = title.trim();
+    final trimmedBody = body.trim();
+    if (trimmedTitle.isEmpty && trimmedBody.isEmpty) return false;
 
     state = state.copyWith(isSaving: true, errorMessage: null, savedPath: null);
 
     try {
+      final now = DateTime.now();
       final settings = ref.read(appSettingsRepositoryProvider);
       final dirService = MarkdownDirectoryService(settings);
       final noteService = MarkdownNoteService(dirService);
 
       final path = await noteService.saveLongNote(
-        title: state.title,
-        body: state.body,
-        dateTime: DateTime.now(),
+        title: trimmedTitle,
+        body: trimmedBody,
+        dateTime: now,
       );
 
       // Write timeline index
-      final wordCount = state.body
+      final wordCount = trimmedBody
           .replaceAll(RegExp(r'\s+'), ' ')
           .trim()
           .split(' ')
           .where((w) => w.isNotEmpty)
           .length;
 
-      final content = state.title.trim().isNotEmpty
-          ? state.title.trim()
-          : _fallbackTitle();
+      final content = trimmedTitle.isNotEmpty ? trimmedTitle : _fallbackTitle();
 
-      await ref.read(recordsRepositoryProvider).create(
-            date: DateTime.now(),
+      await ref
+          .read(recordsRepositoryProvider)
+          .create(
+            date: now,
             type: 'long_note',
             content: content,
             metadata: {
               'path': path,
               'title': content,
+              'displayPath': MarkdownStorageService.displayPathForLocation(
+                path,
+              ),
               'wordCount': wordCount,
             },
           );

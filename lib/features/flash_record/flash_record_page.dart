@@ -373,11 +373,13 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       }
     });
 
-    return SafeArea(
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: () => _dismissAmbientState(state),
-        child: Stack(
+    return Container(
+      color: theme.colorScheme.surface,
+      child: SafeArea(
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: () => _dismissAmbientState(state),
+          child: Stack(
           fit: StackFit.expand,
           children: [
             // Main content
@@ -412,6 +414,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               _buildCardOverlay(state, theme),
           ],
         ),
+      ),
       ),
     );
   }

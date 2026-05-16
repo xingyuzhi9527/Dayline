@@ -14,6 +14,7 @@ class DashboardSummary {
     required this.trackerCount,
     required this.focusMinutes,
     required this.expenseTotal,
+    required this.monthExpenseTotal,
     required this.expenseCount,
     required this.bodyLogCount,
     required this.topTags,
@@ -34,6 +35,7 @@ class DashboardSummary {
   final int trackerCount;
   final int focusMinutes;
   final double expenseTotal;
+  final double monthExpenseTotal;
   final int expenseCount;
   final int bodyLogCount;
   final List<String> topTags;
@@ -64,19 +66,24 @@ final dashboardSummaryProvider = FutureProvider<DashboardSummary>((ref) async {
 
   final records = await ref.read(recordsRepositoryProvider).findByDate(today);
   final todos = await ref.read(todosRepositoryProvider).findByDate(today);
-  final trackerLogs =
-      await ref.read(trackerLogsRepositoryProvider).findByDate(today);
-  final focusMinutes =
-      await ref.read(focusSessionsRepositoryProvider).sumMinutesByDate(today);
-  final expenses =
-      await ref.read(expensesRepositoryProvider).findByDate(today);
-  final expenseTotal =
-      await ref.read(expensesRepositoryProvider).sumAmountByDate(today);
-  final bodyLogs =
-      await ref.read(bodyLogsRepositoryProvider).findByDate(today);
+  final trackerLogs = await ref
+      .read(trackerLogsRepositoryProvider)
+      .findByDate(today);
+  final focusMinutes = await ref
+      .read(focusSessionsRepositoryProvider)
+      .sumMinutesByDate(today);
+  final expenses = await ref.read(expensesRepositoryProvider).findByDate(today);
+  final expenseTotal = await ref
+      .read(expensesRepositoryProvider)
+      .sumAmountByDate(today);
+  final monthExpenseTotal = await ref
+      .read(expensesRepositoryProvider)
+      .sumAmountByMonth(today);
+  final bodyLogs = await ref.read(bodyLogsRepositoryProvider).findByDate(today);
 
-  final review =
-      await ref.read(dailyReviewsRepositoryProvider).findByDate(dateStr);
+  final review = await ref
+      .read(dailyReviewsRepositoryProvider)
+      .findByDate(dateStr);
 
   final tagCounts = <String, int>{};
   for (final r in records) {
@@ -109,10 +116,8 @@ final dashboardSummaryProvider = FutureProvider<DashboardSummary>((ref) async {
   }
   timestamps.sort();
 
-  final firstActivityTime =
-      timestamps.isNotEmpty ? timestamps.first : null;
-  final lastActivityTime =
-      timestamps.isNotEmpty ? timestamps.last : null;
+  final firstActivityTime = timestamps.isNotEmpty ? timestamps.first : null;
+  final lastActivityTime = timestamps.isNotEmpty ? timestamps.last : null;
 
   final longestGapMinutes = _calcLongestGap(timestamps);
   final densestHourRange = _calcDensestHour(timestamps);
@@ -137,6 +142,7 @@ final dashboardSummaryProvider = FutureProvider<DashboardSummary>((ref) async {
     trackerCount: trackerLogs.length,
     focusMinutes: focusMinutes,
     expenseTotal: expenseTotal,
+    monthExpenseTotal: monthExpenseTotal,
     expenseCount: expenses.length,
     bodyLogCount: bodyLogs.length,
     topTags: topTags,
@@ -213,8 +219,9 @@ List<String> _generateInsights({
   if (longestGapMinutes >= 120) {
     final hours = longestGapMinutes ~/ 60;
     final mins = longestGapMinutes % 60;
-    final gapText =
-        hours > 0 ? '${hours}小时${mins > 0 ? '$mins分钟' : ''}' : '${longestGapMinutes}分钟';
+    final gapText = hours > 0
+        ? '${hours}小时${mins > 0 ? '$mins分钟' : ''}'
+        : '${longestGapMinutes}分钟';
     insights.add('今天存在较长的空白时段（$gapText）。');
   }
 
@@ -242,7 +249,9 @@ List<String> _parseTags(String raw) {
   }
 }
 
-final dashboardReviewProvider = FutureProvider<Map<String, Object?>?>((ref) async {
+final dashboardReviewProvider = FutureProvider<Map<String, Object?>?>((
+  ref,
+) async {
   ref.watch(dataVersionProvider);
   final today = DateTime.now();
   return ref.read(dailyReviewsRepositoryProvider).findByDate(dateKey(today));
