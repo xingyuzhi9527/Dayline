@@ -148,6 +148,21 @@ class MarkdownDirectoryService {
     return sub;
   }
 
+  Future<String> ensureAudioAttachmentsDir(DateTime date) async {
+    final root = await ensureRoot();
+    final sub = p.join(
+      root,
+      'documents',
+      'audio',
+      MarkdownFilename.monthDir(date),
+    );
+    final dir = Directory(sub);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return sub;
+  }
+
   Future<String> ensureDocumentsDir() async {
     final root = await ensureRoot();
     final sub = p.join(root, 'documents');

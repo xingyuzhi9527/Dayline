@@ -670,7 +670,7 @@ class _HoldToTalkSession implements SttListenSession {
   Stream<SttTranscript> get transcripts => _controller.stream;
 
   @override
-  Future<SttTranscript> stop() async {
+  Future<SttTranscript> stop({bool transcribe = true}) async {
     stopCount += 1;
     const transcript = SttTranscript(
       text: 'released voice memo',

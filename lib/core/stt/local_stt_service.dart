@@ -23,11 +23,9 @@ class SttPermissionException implements Exception {
 }
 
 class LocalSttService implements SttEngine {
-  LocalSttService({
-    SttAssetManager? assetManager,
-    AudioRecorder? recorder,
-  }) : _assetManager = assetManager ?? SttAssetManager(),
-       _recorder = recorder ?? AudioRecorder();
+  LocalSttService({SttAssetManager? assetManager, AudioRecorder? recorder})
+    : _assetManager = assetManager ?? SttAssetManager(),
+      _recorder = recorder ?? AudioRecorder();
 
   static final LocalSttService instance = LocalSttService(
     assetManager: SttAssetManager(
@@ -350,7 +348,7 @@ class _LocalSttListenSession implements SttListenSession {
   }
 
   @override
-  Future<SttTranscript> stop() async {
+  Future<SttTranscript> stop({bool transcribe = true}) async {
     if (_finished) return _finalCompleter.future;
     if (_stopping) return _finalCompleter.future;
     _stopping = true;
@@ -366,11 +364,30 @@ class _LocalSttListenSession implements SttListenSession {
     } catch (_) {}
 
     final wavPath = recordedPath ?? _wavFile.path;
+    final draft = SttRecordingDraft(
+      path: wavPath,
+      duration: _watch.elapsed,
+      sampleRate: _sttSampleRate,
+    );
+    if (!transcribe) {
+      final transcript = SttTranscript(
+        text: '',
+        isFinal: true,
+        metadata: SttMetadata(
+          modelVersion: _metadata.modelVersion,
+          elapsed: _watch.elapsed,
+        ),
+        recordingDraft: draft,
+      );
+      _finish(transcript);
+      return transcript;
+    }
+
     try {
       final result = await _transcribe(
         wavPath,
       ).timeout(const Duration(seconds: 90));
-      final transcript = result.toTranscript();
+      final transcript = result.toTranscript(recordingDraft: draft);
       _finish(transcript);
       return transcript;
     } catch (_) {
@@ -381,11 +398,10 @@ class _LocalSttListenSession implements SttListenSession {
           modelVersion: _metadata.modelVersion,
           elapsed: _watch.elapsed,
         ),
+        recordingDraft: draft,
       );
       _finish(fallback);
       return fallback;
-    } finally {
-      await _deleteWav();
     }
   }
 
@@ -457,7 +473,7 @@ class _SenseVoiceTranscriptionResult {
     );
   }
 
-  SttTranscript toTranscript() {
+  SttTranscript toTranscript({SttRecordingDraft? recordingDraft}) {
     return SttTranscript(
       text: postProcessTranscript(text),
       isFinal: true,
@@ -468,6 +484,7 @@ class _SenseVoiceTranscriptionResult {
         events: _emptyToNull(events),
         elapsed: Duration(milliseconds: durationMs),
       ),
+      recordingDraft: recordingDraft,
     );
   }
 

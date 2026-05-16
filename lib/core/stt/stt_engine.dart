@@ -41,18 +41,36 @@ class SttMetadata {
   final String? events;
 }
 
+class SttRecordingDraft {
+  const SttRecordingDraft({
+    required this.path,
+    required this.duration,
+    this.mimeType = 'audio/wav',
+    this.sampleRate,
+    this.codec = 'wav',
+  });
+
+  final String path;
+  final Duration duration;
+  final String mimeType;
+  final int? sampleRate;
+  final String codec;
+}
+
 class SttTranscript {
   const SttTranscript({
     required this.text,
     required this.isFinal,
     this.audioLevel = 0,
     this.metadata = const SttMetadata(),
+    this.recordingDraft,
   });
 
   final String text;
   final bool isFinal;
   final double audioLevel;
   final SttMetadata metadata;
+  final SttRecordingDraft? recordingDraft;
 }
 
 abstract interface class SttEngine {
@@ -66,7 +84,7 @@ abstract interface class SttEngine {
 abstract interface class SttListenSession {
   Stream<SttTranscript> get transcripts;
 
-  Future<SttTranscript> stop();
+  Future<SttTranscript> stop({bool transcribe = true});
 
   Future<void> cancel();
 }

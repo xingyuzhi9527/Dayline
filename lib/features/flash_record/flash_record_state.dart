@@ -5,6 +5,8 @@ import '../../core/stt/stt_engine.dart';
 
 enum FlashPhase { idle, listening, recognized, confirming, saving, saved }
 
+enum FlashRecordingMode { audioOnly, transcribe }
+
 const _unchanged = Object();
 
 @immutable
@@ -21,6 +23,8 @@ class FlashRecordState {
     this.audioLevel = 0,
     this.transcriptFinal = false,
     this.sttMetadata,
+    this.recordingDraft,
+    this.recordingMode = FlashRecordingMode.transcribe,
     this.textSaving = false,
     this.savedSequence = 0,
   });
@@ -36,6 +40,8 @@ class FlashRecordState {
   final double audioLevel;
   final bool transcriptFinal;
   final SttMetadata? sttMetadata;
+  final SttRecordingDraft? recordingDraft;
+  final FlashRecordingMode recordingMode;
   final bool textSaving;
   final int savedSequence;
 
@@ -57,6 +63,8 @@ class FlashRecordState {
     double? audioLevel,
     bool? transcriptFinal,
     Object? sttMetadata = _unchanged,
+    Object? recordingDraft = _unchanged,
+    FlashRecordingMode? recordingMode,
     bool? textSaving,
     int? savedSequence,
   }) {
@@ -78,6 +86,10 @@ class FlashRecordState {
       sttMetadata: identical(sttMetadata, _unchanged)
           ? this.sttMetadata
           : sttMetadata as SttMetadata?,
+      recordingDraft: identical(recordingDraft, _unchanged)
+          ? this.recordingDraft
+          : recordingDraft as SttRecordingDraft?,
+      recordingMode: recordingMode ?? this.recordingMode,
       textSaving: textSaving ?? this.textSaving,
       savedSequence: savedSequence ?? this.savedSequence,
     );
