@@ -12,6 +12,29 @@ void main() {
   sqfliteFfiInit();
 
   test(
+    'given notifier is created, when build completes, then STT initializes asynchronously',
+    () async {
+      final sttEngine = _FakeSttEngine();
+      final container = ProviderContainer(
+        overrides: [sttEngineProvider.overrideWithValue(sttEngine)],
+      );
+      addTearDown(container.dispose);
+
+      final state = container.read(flashRecordProvider);
+      expect(state.sttStatus, SttAvailabilityStatus.loading);
+      expect(sttEngine.initializeCount, 0);
+
+      await Future<void>.delayed(Duration.zero);
+
+      expect(sttEngine.initializeCount, 1);
+      expect(
+        container.read(flashRecordProvider).sttStatus,
+        SttAvailabilityStatus.unavailable,
+      );
+    },
+  );
+
+  test(
     'given a parsed time, when saving text, then created_at follows that time',
     () async {
       final database = LocalDatabase(
@@ -29,13 +52,11 @@ void main() {
 
       final today = DateTime.now();
 
-      await container
-          .read(flashRecordProvider.notifier)
-          .saveAsText('08:05 出门');
+      await container.read(flashRecordProvider.notifier).saveAsText('08:05 出门');
 
-      final records = await container.read(recordsRepositoryProvider).findByDate(
-        today,
-      );
+      final records = await container
+          .read(recordsRepositoryProvider)
+          .findByDate(today);
 
       expect(records, hasLength(1));
       expect(records.single['time'], '08:05');
@@ -50,9 +71,13 @@ void main() {
 }
 
 class _FakeSttEngine implements SttEngine {
+  var initializeCount = 0;
+
   @override
-  Future<SttAvailability> initialize() async =>
-      const SttAvailability.unavailable('offline');
+  Future<SttAvailability> initialize() async {
+    initializeCount += 1;
+    return const SttAvailability.unavailable('offline');
+  }
 
   @override
   Future<SttListenSession> startListening() {

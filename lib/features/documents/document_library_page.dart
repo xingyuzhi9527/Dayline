@@ -147,6 +147,9 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
                             return _LibraryItemTile(
                               item: item,
                               onTap: () => _openItem(item),
+                              onDelete: item.isMarkdown
+                                  ? null
+                                  : () => _confirmDeleteDocument(item),
                             );
                           },
                         ),
@@ -248,13 +251,67 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
         );
     }
   }
+
+  Future<void> _confirmDeleteDocument(DocumentLibraryItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除资料库文档？'),
+        content: Text('会删除 Liflow/documents 里的副本，不会删除原始文件。\n\n${item.name}'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await ref.read(documentLibraryServiceProvider).deleteDocument(item);
+      if (!mounted) return;
+      setState(() {
+        _showDocuments = true;
+        _snapshotFuture = _load();
+      });
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('已删除 ${item.name}'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 1),
+          ),
+        );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('删除失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
 }
 
 class _LibraryItemTile extends StatelessWidget {
-  const _LibraryItemTile({required this.item, required this.onTap});
+  const _LibraryItemTile({
+    required this.item,
+    required this.onTap,
+    this.onDelete,
+  });
 
   final DocumentLibraryItem item;
   final VoidCallback onTap;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -282,12 +339,20 @@ class _LibraryItemTile extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
       ),
-      trailing: Icon(
-        item.isMarkdown
-            ? Icons.chevron_right_rounded
-            : Icons.open_in_new_rounded,
-        color: AppColors.muted,
-      ),
+      trailing: item.isMarkdown
+          ? const Icon(Icons.chevron_right_rounded, color: AppColors.muted)
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: '删除',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onDelete,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 20),
+                ),
+                const Icon(Icons.open_in_new_rounded, color: AppColors.muted),
+              ],
+            ),
       onTap: onTap,
     );
   }

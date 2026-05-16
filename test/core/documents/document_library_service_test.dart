@@ -87,4 +87,27 @@ void main() {
     );
     expect(snapshot.documents.map((item) => item.name), contains('paper.pdf'));
   });
+
+  test('deleteDocument removes imported copy from documents folder', () async {
+    final documentsDir = Directory(
+      '${rootDir.path}${Platform.pathSeparator}documents',
+    );
+    await documentsDir.create(recursive: true);
+    final file = File('${documentsDir.path}${Platform.pathSeparator}paper.pdf');
+    await file.writeAsBytes(const [1, 2, 3]);
+
+    final snapshot = await service.load();
+    final item = snapshot.documents.singleWhere(
+      (item) => item.name == 'paper.pdf',
+    );
+
+    await service.deleteDocument(item);
+
+    expect(await file.exists(), isFalse);
+    final afterDelete = await service.load();
+    expect(
+      afterDelete.documents.map((item) => item.name),
+      isNot(contains('paper.pdf')),
+    );
+  });
 }

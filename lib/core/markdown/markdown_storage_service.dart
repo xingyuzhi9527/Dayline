@@ -180,6 +180,19 @@ class MarkdownStorageService {
     });
   }
 
+  Future<void> deleteTreeDocument({required String relativePath}) async {
+    final treeUri = await _directoryService.getTreeRootUri();
+    if (treeUri == null || treeUri.isEmpty || !Platform.isAndroid) {
+      throw StateError('Document tree storage is not available.');
+    }
+
+    await ensureTreeRootSubdir();
+    await _channel.invokeMethod<void>('deleteDocument', {
+      'treeUri': treeUri,
+      'relativePath': await _treePath(relativePath),
+    });
+  }
+
   Future<void> writeRelativeBinaryFile({
     required String relativePath,
     required String sourcePath,
