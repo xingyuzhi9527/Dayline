@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/media/audio_recording_service.dart';
 import '../../../core/media/photo_moment_service.dart';
 import '../../../core/database/repository_providers.dart';
 import '../../../core/theme/app_colors.dart';
@@ -52,8 +53,8 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
                     Text(
                       '回收站 (${deleted.length})',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.accent.withAlpha(160),
-                          ),
+                        color: AppColors.accent.withAlpha(160),
+                      ),
                     ),
                     const Spacer(),
                     Icon(
@@ -105,10 +106,8 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
                                 : content,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: AppColors.muted,
-                                    ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: AppColors.muted),
                           ),
                         ),
                         SizedBox(
@@ -119,8 +118,10 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
                             iconSize: 16,
                             tooltip: '恢复',
                             onPressed: () => _restore(id),
-                            icon: Icon(Icons.restore_rounded,
-                                color: AppColors.tracker),
+                            icon: Icon(
+                              Icons.restore_rounded,
+                              color: AppColors.tracker,
+                            ),
                           ),
                         ),
                         SizedBox(
@@ -131,8 +132,10 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
                             iconSize: 16,
                             tooltip: '彻底删除',
                             onPressed: () => _permanentlyDelete(row),
-                            icon: Icon(Icons.delete_forever_rounded,
-                                color: AppColors.accent.withAlpha(160)),
+                            icon: Icon(
+                              Icons.delete_forever_rounded,
+                              color: AppColors.accent.withAlpha(160),
+                            ),
                           ),
                         ),
                       ],
@@ -144,7 +147,7 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
         );
       },
       loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+      error: (_, _) => const SizedBox.shrink(),
     );
   }
 
@@ -158,10 +161,13 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
   Future<void> _permanentlyDelete(Map<String, Object?> row) async {
     final id = row['id'] as int;
     if ((row['type'] as String?) == 'moment_photo') {
-      await ref.read(photoMomentServiceProvider).permanentlyDeletePhotoMoment(
-        id,
-      );
+      await ref
+          .read(photoMomentServiceProvider)
+          .permanentlyDeletePhotoMoment(id);
     } else {
+      await ref
+          .read(audioRecordingServiceProvider)
+          .deleteAttachmentsForRecord(id);
       await ref.read(recordsRepositoryProvider).permanentDelete(id);
     }
     ref.invalidate(deletedRecordsProvider);

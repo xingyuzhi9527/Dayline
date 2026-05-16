@@ -52,7 +52,9 @@ class _DebugSttListenSession implements SttListenSession {
   Stream<SttTranscript> get transcripts => _controller.stream;
 
   void start() {
-    _controller.add(const SttTranscript(text: '', isFinal: false, audioLevel: 0.2));
+    _controller.add(
+      const SttTranscript(text: '', isFinal: false, audioLevel: 0.2),
+    );
     _timer = Timer(const Duration(milliseconds: 800), () {
       if (_finished) return;
       _latestText = _mockText;
@@ -67,11 +69,13 @@ class _DebugSttListenSession implements SttListenSession {
   }
 
   @override
-  Future<SttTranscript> stop() async {
+  Future<SttTranscript> stop({bool transcribe = true}) async {
     if (_finished) return _finalCompleter.future;
     _timer?.cancel();
     final transcript = SttTranscript(
-      text: postProcessTranscript(_latestText.isEmpty ? _mockText : _latestText),
+      text: postProcessTranscript(
+        _latestText.isEmpty ? _mockText : _latestText,
+      ),
       isFinal: true,
       audioLevel: 0,
       metadata: const SttMetadata(modelVersion: 'debug-mock'),
@@ -86,9 +90,7 @@ class _DebugSttListenSession implements SttListenSession {
     if (!_finished) {
       _finished = true;
       await _controller.close();
-      _finalCompleter.complete(
-        const SttTranscript(text: '', isFinal: true),
-      );
+      _finalCompleter.complete(const SttTranscript(text: '', isFinal: true));
     }
   }
 

@@ -283,6 +283,7 @@ IconData _iconForType(String type) => switch (type) {
   'sleep' => Icons.bedtime_rounded,
   'mood' => Icons.emoji_emotions_outlined,
   'moment_photo' => Icons.camera_alt_rounded,
+  'voice_memo' => Icons.graphic_eq_rounded,
   _ => Icons.notes_rounded,
 };
 

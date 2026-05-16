@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repository_providers.dart';
+import '../../core/media/audio_recording_service.dart';
 import '../../core/parser/expense_note_cleaner.dart';
 import '../../core/parser/lui_lite_parser.dart';
 import '../../core/parser/parsed_input_time.dart';
@@ -22,6 +23,8 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   late final SttEngine _sttEngine;
   SttListenSession? _sttSession;
   StreamSubscription<SttTranscript>? _sttSub;
+  SttRecordingDraft? _recordingDraft;
+  AudioRecordingService? _audioRecordingService;
   bool _disposed = false;
   int _listenRequestId = 0;
 
@@ -32,6 +35,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       _disposed = true;
       unawaited(_sttSub?.cancel());
       unawaited(_sttSession?.cancel());
+      unawaited(_audioRecordingService?.deleteDraftIfExists(_recordingDraft));
     });
     unawaited(
       Future<void>.microtask(() async {
@@ -62,8 +66,18 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
 
   // ---- voice path ----
 
+  void setRecordingMode(FlashRecordingMode mode) {
+    if (state.phase == FlashPhase.listening ||
+        state.phase == FlashPhase.saving) {
+      return;
+    }
+    state = state.copyWith(recordingMode: mode, errorMessage: null);
+  }
+
   Future<void> startListening() async {
     final requestId = ++_listenRequestId;
+    await _discardRecordingDraft();
+    _recordingDraft = null;
     state = state.copyWith(
       phase: FlashPhase.listening,
       rawText: '',
@@ -73,6 +87,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       errorMessage: null,
       source: 'voice',
       transcriptFinal: false,
+      recordingDraft: null,
     );
 
     final availability = state.sttStatus == SttAvailabilityStatus.ready
@@ -126,9 +141,11 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     }
 
     try {
-      final transcript = await session.stop();
+      final shouldTranscribe =
+          state.recordingMode == FlashRecordingMode.transcribe;
+      final transcript = await session.stop(transcribe: shouldTranscribe);
       if (_disposed) return;
-      _completeTranscript(transcript);
+      _completeTranscript(transcript, transcribed: shouldTranscribe);
     } catch (e) {
       if (_disposed) return;
       state = state.copyWith(
@@ -143,7 +160,10 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     if (state.phase != FlashPhase.listening) return;
 
     if (transcript.isFinal) {
-      _completeTranscript(transcript);
+      _completeTranscript(
+        transcript,
+        transcribed: state.recordingMode == FlashRecordingMode.transcribe,
+      );
       return;
     }
 
@@ -158,9 +178,17 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     );
   }
 
-  void _completeTranscript(SttTranscript transcript) {
+  void _completeTranscript(
+    SttTranscript transcript, {
+    required bool transcribed,
+  }) {
     final recognizedText = transcript.text.trim();
-    if (recognizedText.isNotEmpty) {
+    final draft = transcript.recordingDraft;
+    if (transcribed && recognizedText.isNotEmpty) {
+      _recordingDraft = draft;
+      if (draft != null) {
+        _audioService();
+      }
       final parsed = LuiLiteParser.parse(recognizedText);
       state = state.copyWith(
         phase: FlashPhase.confirming,
@@ -170,8 +198,26 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         parsedInput: parsed,
         sttMetadata: transcript.metadata,
         transcriptFinal: true,
+        recordingDraft: draft,
         errorMessage: null,
       );
+    } else if (draft != null) {
+      _recordingDraft = draft;
+      _audioService();
+      state = state.copyWith(
+        phase: FlashPhase.recognized,
+        rawText: recognizedText,
+        partialText: recognizedText,
+        audioLevel: 0,
+        parsedInput: null,
+        sttMetadata: transcript.metadata,
+        transcriptFinal: true,
+        recordingDraft: draft,
+        errorMessage: transcribed ? '没有听清，可以先保存原音。' : null,
+      );
+      if (!transcribed) {
+        unawaited(saveAudioOnly());
+      }
     } else {
       state = state.copyWith(
         phase: FlashPhase.idle,
@@ -236,6 +282,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   }
 
   void cancelConfirm() {
+    unawaited(_discardRecordingDraft());
     state = _idleStateKeepingStt();
   }
 
@@ -246,9 +293,20 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     state = state.copyWith(phase: FlashPhase.saving);
 
     try {
-      await _persist(parsed).timeout(_saveTimeout);
+      final draft = state.recordingDraft;
+      if (draft != null) {
+        _audioService();
+      }
+      final draftConsumed = await _persist(
+        parsed,
+        recordingDraft: draft,
+      ).timeout(_saveTimeout);
+      if (!draftConsumed) {
+        await _audioRecordingService?.deleteDraftIfExists(draft);
+      }
       ref.read(dataVersionProvider.notifier).increment();
-      state = state.copyWith(phase: FlashPhase.saved);
+      _recordingDraft = null;
+      state = state.copyWith(phase: FlashPhase.saved, recordingDraft: null);
     } on TimeoutException {
       state = state.copyWith(
         phase: FlashPhase.confirming,
@@ -270,7 +328,41 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     return FlashRecordState(
       sttStatus: state.sttStatus,
       sttStatusMessage: state.sttStatusMessage,
+      recordingMode: state.recordingMode,
     );
+  }
+
+  Future<void> saveAudioOnly() async {
+    final draft = state.recordingDraft;
+    if (draft == null) {
+      state = state.copyWith(errorMessage: '没有可保存的录音。');
+      return;
+    }
+
+    state = state.copyWith(phase: FlashPhase.saving);
+
+    try {
+      await _audioService()
+          .createVoiceMemo(
+            draft: draft,
+            content: state.rawText,
+            createdAt: DateTime.now(),
+          )
+          .timeout(_saveTimeout);
+      ref.read(dataVersionProvider.notifier).increment();
+      _recordingDraft = null;
+      state = state.copyWith(phase: FlashPhase.saved, recordingDraft: null);
+    } on TimeoutException {
+      state = state.copyWith(
+        phase: FlashPhase.recognized,
+        errorMessage: '保存超时，请再试一次。',
+      );
+    } catch (e) {
+      state = state.copyWith(
+        phase: FlashPhase.recognized,
+        errorMessage: e.toString(),
+      );
+    }
   }
 
   // ---- text path ----
@@ -316,23 +408,25 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
 
   // ---- persistence ----
 
-  Future<void> _persist(ParsedInput parsed) async {
+  Future<bool> _persist(
+    ParsedInput parsed, {
+    SttRecordingDraft? recordingDraft,
+  }) async {
     final now = DateTime.now();
     final createdAt = parsedInputTimeToDateTime(now, parsed.time) ?? now;
 
     switch (parsed.type) {
       case ParsedInputType.memo:
-        await ref
-            .read(recordsRepositoryProvider)
-            .create(
-              date: now,
-              type: 'memo',
-              content: parsed.content,
-              time: parsed.time,
-              tags: parsed.tags,
-              metadata: parsed.metadata,
-              createdAt: createdAt,
-            );
+        return _createRecordWithOptionalAudio(
+          date: now,
+          type: 'memo',
+          content: parsed.content,
+          time: parsed.time,
+          tags: parsed.tags,
+          metadata: parsed.metadata,
+          createdAt: createdAt,
+          recordingDraft: recordingDraft,
+        );
 
       case ParsedInputType.todo:
         await ref
@@ -343,6 +437,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
               dueTime: parsed.time,
               createdAt: createdAt,
             );
+        return false;
 
       case ParsedInputType.focus:
         final d = (parsed.metadata['durationMinutes'] as int?) ?? 0;
@@ -355,6 +450,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
               note: parsed.content,
               createdAt: createdAt,
             );
+        return false;
 
       case ParsedInputType.expense:
         final a = (parsed.metadata['amount'] as num?)?.toDouble() ?? 0.0;
@@ -368,6 +464,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
               note: cleanExpenseNote(parsed.content),
               createdAt: createdAt,
             );
+        return false;
 
       case ParsedInputType.body:
         final v = (parsed.metadata['value'] as num?)?.toDouble() ?? 0.0;
@@ -381,35 +478,76 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
               note: parsed.content,
               createdAt: createdAt,
             );
+        return false;
 
       case ParsedInputType.sleep:
-        await ref
-            .read(recordsRepositoryProvider)
-            .create(
-              date: now,
-              type: 'sleep',
-              content: parsed.content,
-              time: parsed.time,
-              tags: parsed.tags,
-              metadata: parsed.metadata,
-              createdAt: createdAt,
-            );
+        return _createRecordWithOptionalAudio(
+          date: now,
+          type: 'sleep',
+          content: parsed.content,
+          time: parsed.time,
+          tags: parsed.tags,
+          metadata: parsed.metadata,
+          createdAt: createdAt,
+          recordingDraft: recordingDraft,
+        );
 
       case ParsedInputType.mood:
-        await ref
-            .read(recordsRepositoryProvider)
-            .create(
-              date: now,
-              type: 'mood',
-              content: parsed.content,
-              time: parsed.time,
-              tags: parsed.tags,
-              metadata: parsed.metadata,
-              createdAt: createdAt,
-            );
+        return _createRecordWithOptionalAudio(
+          date: now,
+          type: 'mood',
+          content: parsed.content,
+          time: parsed.time,
+          tags: parsed.tags,
+          metadata: parsed.metadata,
+          createdAt: createdAt,
+          recordingDraft: recordingDraft,
+        );
 
       case ParsedInputType.tracker:
         await _saveTrackerLog(parsed, now, createdAt);
+        return false;
+    }
+  }
+
+  Future<bool> _createRecordWithOptionalAudio({
+    required DateTime date,
+    required String type,
+    required String content,
+    String? time,
+    List<String> tags = const [],
+    Map<String, Object?> metadata = const {},
+    required DateTime createdAt,
+    SttRecordingDraft? recordingDraft,
+  }) async {
+    final recordId = await ref
+        .read(recordsRepositoryProvider)
+        .create(
+          date: date,
+          type: type,
+          content: content,
+          time: time,
+          tags: tags,
+          metadata: recordingDraft == null
+              ? metadata
+              : {...metadata, 'source': 'voice', 'hasAudio': true},
+          createdAt: createdAt,
+        );
+
+    if (recordingDraft == null) return false;
+
+    try {
+      await ref
+          .read(audioRecordingServiceProvider)
+          .attachDraftToRecord(
+            recordId: recordId,
+            draft: recordingDraft,
+            writtenAt: createdAt,
+          );
+      return true;
+    } catch (_) {
+      await ref.read(recordsRepositoryProvider).permanentDelete(recordId);
+      rethrow;
     }
   }
 
@@ -466,5 +604,23 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     }
 
     return normalized;
+  }
+
+  Future<void> _discardRecordingDraft() async {
+    final draft = _recordingDraft ?? state.recordingDraft;
+    if (draft == null) return;
+    await _audioService().deleteDraftIfExists(draft);
+    _recordingDraft = null;
+    if (!_disposed) {
+      state = state.copyWith(recordingDraft: null);
+    }
+  }
+
+  AudioRecordingService _audioService() {
+    final existing = _audioRecordingService;
+    if (existing != null) return existing;
+    final service = ref.read(audioRecordingServiceProvider);
+    _audioRecordingService = service;
+    return service;
   }
 }

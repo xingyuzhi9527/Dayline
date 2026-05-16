@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/database/repositories.dart';
+import '../../../core/media/audio_recording_service.dart';
 import '../../../core/media/photo_moment_service.dart';
 import '../../../core/database/repository_providers.dart';
 import '../../../core/markdown/markdown_directory_service.dart';
@@ -642,6 +643,11 @@ class _TimelineEventCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final attachment = event.primaryAttachment;
     final imagePath = attachment?['local_path'] as String?;
+    final attachmentType = attachment?['media_type'] as String?;
+    final isAudioAttachment =
+        attachmentType == 'audio' &&
+        imagePath != null &&
+        imagePath.trim().isNotEmpty;
     final isPhotoMoment =
         event.type == 'moment_photo' &&
         imagePath != null &&
@@ -649,6 +655,7 @@ class _TimelineEventCard extends StatelessWidget {
     final hasTitle = event.title.trim().isNotEmpty;
     final hasDetails =
         (event.description.isNotEmpty && !isPhotoMoment) ||
+        isAudioAttachment ||
         event.tags.isNotEmpty ||
         hasTitle;
 
@@ -749,6 +756,15 @@ class _TimelineEventCard extends StatelessWidget {
                         ),
                       ),
                     ),
+                  if (isAudioAttachment)
+                    Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.xs),
+                      child: _AudioAttachmentStrip(
+                        attachment: attachment!,
+                        color: color,
+                        theme: theme,
+                      ),
+                    ),
                   if (hasTitle)
                     Padding(
                       padding: EdgeInsets.only(top: hasDetails ? 8 : 0),
@@ -812,6 +828,63 @@ class _TimelineEventCard extends StatelessWidget {
       );
     }
     return card;
+  }
+}
+
+class _AudioAttachmentStrip extends StatelessWidget {
+  const _AudioAttachmentStrip({
+    required this.attachment,
+    required this.color,
+    required this.theme,
+  });
+
+  final Map<String, Object?> attachment;
+  final Color color;
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final path = attachment['local_path'] as String? ?? '';
+    final durationMs = attachment['duration_ms'] as int?;
+    final duration = durationMs == null
+        ? null
+        : Duration(milliseconds: durationMs);
+    final exists = path.isNotEmpty && File(path).existsSync();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: color.withAlpha(18),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: color.withAlpha(50)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            exists ? Icons.graphic_eq_rounded : Icons.error_outline_rounded,
+            size: 18,
+            color: exists ? color : AppColors.accent,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Text(
+              exists
+                  ? '录音附件${duration == null ? '' : ' ${_formatAttachmentDuration(duration)}'}'
+                  : '录音文件缺失',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: exists ? color : AppColors.accent,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -1573,6 +1646,13 @@ String _numberText(Object? value) {
   return value.toString();
 }
 
+String _formatAttachmentDuration(Duration duration) {
+  final totalSeconds = duration.inSeconds;
+  final minutes = (totalSeconds ~/ 60).toString().padLeft(2, '0');
+  final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
+  return '$minutes:$seconds';
+}
+
 List<String> _decodeTags(Object? raw) {
   if (raw is List<String>) return raw;
   if (raw is String && raw.trim().isNotEmpty) {
@@ -1670,6 +1750,7 @@ String _labelForType(String type) => switch (type) {
   'sleep' => '睡眠',
   'mood' => '情绪',
   'moment_photo' => '图片片刻',
+  'voice_memo' => '语音片段',
   _ => type,
 };
 
@@ -1684,6 +1765,7 @@ Color _colorForType(String type) => switch (type) {
   'sleep' => const Color(0xFF5C6BC0),
   'mood' => const Color(0xFFD5952F),
   'moment_photo' => const Color(0xFF2F7D6A),
+  'voice_memo' => const Color(0xFF5B7C99),
   _ => AppColors.muted,
 };
 
@@ -1786,7 +1868,7 @@ class _TrashButton extends ConsumerWidget {
                         horizontal: AppSpacing.md,
                       ),
                       itemCount: deleted.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (ctx, i) {
                         final row = deleted[i];
                         final content = row['content'] as String? ?? '';
@@ -1838,6 +1920,9 @@ class _TrashButton extends ConsumerWidget {
                                         .permanentlyDeletePhotoMoment(id);
                                   } else {
                                     await ref
+                                        .read(audioRecordingServiceProvider)
+                                        .deleteAttachmentsForRecord(id);
+                                    await ref
                                         .read(recordsRepositoryProvider)
                                         .permanentDelete(id);
                                   }
@@ -1861,7 +1946,7 @@ class _TrashButton extends ConsumerWidget {
             height: 80,
             child: Center(child: CircularProgressIndicator()),
           ),
-          error: (_, __) =>
+          error: (_, _) =>
               const SizedBox(height: 80, child: Center(child: Text('加载失败'))),
         );
       },

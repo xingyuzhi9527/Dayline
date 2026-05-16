@@ -967,11 +967,15 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
 
   Widget _buildVoiceArea(FlashRecordState state, ThemeData theme) {
     final effectiveLabel = state.phase == FlashPhase.listening
-        ? '正在本地识别...'
+        ? state.recordingMode == FlashRecordingMode.audioOnly
+              ? '正在录音，松开后保存原音'
+              : '正在本地识别...'
         : state.sttLoading
         ? '正在唤醒离线大脑...'
         : state.sttReady
-        ? '时刻准备记录你的灵感'
+        ? state.recordingMode == FlashRecordingMode.audioOnly
+              ? '大话筒会保存原始录音'
+              : '时刻准备记录你的灵感'
         : state.sttStatusMessage;
 
     final liveText = state.partialText.trim().isNotEmpty
@@ -983,6 +987,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        _RecordingModeToggle(
+          mode: state.recordingMode,
+          enabled: state.phase != FlashPhase.listening,
+          onChanged: (mode) {
+            ref.read(flashRecordProvider.notifier).setRecordingMode(mode);
+          },
+        ),
+        const SizedBox(height: AppSpacing.sm),
         RepaintBoundary(
           child: VoiceButton(
             phase: state.phase.name,
@@ -1037,10 +1049,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                   : liveText.isNotEmpty
                   ? liveText
                   : state.phase == FlashPhase.listening
-                  ? '松开后整理成闪记卡片'
+                  ? state.recordingMode == FlashRecordingMode.audioOnly
+                        ? '松开后保存为一条语音片段'
+                        : '松开后整理成闪记卡片'
                   : state.sttLoading
                   ? '首次加载稍慢，之后会热启动'
-                  : '也可以长按话筒说话',
+                  : state.recordingMode == FlashRecordingMode.audioOnly
+                  ? '适合保留语气、环境声和完整表达'
+                  : '适合变成可编辑、可分类的文字记录',
               key: ValueKey('${errorText ?? ''}-$liveText'),
               textAlign: TextAlign.center,
               maxLines: 2,
@@ -1060,6 +1076,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 
   Widget _buildRecognizedArea(FlashRecordState state, ThemeData theme) {
+    if (state.recordingDraft != null && state.rawText.trim().isEmpty) {
+      return _buildAudioDraftArea(state, theme);
+    }
+
     if (_recognizedTextController.text != state.rawText) {
       _recognizedTextController.text = state.rawText;
       _recognizedTextController.selection = TextSelection.fromPosition(
@@ -1136,6 +1156,74 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAudioDraftArea(FlashRecordState state, ThemeData theme) {
+    final draft = state.recordingDraft;
+    final durationText = draft == null
+        ? ''
+        : _formatAudioDuration(draft.duration);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.containerMargin,
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.graphic_eq_rounded,
+              color: AppColors.primary,
+              size: 42,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              durationText.isEmpty ? '语音片段' : '语音片段 $durationText',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (state.errorMessage?.trim().isNotEmpty == true) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                state.errorMessage!,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: AppColors.accent,
+                ),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.md),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton(
+                  onPressed: () {
+                    ref.read(flashRecordProvider.notifier).cancelConfirm();
+                  },
+                  child: const Text('放弃'),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                FilledButton.icon(
+                  onPressed: () {
+                    ref.read(flashRecordProvider.notifier).saveAudioOnly();
+                  },
+                  icon: const Icon(Icons.save_rounded, size: 18),
+                  label: const Text('保存原音'),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1889,6 +1977,128 @@ class _ToolDrawerAction extends StatelessWidget {
       ),
     );
   }
+}
+
+class _RecordingModeToggle extends StatelessWidget {
+  const _RecordingModeToggle({
+    required this.mode,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final FlashRecordingMode mode;
+  final bool enabled;
+  final ValueChanged<FlashRecordingMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      width: 248,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppColors.surface.withAlpha(220),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border.withAlpha(180)),
+      ),
+      child: Row(
+        children: [
+          _RecordingModeSegment(
+            icon: Icons.graphic_eq_rounded,
+            label: '留原音',
+            selected: mode == FlashRecordingMode.audioOnly,
+            enabled: enabled,
+            theme: theme,
+            onTap: () => onChanged(FlashRecordingMode.audioOnly),
+          ),
+          _RecordingModeSegment(
+            icon: Icons.notes_rounded,
+            label: '转文字',
+            selected: mode == FlashRecordingMode.transcribe,
+            enabled: enabled,
+            theme: theme,
+            onTap: () => onChanged(FlashRecordingMode.transcribe),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecordingModeSegment extends StatelessWidget {
+  const _RecordingModeSegment({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.enabled,
+    required this.theme,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final bool enabled;
+  final ThemeData theme;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tint = selected ? AppColors.primary : AppColors.muted;
+
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+          onTap: enabled ? onTap : null,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected
+                  ? AppColors.primary.withAlpha(28)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 16,
+                  color: tint.withAlpha(enabled ? 220 : 120),
+                ),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: tint.withAlpha(enabled ? 230 : 130),
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _formatAudioDuration(Duration duration) {
+  final totalSeconds = duration.inSeconds;
+  final minutes = (totalSeconds ~/ 60).toString().padLeft(2, '0');
+  final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
+  return '$minutes:$seconds';
 }
 
 String _formatEventTime(int timestamp) {
