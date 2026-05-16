@@ -106,6 +106,25 @@ class DocumentLibraryService {
     );
   }
 
+  Future<void> deleteDocument(DocumentLibraryItem item) async {
+    if (item.kind != LibraryItemKind.document ||
+        !item.relativePath.startsWith('documents/')) {
+      throw StateError('Only imported documents can be deleted here.');
+    }
+
+    final treeUri = await _directoryService.getTreeRootUri();
+    if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
+      await _storageService.deleteTreeDocument(relativePath: item.relativePath);
+      return;
+    }
+
+    final root = await _directoryService.ensureRoot();
+    final file = File(_joinLocal(root, item.relativePath));
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
+
   Future<DocumentLibrarySnapshot> _loadTree(String treeUri) async {
     final rows = await _storageService.listTreeFiles(
       roots: const ['daily', 'notes', 'documents'],
@@ -235,6 +254,20 @@ class DocumentLibraryService {
   String _relativePath(String root, String filePath) {
     final relative = p.relative(filePath, from: root);
     return p.split(relative).join('/');
+  }
+
+  String _joinLocal(String root, String relativePath) {
+    final normalized = p.posix.normalize(relativePath).replaceAll('\\', '/');
+    if (p.posix.isAbsolute(normalized) ||
+        normalized == '..' ||
+        normalized.startsWith('../')) {
+      throw ArgumentError('Unsafe document path: $relativePath');
+    }
+    final segments = normalized
+        .split('/')
+        .where((segment) => segment.isNotEmpty && segment != '.')
+        .toList();
+    return p.joinAll([root, ...segments]);
   }
 
   String? _mimeTypeForPath(String path) {

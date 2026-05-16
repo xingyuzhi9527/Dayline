@@ -59,6 +59,7 @@ class MainActivity : FlutterActivity() {
                     "listFiles" -> listFiles(call, result)
                     "importDocument" -> importDocument(call, result)
                     "openDocument" -> openDocument(call, result)
+                    "deleteDocument" -> deleteDocument(call, result)
                     "writeBinaryFile" -> writeBinaryFile(call, result)
                     "writeTextFile" -> writeTextFile(call, result)
                     "readTextFile" -> readTextFile(call, result)
@@ -224,6 +225,19 @@ class MainActivity : FlutterActivity() {
         } catch (error: Throwable) {
             result.error("document_open_error", error.message, null)
         }
+    }
+
+    private fun deleteDocument(call: MethodCall, result: MethodChannel.Result) {
+        val treeUri = call.argument<String>("treeUri")
+            ?: throw IllegalArgumentException("Missing: treeUri")
+        val relativePath = call.argument<String>("relativePath")
+            ?: throw IllegalArgumentException("Missing: relativePath")
+
+        val file = resolveFile(Uri.parse(treeUri), relativePath, false)
+        if (!file.delete()) {
+            throw IllegalStateException("Cannot delete document: $relativePath")
+        }
+        result.success(null)
     }
 
     private fun writeBinaryFile(call: MethodCall, result: MethodChannel.Result) {

@@ -33,7 +33,13 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       unawaited(_sttSub?.cancel());
       unawaited(_sttSession?.cancel());
     });
-    unawaited(_initializeStt());
+    unawaited(
+      Future<void>.microtask(() async {
+        if (!_disposed) {
+          await _initializeStt();
+        }
+      }),
+    );
     return const FlashRecordState();
   }
 
