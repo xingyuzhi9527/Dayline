@@ -3,8 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/database/repositories.dart';
 import '../../../core/database/repository_providers.dart';
+import '../../../core/markdown/daily_review_markdown.dart';
 import '../../../core/markdown/markdown_directory_service.dart';
+import '../../../core/markdown/markdown_document_parser.dart';
 import '../../../core/markdown/markdown_note_service.dart';
+import '../../../core/markdown/markdown_storage_service.dart';
 import '../../markdown_setup/markdown_directory_dialog.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -62,7 +65,7 @@ class DashboardExpandedView extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           const _EveningReviewInput(),
           const SizedBox(height: AppSpacing.lg),
-          _DividerLabel(label: '生成笔记'),
+          _DividerLabel(label: '今日日记'),
           const SizedBox(height: AppSpacing.sm),
           _GenerateNoteSection(summary: summary),
           const SizedBox(height: AppSpacing.md),
@@ -590,28 +593,85 @@ class _EveningReviewInputState extends ConsumerState<_EveningReviewInput> {
     setState(() => _saving = true);
     try {
       final today = DateTime.now();
+      final kept = _keptController.text.trim();
+      final adjust = _adjustController.text.trim();
+      final nextAction = _nextActionController.text.trim();
       await ref
           .read(dailyReviewsRepositoryProvider)
           .upsert(
             date: dateKey(today),
-            kept: _keptController.text.trim(),
-            adjust: _adjustController.text.trim(),
-            nextAction: _nextActionController.text.trim(),
+            kept: kept,
+            adjust: adjust,
+            nextAction: nextAction,
           );
+      var syncedNote = false;
+      Object? syncError;
+      try {
+        syncedNote = await _syncDailyNoteReview(
+          today,
+          kept: kept,
+          adjust: adjust,
+          nextAction: nextAction,
+        );
+      } catch (e) {
+        syncError = e;
+      }
       ref.read(dataVersionProvider.notifier).increment();
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(
-            content: Text('复盘已保存'),
+          SnackBar(
+            content: Text(
+              syncError != null
+                  ? '复盘已保存，但今日日记更新失败：$syncError'
+                  : syncedNote
+                  ? '复盘已保存，今日日记已更新'
+                  : '复盘已保存',
+            ),
             behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 1),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('保存失败：$e'),
+            behavior: SnackBarBehavior.floating,
           ),
         );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<bool> _syncDailyNoteReview(
+    DateTime today, {
+    required String kept,
+    required String adjust,
+    required String nextAction,
+  }) async {
+    final settings = ref.read(appSettingsRepositoryProvider);
+    final dirService = MarkdownDirectoryService(settings);
+    if (!await dirService.isConfigured()) return false;
+
+    final noteService = MarkdownNoteService(dirService);
+    final location = await noteService.findDailyNote(today);
+    if (location == null) return false;
+
+    final storage = MarkdownStorageService(dirService);
+    final raw = await storage.readTextFileLocation(location);
+    final updated = upsertDailyReviewSection(
+      raw,
+      kept: kept,
+      adjust: adjust,
+      nextAction: nextAction,
+    );
+    await storage.writeTextFileLocation(location, updated);
+    return true;
   }
 
   @override
@@ -756,58 +816,135 @@ class _ReviewField extends StatelessWidget {
 
 // ── Section 6: Generate Note ──
 
-class _GenerateNoteSection extends ConsumerWidget {
+class _GenerateNoteSection extends ConsumerStatefulWidget {
   const _GenerateNoteSection({required this.summary});
 
   final DashboardSummary summary;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_GenerateNoteSection> createState() =>
+      _GenerateNoteSectionState();
+}
+
+class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
+  bool _checkingNote = true;
+  bool _hasDailyNote = false;
+  bool _isGenerating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDailyNoteState();
+  }
+
+  Future<void> _loadDailyNoteState() async {
+    final settings = ref.read(appSettingsRepositoryProvider);
+    final dirService = MarkdownDirectoryService(settings);
+    if (!await dirService.isConfigured()) {
+      if (mounted) setState(() => _checkingNote = false);
+      return;
+    }
+
+    final noteService = MarkdownNoteService(dirService);
+    final location = await noteService.findDailyNote(DateTime.now());
+    if (!mounted) return;
+    setState(() {
+      _hasDailyNote = location != null;
+      _checkingNote = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final buttonLabel = _hasDailyNote ? '修改笔记' : '生成日记';
 
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Stack(
           children: [
-            Row(
-              children: [
-                Text(
-                  '生成今日笔记',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w600,
+            Opacity(
+              opacity: _isGenerating ? 0.34 : 1,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        '今日日记',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (widget.summary.isReviewed)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.xs,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.tracker.withAlpha(20),
+                            borderRadius: BorderRadius.circular(
+                              AppSpacing.radiusSm,
+                            ),
+                          ),
+                          child: Text(
+                            '已复盘',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: AppColors.tracker,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: 48),
+                ],
+              ),
+            ),
+            if (_isGenerating)
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(78),
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                   ),
                 ),
-                const Spacer(),
-                if (summary.isReviewed)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.xs,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.tracker.withAlpha(20),
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                    ),
-                    child: Text(
-                      '已复盘',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: AppColors.tracker,
-                      ),
+              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 20),
+                const SizedBox(height: AppSpacing.md),
+                SizedBox(
+                  width: double.infinity,
+                  child: AbsorbPointer(
+                    absorbing: _checkingNote || _isGenerating,
+                    child: FilledButton.icon(
+                      onPressed: () => _generateMarkdown(context),
+                      icon: _isGenerating
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Icon(
+                              _hasDailyNote
+                                  ? Icons.edit_note_rounded
+                                  : Icons.description_outlined,
+                              size: 18,
+                            ),
+                      label: Text(buttonLabel),
                     ),
                   ),
+                ),
               ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: () => _generateMarkdown(context, ref),
-                icon: const Icon(Icons.description_outlined, size: 18),
-                label: Text(summary.isReviewed ? '生成今日笔记' : '生成草稿'),
-              ),
             ),
           ],
         ),
@@ -815,7 +952,9 @@ class _GenerateNoteSection extends ConsumerWidget {
     );
   }
 
-  Future<void> _generateMarkdown(BuildContext context, WidgetRef ref) async {
+  Future<void> _generateMarkdown(BuildContext context) async {
+    if (_checkingNote || _isGenerating) return;
+
     final scaffold = ScaffoldMessenger.of(context);
     final settings = ref.read(appSettingsRepositoryProvider);
     final dirService = MarkdownDirectoryService(settings);
@@ -826,17 +965,34 @@ class _GenerateNoteSection extends ConsumerWidget {
       if (!context.mounted) return;
     }
 
+    final noteService = MarkdownNoteService(dirService);
+    final existingLocation = await noteService.findDailyNote(DateTime.now());
+    if (!context.mounted) return;
+    if (existingLocation != null) {
+      await _openDailyNoteEditor(context, existingLocation);
+      if (mounted) {
+        setState(() => _hasDailyNote = true);
+      }
+      return;
+    }
+
+    setState(() => _isGenerating = true);
+
     try {
       scaffold.showSnackBar(
         const SnackBar(
-          content: Text('正在生成…'),
+          content: Text('正在生成日记…'),
           behavior: SnackBarBehavior.floating,
           duration: Duration(seconds: 1),
         ),
       );
 
-      final path = await _exportDashboardMarkdown(ref);
+      final path = await _exportDashboardMarkdown();
       if (!context.mounted) return;
+      setState(() {
+        _isGenerating = false;
+        _hasDailyNote = true;
+      });
 
       final normalizedPath = path.replaceAll('\\', '/');
       final displayPath = normalizedPath.contains('Liflow/')
@@ -846,25 +1002,44 @@ class _GenerateNoteSection extends ConsumerWidget {
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
-            content: Text('已生成：$displayPath'),
+            content: Text('已生成日记：$displayPath'),
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2),
           ),
         );
     } catch (e) {
       if (!context.mounted) return;
+      setState(() => _isGenerating = false);
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
-            content: Text('生成失败：$e'),
+            content: Text('生成日记失败：$e'),
             behavior: SnackBarBehavior.floating,
           ),
         );
     }
   }
 
-  Future<String> _exportDashboardMarkdown(WidgetRef ref) async {
+  Future<void> _openDailyNoteEditor(
+    BuildContext context,
+    String location,
+  ) async {
+    final settings = ref.read(appSettingsRepositoryProvider);
+    final storage = MarkdownStorageService(MarkdownDirectoryService(settings));
+    final raw = await storage.readTextFileLocation(location);
+    if (!context.mounted) return;
+
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) =>
+            _DailyNoteEditorPage(location: location, initialContent: raw),
+      ),
+    );
+  }
+
+  Future<String> _exportDashboardMarkdown() async {
     final today = DateTime.now();
     final summaryAsync = ref.read(dashboardSummaryProvider.future);
     final reviewAsync = ref.read(dashboardReviewProvider.future);
@@ -877,7 +1052,7 @@ class _GenerateNoteSection extends ConsumerWidget {
     final tagsYaml = summary.topTags.map((t) => '  - $t').join('\n');
     buf.writeln('---');
     buf.writeln('date: ${summary.date}');
-    buf.writeln('title: ${summary.date}');
+    buf.writeln('title: ${summary.date} 日记');
     buf.writeln('source: liflow');
     buf.writeln('version: 1');
     buf.writeln('generated_at: ${DateTime.now().toIso8601String()}');
@@ -889,7 +1064,7 @@ class _GenerateNoteSection extends ConsumerWidget {
     buf.writeln(tagsYaml);
     buf.writeln('---');
     buf.writeln();
-    buf.writeln('# ${summary.date} 复盘');
+    buf.writeln('# ${summary.date} 日记');
     buf.writeln();
     buf.writeln('## 今日概览');
     buf.writeln();
@@ -981,6 +1156,127 @@ class _GenerateNoteSection extends ConsumerWidget {
   String _fmtMs(int ms) {
     final dt = DateTime.fromMillisecondsSinceEpoch(ms);
     return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class _DailyNoteEditorPage extends ConsumerStatefulWidget {
+  const _DailyNoteEditorPage({
+    required this.location,
+    required this.initialContent,
+  });
+
+  final String location;
+  final String initialContent;
+
+  @override
+  ConsumerState<_DailyNoteEditorPage> createState() =>
+      _DailyNoteEditorPageState();
+}
+
+class _DailyNoteEditorPageState extends ConsumerState<_DailyNoteEditorPage> {
+  late final TextEditingController _controller;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialContent);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+
+    try {
+      final settings = ref.read(appSettingsRepositoryProvider);
+      final storage = MarkdownStorageService(
+        MarkdownDirectoryService(settings),
+      );
+      await storage.writeTextFileLocation(widget.location, _controller.text);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('笔记已保存'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 1),
+          ),
+        );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('保存失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final parsed = parseMarkdownDocument(
+      widget.initialContent,
+      fallbackTitle: '今日日记',
+    );
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          parsed.title.isEmpty ? '修改笔记' : parsed.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: _saving ? null : _save,
+            icon: _saving
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.check_rounded),
+            label: const Text('保存'),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: TextField(
+            controller: _controller,
+            enabled: !_saving,
+            expands: true,
+            minLines: null,
+            maxLines: null,
+            keyboardType: TextInputType.multiline,
+            textInputAction: TextInputAction.newline,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              height: 1.45,
+              fontFamily: 'monospace',
+            ),
+            decoration: const InputDecoration(
+              hintText: 'Markdown 日记',
+              alignLabelWithHint: true,
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

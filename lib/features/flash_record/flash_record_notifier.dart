@@ -161,11 +161,13 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   void _completeTranscript(SttTranscript transcript) {
     final recognizedText = transcript.text.trim();
     if (recognizedText.isNotEmpty) {
+      final parsed = LuiLiteParser.parse(recognizedText);
       state = state.copyWith(
-        phase: FlashPhase.recognized,
+        phase: FlashPhase.confirming,
         rawText: recognizedText,
         partialText: recognizedText,
         audioLevel: 0,
+        parsedInput: parsed,
         sttMetadata: transcript.metadata,
         transcriptFinal: true,
         errorMessage: null,
@@ -205,7 +207,31 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     final parsed = state.parsedInput;
     if (parsed == null || parsed.type == newType) return;
     state = state.copyWith(
-      parsedInput: parsed.copyWith(type: newType, tags: []),
+      parsedInput: parsed.copyWith(type: newType, confidence: 1),
+    );
+  }
+
+  void updateParsedText(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      state = state.copyWith(rawText: text, errorMessage: null);
+      return;
+    }
+
+    state = state.copyWith(
+      rawText: text,
+      parsedInput: LuiLiteParser.parse(trimmed),
+      errorMessage: null,
+    );
+  }
+
+  void updateParsedTags(List<String> tags) {
+    final parsed = state.parsedInput;
+    if (parsed == null) return;
+
+    state = state.copyWith(
+      parsedInput: parsed.copyWith(tags: _normalizeTags(tags)),
+      errorMessage: null,
     );
   }
 
@@ -225,12 +251,12 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       state = state.copyWith(phase: FlashPhase.saved);
     } on TimeoutException {
       state = state.copyWith(
-        phase: FlashPhase.recognized,
+        phase: FlashPhase.confirming,
         errorMessage: '保存超时，请再试一次。',
       );
     } catch (e) {
       state = state.copyWith(
-        phase: FlashPhase.recognized,
+        phase: FlashPhase.confirming,
         errorMessage: e.toString(),
       );
     }
@@ -319,7 +345,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
             );
 
       case ParsedInputType.focus:
-        final d = (parsed.metadata['durationMinutes'] as int?) ?? 25;
+        final d = (parsed.metadata['durationMinutes'] as int?) ?? 0;
         await ref
             .read(focusSessionsRepositoryProvider)
             .create(
@@ -422,5 +448,23 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
           note: parsed.content,
           createdAt: createdAt,
         );
+  }
+
+  static List<String> _normalizeTags(Iterable<String> tags) {
+    final seen = <String>{};
+    final normalized = <String>[];
+
+    for (final tag in tags) {
+      final value = tag
+          .replaceFirst(RegExp(r'^[#＃]+'), '')
+          .replaceAll(RegExp(r'\s+'), '')
+          .trim();
+      if (value.isEmpty || seen.contains(value)) continue;
+
+      seen.add(value);
+      normalized.add(value);
+    }
+
+    return normalized;
   }
 }

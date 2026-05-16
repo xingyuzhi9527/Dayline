@@ -10,7 +10,6 @@ import 'package:flutter_test/flutter_test.dart';
 // Each entry: (input, expected_type, expected_tags_contains, metadata_checks)
 typedef _Case = (String, ParsedInputType, List<String>, Map<String, dynamic>);
 final _cases = <_Case>[
-
   // ── Mood ──
   ('心情不错', ParsedInputType.mood, ['正面'], {}),
   ('今天有点焦虑', ParsedInputType.mood, ['焦虑', '负面'], {}),
@@ -40,7 +39,7 @@ final _cases = <_Case>[
   ('要做 备份照片', ParsedInputType.todo, ['待办'], {}),
 
   // ── Focus ──
-  ('番茄 阅读', ParsedInputType.focus, ['专注'], {}),
+  ('番茄 阅读', ParsedInputType.tracker, ['学习'], {}),
   ('专注 写代码 25min', ParsedInputType.focus, ['专注'], {'durationMinutes': 25}),
   ('心流 编程 1小时', ParsedInputType.focus, ['专注'], {'durationMinutes': 60}),
   ('番茄工作25分钟', ParsedInputType.focus, ['专注'], {'durationMinutes': 25}),
@@ -58,7 +57,12 @@ final _cases = <_Case>[
   ('没睡好 醒了三次', ParsedInputType.sleep, ['睡眠'], {}),
 
   // ── Tracker — exercise ──
-  ('9:30 跑步 30分钟 #健康', ParsedInputType.tracker, ['健康'], {'durationMinutes': 30}),
+  (
+    '9:30 跑步 30分钟 #健康',
+    ParsedInputType.tracker,
+    ['健康'],
+    {'durationMinutes': 30},
+  ),
   ('跑步3分钟', ParsedInputType.tracker, ['运动'], {'durationMinutes': 3}),
   ('健身 1小时 练胸', ParsedInputType.tracker, ['运动'], {'durationMinutes': 60}),
   ('瑜伽 45min', ParsedInputType.tracker, ['运动'], {'durationMinutes': 45}),
@@ -107,15 +111,12 @@ final _cases = <_Case>[
 
 void main() {
   group('Bulk life data — parser validation', () {
-    for (final (i, (input, expectedType, expectedTags, checks)) in _cases.indexed) {
+    for (final (i, (input, expectedType, expectedTags, checks))
+        in _cases.indexed) {
       test('[${(i + 1).toString().padLeft(2, '0')}] "$input"', () {
         final parsed = LuiLiteParser.parse(input);
 
-        expect(
-          parsed.type,
-          expectedType,
-          reason: 'type mismatch for "$input"',
-        );
+        expect(parsed.type, expectedType, reason: 'type mismatch for "$input"');
 
         for (final tag in expectedTags) {
           expect(

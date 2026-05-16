@@ -25,7 +25,11 @@ class ParserPreviewCard extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _OriginalRecordCard(text: rawText),
+        _OriginalRecordCard(
+          text: rawText,
+          enabled: !state.isSaving,
+          onChanged: notifier.updateParsedText,
+        ),
         const SizedBox(height: AppSpacing.md),
         _ParsedBentoGrid(
           parsed: parsed,
@@ -66,9 +70,15 @@ class ParserPreviewCard extends ConsumerWidget {
 }
 
 class _OriginalRecordCard extends StatelessWidget {
-  const _OriginalRecordCard({required this.text});
+  const _OriginalRecordCard({
+    required this.text,
+    required this.enabled,
+    required this.onChanged,
+  });
 
   final String text;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -89,17 +99,75 @@ class _OriginalRecordCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
-              Text(
-                '"$text"',
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  color: AppColors.ink,
-                  fontWeight: FontWeight.w700,
-                ),
+              _EditableRecordTextField(
+                text: text,
+                enabled: enabled,
+                onChanged: onChanged,
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _EditableRecordTextField extends StatefulWidget {
+  const _EditableRecordTextField({
+    required this.text,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String text;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_EditableRecordTextField> createState() =>
+      _EditableRecordTextFieldState();
+}
+
+class _EditableRecordTextFieldState extends State<_EditableRecordTextField> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.text);
+  }
+
+  @override
+  void didUpdateWidget(covariant _EditableRecordTextField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.text != oldWidget.text && widget.text != _controller.text) {
+      _controller.text = widget.text;
+      _controller.selection = TextSelection.collapsed(
+        offset: _controller.text.length,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      key: const ValueKey('parser-preview-text-field'),
+      controller: _controller,
+      enabled: widget.enabled,
+      minLines: 2,
+      maxLines: 4,
+      textInputAction: TextInputAction.newline,
+      decoration: const InputDecoration(
+        labelText: '编辑文本',
+        border: OutlineInputBorder(),
+      ),
+      onChanged: widget.onChanged,
     );
   }
 }

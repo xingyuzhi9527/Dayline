@@ -7,16 +7,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/database/repository_providers.dart';
-import '../../core/parser/lui_lite_parser.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
+import '../focus/focus_session_page.dart';
+import '../long_note/long_note_editor_page.dart';
 import '../timeline/timeline_providers.dart';
 import 'flash_record_notifier.dart';
 import 'flash_record_state.dart';
 import 'widgets/audio_waveform.dart';
 import 'widgets/flash_card.dart';
 import 'widgets/voice_button.dart';
-import '../long_note/long_note_editor_page.dart';
 
 final todayTodoPanelEventsProvider = FutureProvider<List<TimelineEvent>>((
   ref,
@@ -147,9 +147,12 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         _logInput('focus lost ignored during keyboard launch');
         return;
       }
-      final sinceLaunch = DateTime.now().millisecondsSinceEpoch - _launchCompletedAt;
+      final sinceLaunch =
+          DateTime.now().millisecondsSinceEpoch - _launchCompletedAt;
       if (sinceLaunch < 400) {
-        _logInput('focus lost ignored, within $sinceLaunch ms of launch complete');
+        _logInput(
+          'focus lost ignored, within $sinceLaunch ms of launch complete',
+        );
         return;
       }
       _collapseIntentInput(reason: 'focus-lost', unfocus: false);
@@ -172,6 +175,20 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         builder: (context) => const LongNoteEditorPage(),
       ),
     );
+  }
+
+  Future<void> _openFocusSession(BuildContext context) async {
+    _collapseIntentInput(reason: 'open-focus-session');
+    FocusScope.of(context).unfocus();
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (context) => const FocusSessionPage(),
+      ),
+    );
+    if (saved == true && mounted) {
+      ref.invalidate(todayTodoPanelEventsProvider);
+    }
   }
 
   void _expandIntentInput() {
@@ -228,7 +245,9 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       'launch_complete reason=$reason mounted=$mounted launching=$_keyboardLaunchExpanding expanded=$_intentExpanded focus=${_textFocusNode.hasFocus}',
     );
     if (!mounted || !_keyboardLaunchExpanding) {
-      _logInput('launch_complete ABORT mounted=$mounted launching=$_keyboardLaunchExpanding');
+      _logInput(
+        'launch_complete ABORT mounted=$mounted launching=$_keyboardLaunchExpanding',
+      );
       return;
     }
     _keyboardRevealTimer?.cancel();
@@ -380,41 +399,44 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           behavior: HitTestBehavior.translucent,
           onTap: () => _dismissAmbientState(state),
           child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Main content
-            Positioned.fill(
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 120),
-                opacity: MediaQuery.viewInsetsOf(context).bottom > 0 ? 0.38 : 1,
-                child: Align(
-                  alignment: const Alignment(0, -0.03),
-                  child: _buildPrimaryStage(state, theme),
-                ),
-              ),
-            ),
-
-            if (_intentExpanded)
+            fit: StackFit.expand,
+            children: [
+              // Main content
               Positioned.fill(
-                child: ModalBarrier(
-                  key: const ValueKey('intent-dismiss-layer'),
-                  color: Colors.transparent,
-                  dismissible: true,
-                  onDismiss: () => _collapseIntentInput(reason: 'barrier'),
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 120),
+                  opacity: MediaQuery.viewInsetsOf(context).bottom > 0
+                      ? 0.38
+                      : 1,
+                  child: Align(
+                    alignment: const Alignment(0, -0.03),
+                    child: _buildPrimaryStage(state, theme),
+                  ),
                 ),
               ),
 
-            if (state.isInputActive) _buildTextInputDock(state, theme),
+              if (_intentExpanded)
+                Positioned.fill(
+                  child: ModalBarrier(
+                    key: const ValueKey('intent-dismiss-layer'),
+                    color: Colors.transparent,
+                    dismissible: true,
+                    onDismiss: () => _collapseIntentInput(reason: 'barrier'),
+                  ),
+                ),
 
-            if (_memoryExpanded) _buildMemoryScatterLayer(theme, memoryEvents),
+              if (state.isInputActive) _buildTextInputDock(state, theme),
 
-            // Flash card overlay
-            if (state.phase == FlashPhase.confirming &&
-                state.parsedInput != null)
-              _buildCardOverlay(state, theme),
-          ],
+              if (_memoryExpanded)
+                _buildMemoryScatterLayer(theme, memoryEvents),
+
+              // Flash card overlay
+              if (state.phase == FlashPhase.confirming &&
+                  state.parsedInput != null)
+                _buildCardOverlay(state, theme),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -1168,13 +1190,30 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           ),
         ),
         Semantics(
+          label: 'open-focus-session',
+          button: true,
+          child: IconButton(
+            key: const ValueKey('open-focus-session'),
+            onPressed: () => _openFocusSession(context),
+            icon: const Icon(
+              Icons.timer_rounded,
+              color: AppColors.muted,
+              size: 22,
+            ),
+            tooltip: '专注',
+          ),
+        ),
+        Semantics(
           label: 'open-long-note',
           button: true,
           child: IconButton(
             key: const ValueKey('open-long-note'),
             onPressed: () => _openLongNoteEditor(context),
-            icon: const Icon(Icons.edit_note_rounded,
-                color: AppColors.muted, size: 22),
+            icon: const Icon(
+              Icons.edit_note_rounded,
+              color: AppColors.muted,
+              size: 22,
+            ),
             tooltip: '长笔记',
           ),
         ),
@@ -1366,19 +1405,21 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           child: FlashCard(
             rawText: state.rawText,
             parsedInput: state.parsedInput!,
+            onTextChanged: (text) {
+              ref.read(flashRecordProvider.notifier).updateParsedText(text);
+            },
+            onTypeChanged: (type) {
+              ref.read(flashRecordProvider.notifier).switchParsedType(type);
+            },
+            onTagsChanged: (tags) {
+              ref.read(flashRecordProvider.notifier).updateParsedTags(tags);
+            },
             onSave: () {
               ref.read(flashRecordProvider.notifier).save();
             },
             onCancel: () {
               ref.read(flashRecordProvider.notifier).cancelConfirm();
             },
-            onSwitchToTodo: state.parsedInput?.type != ParsedInputType.todo
-                ? () {
-                    ref
-                        .read(flashRecordProvider.notifier)
-                        .switchParsedType(ParsedInputType.todo);
-                  }
-                : null,
           ),
         ),
       ),

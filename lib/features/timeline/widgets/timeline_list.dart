@@ -249,12 +249,6 @@ class _TimelineTile extends ConsumerWidget {
       theme: theme,
       onTap: event.type == 'long_note' ? () => _openReader(context, ref) : null,
       onEdit: () => _openEditor(context, ref),
-      onConvertExpense: event.source == TimelineEventSource.record
-          ? () => _convertRecordToExpense(context, ref)
-          : null,
-      onConvertTodo: event.source == TimelineEventSource.record
-          ? () => _convertRecordToTodo(context, ref)
-          : null,
     );
 
     return Column(
@@ -372,7 +366,19 @@ class _TimelineTile extends ConsumerWidget {
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => _TimelineEventEditSheet(event: event),
+      builder: (context) => _TimelineEventEditSheet(
+        event: event,
+        onConvertExpense:
+            event.source == TimelineEventSource.record &&
+                event.type != 'long_note'
+            ? () => _convertRecordToExpense(context, ref)
+            : null,
+        onConvertTodo:
+            event.source == TimelineEventSource.record &&
+                event.type != 'long_note'
+            ? () => _convertRecordToTodo(context, ref)
+            : null,
+      ),
     );
 
     if (saved != true || !context.mounted) return;
@@ -389,18 +395,18 @@ class _TimelineTile extends ConsumerWidget {
       );
   }
 
-  Future<void> _convertRecordToExpense(
+  Future<bool> _convertRecordToExpense(
     BuildContext context,
     WidgetRef ref,
   ) async {
     final metadata = _decodeMetadata(event.data['metadata']);
-    if (metadata['linkedExpenseId'] != null) return;
+    if (metadata['linkedExpenseId'] != null) return false;
 
     final parsed = LuiLiteParser.parse(event.title);
     final amount = (parsed.metadata['amount'] as num?)?.toDouble();
     if (amount == null) {
       _showTimelineSnack(context, '没有识别到金额，先把记录改成类似“午饭 35元”。');
-      return;
+      return false;
     }
 
     final tags = _addTag(event.tags, '消费');
@@ -434,14 +440,15 @@ class _TimelineTile extends ConsumerWidget {
         );
 
     ref.read(dataVersionProvider.notifier).increment();
-    if (!context.mounted) return;
+    if (!context.mounted) return false;
     ref.invalidate(timelineEventsProvider);
     _showTimelineSnack(context, '已转成消费，盘页面会计入统计。');
+    return true;
   }
 
-  Future<void> _convertRecordToTodo(BuildContext context, WidgetRef ref) async {
+  Future<bool> _convertRecordToTodo(BuildContext context, WidgetRef ref) async {
     final metadata = _decodeMetadata(event.data['metadata']);
-    if (metadata['linkedTodoId'] != null) return;
+    if (metadata['linkedTodoId'] != null) return false;
 
     final parsed = LuiLiteParser.parse('待办 ${event.title}');
     final title = parsed.content.isNotEmpty ? parsed.content : event.title;
@@ -465,9 +472,10 @@ class _TimelineTile extends ConsumerWidget {
         );
 
     ref.read(dataVersionProvider.notifier).increment();
-    if (!context.mounted) return;
+    if (!context.mounted) return false;
     ref.invalidate(timelineEventsProvider);
     _showTimelineSnack(context, '已转成待办。');
+    return true;
   }
 }
 
@@ -583,8 +591,6 @@ class _TimelineEventCard extends StatelessWidget {
     required this.theme,
     this.onTap,
     required this.onEdit,
-    this.onConvertExpense,
-    this.onConvertTodo,
   });
 
   final TimelineEvent event;
@@ -592,8 +598,6 @@ class _TimelineEventCard extends StatelessWidget {
   final ThemeData theme;
   final VoidCallback? onTap;
   final VoidCallback onEdit;
-  final VoidCallback? onConvertExpense;
-  final VoidCallback? onConvertTodo;
 
   @override
   Widget build(BuildContext context) {
@@ -713,15 +717,6 @@ class _TimelineEventCard extends StatelessWidget {
                             .toList(),
                       ),
                     ),
-                  if (event.source == TimelineEventSource.record)
-                    Padding(
-                      padding: const EdgeInsets.only(top: AppSpacing.xs),
-                      child: _RecordQuickActions(
-                        metadata: _decodeMetadata(event.data['metadata']),
-                        onConvertExpense: onConvertExpense,
-                        onConvertTodo: onConvertTodo,
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -826,9 +821,15 @@ class _QuickActionChip extends StatelessWidget {
 }
 
 class _TimelineEventEditSheet extends ConsumerStatefulWidget {
-  const _TimelineEventEditSheet({required this.event});
+  const _TimelineEventEditSheet({
+    required this.event,
+    this.onConvertExpense,
+    this.onConvertTodo,
+  });
 
   final TimelineEvent event;
+  final Future<bool> Function()? onConvertExpense;
+  final Future<bool> Function()? onConvertTodo;
 
   @override
   ConsumerState<_TimelineEventEditSheet> createState() =>
@@ -917,6 +918,10 @@ class _TimelineEventEditSheetState
     super.dispose();
   }
 
+  bool get _canConvertRecord =>
+      widget.event.source == TimelineEventSource.record &&
+      widget.event.type != 'long_note';
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -959,6 +964,18 @@ class _TimelineEventEditSheetState
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 ..._buildFields(theme),
+                if (_canConvertRecord) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  _RecordQuickActions(
+                    metadata: _decodeMetadata(widget.event.data['metadata']),
+                    onConvertExpense: widget.onConvertExpense == null
+                        ? null
+                        : () => _runConvertAction(widget.onConvertExpense!),
+                    onConvertTodo: widget.onConvertTodo == null
+                        ? null
+                        : () => _runConvertAction(widget.onConvertTodo!),
+                  ),
+                ],
                 if (_errorText != null) ...[
                   const SizedBox(height: AppSpacing.xs),
                   Text(
@@ -1170,6 +1187,30 @@ class _TimelineEventEditSheetState
       setState(() {
         _saving = false;
         _errorText = '删除失败：$e';
+      });
+    }
+  }
+
+  Future<void> _runConvertAction(Future<bool> Function() action) async {
+    if (_saving) return;
+    setState(() {
+      _saving = true;
+      _errorText = null;
+    });
+
+    try {
+      final changed = await action();
+      if (!mounted) return;
+      if (changed) {
+        Navigator.of(context).pop(false);
+      } else {
+        setState(() => _saving = false);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _errorText = '保存失败：$e';
       });
     }
   }

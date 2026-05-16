@@ -8,17 +8,21 @@ class FlashCard extends StatelessWidget {
   const FlashCard({
     required this.rawText,
     required this.parsedInput,
+    required this.onTextChanged,
+    required this.onTypeChanged,
+    required this.onTagsChanged,
     required this.onSave,
     required this.onCancel,
-    this.onSwitchToTodo,
     super.key,
   });
 
   final String rawText;
   final ParsedInput parsedInput;
+  final ValueChanged<String> onTextChanged;
+  final ValueChanged<ParsedInputType> onTypeChanged;
+  final ValueChanged<List<String>> onTagsChanged;
   final VoidCallback onSave;
   final VoidCallback onCancel;
-  final VoidCallback? onSwitchToTodo;
 
   static String labelForType(ParsedInputType type) =>
       _TypeMeta.from(type).label;
@@ -26,8 +30,7 @@ class FlashCard extends StatelessWidget {
   static IconData iconForType(ParsedInputType type) =>
       _TypeMeta.from(type).icon;
 
-  static Color colorForType(ParsedInputType type) =>
-      _TypeMeta.from(type).color;
+  static Color colorForType(ParsedInputType type) => _TypeMeta.from(type).color;
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +50,6 @@ class FlashCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
             Row(
               children: [
                 Container(
@@ -61,7 +63,7 @@ class FlashCard extends StatelessWidget {
                 ),
                 const SizedBox(width: AppSpacing.sm),
                 Text(
-                  '闪记卡片',
+                  '编辑卡片',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
@@ -76,69 +78,36 @@ class FlashCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: AppSpacing.md),
-            const Divider(),
+            _EditableVoiceTextField(text: rawText, onChanged: onTextChanged),
             const SizedBox(height: AppSpacing.md),
-
-            // Content grid
-            _InfoRow(label: '原始文本', value: rawText),
-            _InfoRow(label: '类型', value: typeMeta.label),
-            if (onSwitchToTodo != null && parsedInput.type != ParsedInputType.todo)
-              Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                child: Row(
-                  children: [
-                    const SizedBox(width: 64),
-                    InkWell(
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                      onTap: onSwitchToTodo,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.xs,
-                          vertical: AppSpacing.xxs,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF4A90D9).withAlpha(18),
-                          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                          border: Border.all(
-                            color: const Color(0xFF4A90D9).withAlpha(80),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.check_circle_outline,
-                              size: 14,
-                              color: Color(0xFF4A90D9),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '改为待办',
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: const Color(0xFF4A90D9),
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
+            Row(
+              children: [
+                Text(
+                  '类型',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: AppColors.muted,
+                  ),
                 ),
-              ),
-            _InfoRow(label: '内容', value: parsedInput.content),
-            if (parsedInput.tags.isNotEmpty)
-              _InfoRow(label: '标签', value: parsedInput.tags.join('、')),
+                const SizedBox(width: AppSpacing.sm),
+                _TypeMenu(
+                  selectedType: parsedInput.type,
+                  onChanged: onTypeChanged,
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            _EditableTagChips(
+              tags: parsedInput.tags,
+              onTagsChanged: onTagsChanged,
+            ),
+            const SizedBox(height: AppSpacing.sm),
             if (durationMinutes != null)
               _InfoRow(label: '时长', value: '$durationMinutes 分钟'),
             if (amount != null)
               _InfoRow(label: '金额', value: '¥${amount.toStringAsFixed(2)}'),
             if (parsedInput.time != null)
               _InfoRow(label: '时间', value: parsedInput.time!),
-
             const SizedBox(height: AppSpacing.lg),
-
-            // Actions
             Row(
               children: [
                 Expanded(
@@ -164,31 +133,187 @@ class FlashCard extends StatelessWidget {
   }
 }
 
-class _TypeMeta {
-  const _TypeMeta(this.label, this.icon, this.color);
+class _EditableVoiceTextField extends StatefulWidget {
+  const _EditableVoiceTextField({required this.text, required this.onChanged});
 
-  final String label;
-  final IconData icon;
-  final Color color;
+  final String text;
+  final ValueChanged<String> onChanged;
 
-  static _TypeMeta from(ParsedInputType type) => switch (type) {
-        ParsedInputType.memo => const _TypeMeta(
-            '备忘', Icons.edit_note_rounded, AppColors.primary),
-        ParsedInputType.todo => const _TypeMeta(
-            '待办', Icons.check_circle_outline, Color(0xFF4A90D9)),
-        ParsedInputType.tracker => const _TypeMeta(
-            '打卡', Icons.directions_run_rounded, Color(0xFF7CB342)),
-        ParsedInputType.focus =>
-          const _TypeMeta('专注', Icons.timer_rounded, Color(0xFFE67E22)),
-        ParsedInputType.expense => const _TypeMeta(
-            '消费', Icons.payments_rounded, Color(0xFFE74C3C)),
-        ParsedInputType.body =>
-          const _TypeMeta('身体', Icons.monitor_heart_outlined, Color(0xFF9B59B6)),
-        ParsedInputType.sleep =>
-          const _TypeMeta('睡眠', Icons.bedtime_rounded, Color(0xFF5C6BC0)),
-        ParsedInputType.mood =>
-          const _TypeMeta('情绪', Icons.emoji_emotions_outlined, Color(0xFF9B59B6)),
-      };
+  @override
+  State<_EditableVoiceTextField> createState() =>
+      _EditableVoiceTextFieldState();
+}
+
+class _EditableVoiceTextFieldState extends State<_EditableVoiceTextField> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.text);
+  }
+
+  @override
+  void didUpdateWidget(covariant _EditableVoiceTextField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.text != oldWidget.text && widget.text != _controller.text) {
+      _controller.text = widget.text;
+      _controller.selection = TextSelection.collapsed(
+        offset: _controller.text.length,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      key: const ValueKey('flash-card-text-field'),
+      controller: _controller,
+      minLines: 2,
+      maxLines: 4,
+      textInputAction: TextInputAction.newline,
+      decoration: const InputDecoration(
+        labelText: '编辑文本',
+        border: OutlineInputBorder(),
+      ),
+      onChanged: widget.onChanged,
+    );
+  }
+}
+
+class _TypeMenu extends StatelessWidget {
+  const _TypeMenu({required this.selectedType, required this.onChanged});
+
+  final ParsedInputType selectedType;
+  final ValueChanged<ParsedInputType> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedMeta = _TypeMeta.from(selectedType);
+    return PopupMenuButton<ParsedInputType>(
+      initialValue: selectedType,
+      tooltip: '修改类型',
+      onSelected: onChanged,
+      itemBuilder: (context) {
+        return [
+          for (final type in ParsedInputType.values)
+            PopupMenuItem(
+              value: type,
+              child: Row(
+                children: [
+                  Icon(_TypeMeta.from(type).icon, size: 18),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(_TypeMeta.from(type).label),
+                ],
+              ),
+            ),
+        ];
+      },
+      child: Chip(
+        avatar: Icon(selectedMeta.icon, size: 16, color: selectedMeta.color),
+        label: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(selectedMeta.label),
+            const SizedBox(width: AppSpacing.xxs),
+            const Icon(Icons.expand_more_rounded, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EditableTagChips extends StatefulWidget {
+  const _EditableTagChips({required this.tags, required this.onTagsChanged});
+
+  final List<String> tags;
+  final ValueChanged<List<String>> onTagsChanged;
+
+  @override
+  State<_EditableTagChips> createState() => _EditableTagChipsState();
+}
+
+class _EditableTagChipsState extends State<_EditableTagChips> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _addTags([String? rawValue]) {
+    final additions = _parseTagInput(rawValue ?? _controller.text);
+    if (additions.isEmpty) return;
+    widget.onTagsChanged([...widget.tags, ...additions]);
+    _controller.clear();
+  }
+
+  void _removeTag(String tag) {
+    widget.onTagsChanged(widget.tags.where((value) => value != tag).toList());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('标签', style: theme.textTheme.labelLarge),
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            for (final tag in widget.tags)
+              InputChip(
+                avatar: const Icon(Icons.tag, size: 14),
+                label: Text('#$tag'),
+                onDeleted: () => _removeTag(tag),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 132, maxWidth: 210),
+              child: TextField(
+                key: const ValueKey('flash-card-tag-field'),
+                controller: _controller,
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: widget.tags.isEmpty ? '添加标签' : '继续添加',
+                  prefixIcon: const Icon(Icons.tag, size: 18),
+                  suffixIcon: IconButton(
+                    tooltip: '添加标签',
+                    onPressed: _addTags,
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                  ),
+                  border: const OutlineInputBorder(),
+                ),
+                textInputAction: TextInputAction.done,
+                onSubmitted: _addTags,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  List<String> _parseTagInput(String input) {
+    return input
+        .split(RegExp(r'[\s,，、＃#]+'))
+        .map((tag) => tag.trim())
+        .where((tag) => tag.isNotEmpty)
+        .toList(growable: false);
+  }
 }
 
 class _InfoRow extends StatelessWidget {
@@ -200,14 +325,13 @@ class _InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
     return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 64,
+            width: 56,
             child: Text(
               label,
               style: theme.textTheme.bodySmall?.copyWith(
@@ -215,14 +339,60 @@ class _InfoRow extends StatelessWidget {
               ),
             ),
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: theme.textTheme.bodyMedium,
-            ),
-          ),
+          Expanded(child: Text(value, style: theme.textTheme.bodyMedium)),
         ],
       ),
     );
   }
+}
+
+class _TypeMeta {
+  const _TypeMeta(this.label, this.icon, this.color);
+
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  static _TypeMeta from(ParsedInputType type) => switch (type) {
+    ParsedInputType.memo => const _TypeMeta(
+      '备忘',
+      Icons.edit_note_rounded,
+      AppColors.primary,
+    ),
+    ParsedInputType.todo => const _TypeMeta(
+      '待办',
+      Icons.check_circle_outline,
+      Color(0xFF4A90D9),
+    ),
+    ParsedInputType.tracker => const _TypeMeta(
+      '打卡',
+      Icons.directions_run_rounded,
+      Color(0xFF7CB342),
+    ),
+    ParsedInputType.focus => const _TypeMeta(
+      '专注',
+      Icons.timer_rounded,
+      Color(0xFFE67E22),
+    ),
+    ParsedInputType.expense => const _TypeMeta(
+      '消费',
+      Icons.payments_rounded,
+      Color(0xFFE74C3C),
+    ),
+    ParsedInputType.body => const _TypeMeta(
+      '身体',
+      Icons.monitor_heart_outlined,
+      Color(0xFF9B59B6),
+    ),
+    ParsedInputType.sleep => const _TypeMeta(
+      '睡眠',
+      Icons.bedtime_rounded,
+      Color(0xFF5C6BC0),
+    ),
+    ParsedInputType.mood => const _TypeMeta(
+      '情绪',
+      Icons.emoji_emotions_outlined,
+      Color(0xFF9B59B6),
+    ),
+  };
 }

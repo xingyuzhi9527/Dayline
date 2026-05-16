@@ -90,7 +90,7 @@ void main() {
     expect(find.text('今天由什么组成'), findsOneWidget);
     expect(find.text('今日洞察'), findsOneWidget);
     expect(find.text('晚间复盘'), findsOneWidget);
-    expect(find.text('生成今日笔记'), findsOneWidget);
+    expect(find.text('生成日记'), findsOneWidget);
 
     // Evening review prompts
     expect(find.text('今天值得保留的是'), findsOneWidget);
