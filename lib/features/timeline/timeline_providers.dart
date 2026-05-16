@@ -53,6 +53,15 @@ class TimelineEvent {
   final Map<String, Object?> data;
 
   String get id => '${source.storageKey}:$sourceId';
+
+  Map<String, Object?>? get primaryAttachment {
+    final raw = data['attachment'];
+    if (raw is Map<String, Object?>) return raw;
+    if (raw is Map) {
+      return raw.cast<String, Object?>();
+    }
+    return null;
+  }
 }
 
 class TimelineDateNotifier extends Notifier<DateTime> {
@@ -113,12 +122,19 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
 
   try {
     final records = await ref.read(recordsRepositoryProvider).findByDate(date);
+    final recordIds = records.map((row) => row['id'] as int).toList();
+    final attachmentsByRecordId = await ref
+        .read(mediaAttachmentsRepositoryProvider)
+        .findByRecordIds(recordIds);
+
     for (final r in records) {
       final type = r['type'] as String;
+      final recordId = r['id'] as int;
+      final attachments = attachmentsByRecordId[recordId] ?? const [];
       events.add(
         TimelineEvent(
           source: TimelineEventSource.record,
-          sourceId: r['id'] as int,
+          sourceId: recordId,
           type: type,
           title: r['content'] as String,
           description: (r['time'] as String?) ?? '',
@@ -126,7 +142,11 @@ Future<List<TimelineEvent>> loadTimelineEventsForDate(
           date: dateStr,
           icon: _iconForType(type),
           tags: _parseTags(r['tags'] as String),
-          data: r,
+          data: {
+            ...r,
+            if (attachments.isNotEmpty) 'attachment': attachments.first,
+            if (attachments.length > 1) 'attachments': attachments,
+          },
         ),
       );
     }
@@ -262,6 +282,7 @@ IconData _iconForType(String type) => switch (type) {
   'body' => Icons.monitor_weight_rounded,
   'sleep' => Icons.bedtime_rounded,
   'mood' => Icons.emoji_emotions_outlined,
+  'moment_photo' => Icons.camera_alt_rounded,
   _ => Icons.notes_rounded,
 };
 

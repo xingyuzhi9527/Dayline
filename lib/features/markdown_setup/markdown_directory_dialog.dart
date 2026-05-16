@@ -74,7 +74,8 @@ class _MarkdownDirectoryDialogState extends State<_MarkdownDirectoryDialog> {
             Text(
               'Liflow 会把日常记录和长笔记保存成 Markdown。默认结构是：\n'
               'Liflow/daily/年月/日期.md\n'
-              'Liflow/notes/年月/时间_标题.md',
+              'Liflow/notes/年月/时间_标题.md\n'
+              'Liflow/documents/导入的文档',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: AppColors.ink,
                 height: 1.55,
@@ -134,6 +135,7 @@ class _MarkdownDirectoryDialogState extends State<_MarkdownDirectoryDialog> {
           FilledButton.icon(
             onPressed: () async {
               await widget.dirService.useDefaultRoot();
+              await storageService.ensureCoreDirectories();
               if (context.mounted) Navigator.of(context).pop(true);
             },
             icon: const Icon(Icons.check_rounded, size: 18),
@@ -147,9 +149,18 @@ class _MarkdownDirectoryDialogState extends State<_MarkdownDirectoryDialog> {
   Future<void> _pickDirectory(MarkdownStorageService storageService) async {
     setState(() => _picking = true);
     try {
-      final treeUri = await storageService.pickDirectory();
-      if (!mounted || treeUri == null || treeUri.isEmpty) return;
-      await widget.dirService.setTreeRootUri(treeUri);
+      final picked = await storageService.pickDirectory();
+      if (!mounted || picked == null || picked.treeUri.isEmpty) return;
+      final rootSubdir =
+          picked.name?.trim().toLowerCase() ==
+              MarkdownDirectoryService.defaultDirName.toLowerCase()
+          ? ''
+          : MarkdownDirectoryService.defaultDirName;
+      await widget.dirService.setTreeRootUri(
+        picked.treeUri,
+        rootSubdir: rootSubdir,
+      );
+      await storageService.ensureCoreDirectories();
       if (context.mounted) Navigator.of(context).pop(true);
     } finally {
       if (mounted) setState(() => _picking = false);

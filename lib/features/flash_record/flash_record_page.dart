@@ -5,12 +5,14 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/database/repository_providers.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../focus/focus_session_page.dart';
 import '../long_note/long_note_editor_page.dart';
+import '../photo_moment/photo_moment_editor_page.dart';
 import '../timeline/timeline_providers.dart';
 import 'flash_record_notifier.dart';
 import 'flash_record_state.dart';
@@ -64,6 +66,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   static const double _intentPillHeight = 48;
   static const double _todoSwipeThreshold = 18;
   static const double _todoSwipeHorizontalTolerance = 52;
+  static const double _toolSwipeThreshold = 18;
   static const Duration _intentSettleDuration = Duration(milliseconds: 340);
   static const Duration _intentContentSwapDuration = Duration(
     milliseconds: 180,
@@ -73,14 +76,18 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   final _textController = TextEditingController();
   final _recognizedTextController = TextEditingController();
   final _textFocusNode = FocusNode();
+  final _imagePicker = ImagePicker();
   late final AnimationController _memoryController;
   Timer? _keyboardRevealTimer;
   bool _memoryExpanded = false;
   bool _intentExpanded = false;
   bool _intentLongPressActive = false;
+  bool _toolsExpanded = false;
   bool _keyboardVisible = false;
   bool _keyboardLaunchExpanding = false;
   bool _keyboardHiding = false;
+  bool _capturingPhoto = false;
+  bool _recoveringLostPhoto = false;
   int _launchCompletedAt = 0;
   Offset _intentDragOffset = Offset.zero;
 
@@ -101,6 +108,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       duration: const Duration(milliseconds: 680),
       reverseDuration: const Duration(milliseconds: 320),
     );
+    unawaited(_recoverLostPhoto());
   }
 
   @override
@@ -121,6 +129,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         .map((v) => v.viewInsets.bottom)
         .toList();
     final keyboardOpen = viewInsets.any((b) => b > 0);
+    final wasKeyboardVisible = _keyboardVisible;
     if (keyboardOpen != _keyboardVisible) {
       _logInput(
         'metrics changed keyboardOpen=$keyboardOpen insets=$viewInsets expanded=$_intentExpanded focus=${_textFocusNode.hasFocus} launching=$_keyboardLaunchExpanding',
@@ -131,11 +140,17 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       _keyboardRevealTimer?.cancel();
       _completeKeyboardLaunch('metrics');
     }
-    if (_keyboardVisible && !keyboardOpen && _intentExpanded) {
+    if (wasKeyboardVisible &&
+        !keyboardOpen &&
+        (_intentExpanded || _keyboardLaunchExpanding)) {
       _logInput('metrics keyboard closed while expanded, collapsing');
       _collapseIntentInput(reason: 'metrics-keyboard-closed', unfocus: false);
     }
-    _keyboardVisible = keyboardOpen;
+    if (mounted && _keyboardVisible != keyboardOpen) {
+      setState(() => _keyboardVisible = keyboardOpen);
+    } else {
+      _keyboardVisible = keyboardOpen;
+    }
   }
 
   void _handleTextFocusChange() {
@@ -178,6 +193,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 
   Future<void> _openFocusSession(BuildContext context) async {
+    _closeToolDrawer();
     _collapseIntentInput(reason: 'open-focus-session');
     FocusScope.of(context).unfocus();
     final saved = await Navigator.of(context).push<bool>(
@@ -192,6 +208,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 
   void _expandIntentInput() {
+    _closeToolDrawer();
     final phase = ref.read(flashRecordProvider).phase;
     _logInput(
       'expand_tap phase=${phase.name} expanded=$_intentExpanded launching=$_keyboardLaunchExpanding kbVis=$_keyboardVisible focus=${_textFocusNode.hasFocus}',
@@ -270,23 +287,24 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     _logInput(
       'collapse reason=$reason expanded=$_intentExpanded focus=$hadFocus keyboard=$_keyboardVisible launching=$_keyboardLaunchExpanding',
     );
-    if (!_intentExpanded && (!unfocus || !hadFocus)) {
+    if (!_intentExpanded &&
+        !_keyboardLaunchExpanding &&
+        (!unfocus || !hadFocus)) {
       _logInput('collapse SKIP nothing to do');
       return;
     }
     _keyboardRevealTimer?.cancel();
-    if (_keyboardLaunchExpanding) {
-      _logInput('collapse aborting launch');
-      _keyboardLaunchExpanding = false;
+    if (_intentExpanded || _keyboardLaunchExpanding) {
+      _logInput('collapse clearing expanded/launching state');
+      setState(() {
+        _intentExpanded = false;
+        _keyboardLaunchExpanding = false;
+      });
     }
-    if (_intentExpanded) {
-      _logInput('collapse setting expanded=false');
-      setState(() => _intentExpanded = false);
-    }
-    if (unfocus && hadFocus) {
+    if (unfocus && (hadFocus || _keyboardVisible || _keyboardHiding)) {
       _logInput('collapse unfocusing');
       _keyboardHiding = true;
-      _textFocusNode.unfocus();
+      FocusScope.of(context).unfocus();
       Future.delayed(const Duration(milliseconds: 350), () {
         if (mounted) _keyboardHiding = false;
       });
@@ -318,18 +336,24 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     final verticalVelocity = details.velocity.pixelsPerSecond.dy;
     final isUpwardIntent =
         _intentDragOffset.dy < -_todoSwipeThreshold || verticalVelocity < -250;
+    final isDownwardIntent =
+        _intentDragOffset.dy > _toolSwipeThreshold || verticalVelocity > 250;
     final isMostlyVertical =
         _intentDragOffset.dx.abs() <= _todoSwipeHorizontalTolerance;
 
     if (isUpwardIntent && isMostlyVertical) {
       HapticFeedback.selectionClick();
       _openMemoryScatter();
+    } else if (isDownwardIntent && isMostlyVertical) {
+      HapticFeedback.selectionClick();
+      _openToolDrawer();
     }
     _intentDragOffset = Offset.zero;
   }
 
   void _openMemoryScatter() {
     FocusScope.of(context).unfocus();
+    _closeToolDrawer();
     if (_memoryExpanded) return;
     _logInput('memory panel opened');
     setState(() => _memoryExpanded = true);
@@ -348,6 +372,19 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     );
   }
 
+  void _openToolDrawer() {
+    FocusScope.of(context).unfocus();
+    if (_toolsExpanded) return;
+    _logInput('tool drawer opened');
+    setState(() => _toolsExpanded = true);
+  }
+
+  void _closeToolDrawer() {
+    if (!_toolsExpanded) return;
+    _logInput('tool drawer closed');
+    setState(() => _toolsExpanded = false);
+  }
+
   void _dismissAmbientState(FlashRecordState state) {
     _logInput(
       'ambient_dismiss phase=${state.phase.name} expanded=$_intentExpanded focus=${_textFocusNode.hasFocus} launching=$_keyboardLaunchExpanding hiding=$_keyboardHiding kbVis=$_keyboardVisible',
@@ -358,10 +395,104 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     }
     _collapseIntentInput(reason: 'ambient-tap');
     _closeMemoryScatter();
+    _closeToolDrawer();
     FocusScope.of(context).unfocus();
     if (state.phase == FlashPhase.listening) {
       _handleIntentLongPressEnd();
       unawaited(ref.read(flashRecordProvider.notifier).stopListening());
+    }
+  }
+
+  Future<void> _handleTakePhoto() async {
+    if (_capturingPhoto) return;
+
+    _closeToolDrawer();
+    _collapseIntentInput(reason: 'open-camera');
+    FocusScope.of(context).unfocus();
+
+    setState(() => _capturingPhoto = true);
+
+    try {
+      final photo = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.rear,
+        imageQuality: 92,
+      );
+
+      if (!mounted || photo == null) return;
+
+      final saved = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) =>
+              PhotoMomentEditorPage.create(sourceImagePath: photo.path),
+        ),
+      );
+
+      if (saved == true && mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('已保存图片片刻'),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 1),
+            ),
+          );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('拍照失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _capturingPhoto = false);
+      }
+    }
+  }
+
+  Future<void> _recoverLostPhoto() async {
+    if (_recoveringLostPhoto) return;
+    _recoveringLostPhoto = true;
+
+    try {
+      final response = await _imagePicker.retrieveLostData();
+      if (!mounted || response.isEmpty) return;
+
+      final file =
+          response.file ??
+          (response.files?.isNotEmpty ?? false ? response.files!.first : null);
+      if (file == null) return;
+
+      final saved = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) =>
+              PhotoMomentEditorPage.create(sourceImagePath: file.path),
+        ),
+      );
+
+      if (saved == true && mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('已恢复并保存拍照片刻'),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 1),
+            ),
+          );
+      }
+    } catch (_) {
+      // Lost data recovery is best-effort. Ignore failures and keep the main flow responsive.
+    } finally {
+      _recoveringLostPhoto = false;
     }
   }
 
@@ -1032,7 +1163,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     ThemeData theme, {
     bool compact = false,
   }) {
-    final expanded = _intentExpanded;
+    final expanded = _intentExpanded || _keyboardLaunchExpanding;
     final horizontalPadding = expanded ? AppSpacing.containerMargin + 12 : 0.0;
     final isListening = state.phase == FlashPhase.listening;
     final keyboardMotion = _keyboardLaunchExpanding;
@@ -1046,68 +1177,149 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         horizontalPadding,
         compact ? 0 : AppSpacing.md,
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final expandedWidth = constraints.maxWidth.isFinite
-              ? constraints.maxWidth
-              : MediaQuery.sizeOf(context).width - horizontalPadding * 2;
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_toolsExpanded && !expanded && !compact) ...[
+            _buildToolDrawer(theme),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final expandedWidth = constraints.maxWidth.isFinite
+                  ? constraints.maxWidth
+                  : MediaQuery.sizeOf(context).width - horizontalPadding * 2;
 
-          return Align(
-            alignment: Alignment.bottomCenter,
-            child: AnimatedContainer(
-              key: const ValueKey('unified-intent-pill'),
-              duration: keyboardMotion ? Duration.zero : _intentSettleDuration,
-              curve: _intentMotionCurve,
-              width: expanded ? expandedWidth : _intentPillWidth,
-              height: _intentPillHeight,
-              decoration: BoxDecoration(
-                color: (isListening ? AppColors.primary : AppColors.surface)
-                    .withAlpha(isListening ? 232 : 218),
-                borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-                border: Border.all(
-                  color: isListening
-                      ? AppColors.primary.withAlpha(90)
-                      : AppColors.border.withAlpha(132),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color:
-                        (isListening ? AppColors.primary : AppColors.softShadow)
-                            .withAlpha(isListening ? 36 : 24),
-                    blurRadius: isListening ? 22 : 16,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: AnimatedSwitcher(
-                duration: keyboardMotion
-                    ? Duration.zero
-                    : _intentContentSwapDuration,
-                switchInCurve: _intentMotionCurve,
-                switchOutCurve: Curves.easeOutCubic,
-                transitionBuilder: (child, animation) {
-                  final curved = CurvedAnimation(
-                    parent: animation,
-                    curve: _intentMotionCurve,
-                  );
-                  return FadeTransition(
-                    opacity: curved,
-                    child: ScaleTransition(
-                      scale: Tween<double>(
-                        begin: 0.985,
-                        end: 1,
-                      ).animate(curved),
-                      child: child,
+              return Align(
+                alignment: Alignment.bottomCenter,
+                child: AnimatedContainer(
+                  key: const ValueKey('unified-intent-pill'),
+                  duration: keyboardMotion
+                      ? Duration.zero
+                      : _intentSettleDuration,
+                  curve: _intentMotionCurve,
+                  width: expanded ? expandedWidth : _intentPillWidth,
+                  height: _intentPillHeight,
+                  decoration: BoxDecoration(
+                    color: (isListening ? AppColors.primary : AppColors.surface)
+                        .withAlpha(isListening ? 232 : 218),
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+                    border: Border.all(
+                      color: isListening
+                          ? AppColors.primary.withAlpha(90)
+                          : AppColors.border.withAlpha(132),
                     ),
-                  );
-                },
-                child: expanded
-                    ? _buildExpandedIntentInput(state, theme)
-                    : _buildCollapsedIntentPill(state, theme),
+                    boxShadow: [
+                      BoxShadow(
+                        color:
+                            (isListening
+                                    ? AppColors.primary
+                                    : AppColors.softShadow)
+                                .withAlpha(isListening ? 36 : 24),
+                        blurRadius: isListening ? 22 : 16,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: AnimatedSwitcher(
+                    duration: keyboardMotion
+                        ? Duration.zero
+                        : _intentContentSwapDuration,
+                    switchInCurve: _intentMotionCurve,
+                    switchOutCurve: Curves.easeOutCubic,
+                    transitionBuilder: (child, animation) {
+                      final curved = CurvedAnimation(
+                        parent: animation,
+                        curve: _intentMotionCurve,
+                      );
+                      return FadeTransition(
+                        opacity: curved,
+                        child: ScaleTransition(
+                          scale: Tween<double>(
+                            begin: 0.985,
+                            end: 1,
+                          ).animate(curved),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: expanded
+                        ? _buildExpandedIntentInput(state, theme)
+                        : _buildCollapsedIntentPill(state, theme),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToolDrawer(ThemeData theme) {
+    return Material(
+      color: AppColors.surface.withAlpha(242),
+      elevation: 6,
+      shadowColor: AppColors.softShadow,
+      borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+          border: Border.all(color: AppColors.border.withAlpha(145)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '记录一个片刻',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
               ),
             ),
-          );
-        },
+            const SizedBox(height: AppSpacing.sm),
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: AppSpacing.sm,
+              crossAxisSpacing: AppSpacing.sm,
+              childAspectRatio: 2.2,
+              children: [
+                _ToolDrawerAction(
+                  icon: Icons.timer_rounded,
+                  label: '专注',
+                  onTap: () => _openFocusSession(context),
+                ),
+                _ToolDrawerAction(
+                  icon: Icons.edit_note_rounded,
+                  label: '长笔记',
+                  onTap: () {
+                    _closeToolDrawer();
+                    _openLongNoteEditor(context);
+                  },
+                ),
+                _ToolDrawerAction(
+                  icon: Icons.camera_alt_rounded,
+                  label: _capturingPhoto ? '拍照中...' : '拍照',
+                  onTap: _capturingPhoto ? null : _handleTakePhoto,
+                ),
+                const _ToolDrawerAction(
+                  icon: Icons.image_outlined,
+                  label: '图片',
+                  enabled: false,
+                ),
+                const _ToolDrawerAction(
+                  icon: Icons.mic_none_rounded,
+                  label: '录音',
+                  enabled: false,
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1620,6 +1832,62 @@ class _TodoPanelEventCard extends ConsumerWidget {
     }
     ref.invalidate(todayTodoPanelEventsProvider);
     ref.read(dataVersionProvider.notifier).increment();
+  }
+}
+
+class _ToolDrawerAction extends StatelessWidget {
+  const _ToolDrawerAction({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.enabled = true,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = enabled && onTap != null;
+    final tint = active ? AppColors.primary : AppColors.muted.withAlpha(160);
+
+    return Material(
+      color: tint.withAlpha(active ? 18 : 8),
+      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        onTap: active ? onTap : null,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.sm,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            border: Border.all(color: tint.withAlpha(active ? 70 : 32)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: tint, size: 18),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: tint,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import 'dashboard_providers.dart';
+import '../documents/document_library_page.dart';
 import 'widgets/dashboard_expanded.dart';
 import 'widgets/review_orb.dart';
 
@@ -54,7 +55,52 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   ),
                 ),
               ),
+            Positioned(
+              top: AppSpacing.sm,
+              right: AppSpacing.md,
+              child: _LibraryShortcut(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const DocumentLibraryPage(),
+                  ),
+                ),
+              ),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LibraryShortcut extends StatelessWidget {
+  const _LibraryShortcut({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Tooltip(
+        message: '资料库',
+        child: Material(
+          color: AppColors.surface.withAlpha(235),
+          shape: const CircleBorder(),
+          elevation: 2,
+          shadowColor: AppColors.softShadow,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: const SizedBox(
+              width: 44,
+              height: 44,
+              child: Icon(
+                Icons.folder_special_rounded,
+                color: AppColors.primary,
+                size: 22,
+              ),
+            ),
+          ),
         ),
       ),
     );

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/media/photo_moment_service.dart';
 import '../../../core/database/repository_providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -129,7 +130,7 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
                             padding: EdgeInsets.zero,
                             iconSize: 16,
                             tooltip: '彻底删除',
-                            onPressed: () => _permanentlyDelete(id),
+                            onPressed: () => _permanentlyDelete(row),
                             icon: Icon(Icons.delete_forever_rounded,
                                 color: AppColors.accent.withAlpha(160)),
                           ),
@@ -154,8 +155,15 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
     ref.read(dataVersionProvider.notifier).increment();
   }
 
-  Future<void> _permanentlyDelete(int id) async {
-    await ref.read(recordsRepositoryProvider).permanentDelete(id);
+  Future<void> _permanentlyDelete(Map<String, Object?> row) async {
+    final id = row['id'] as int;
+    if ((row['type'] as String?) == 'moment_photo') {
+      await ref.read(photoMomentServiceProvider).permanentlyDeletePhotoMoment(
+        id,
+      );
+    } else {
+      await ref.read(recordsRepositoryProvider).permanentDelete(id);
+    }
     ref.invalidate(deletedRecordsProvider);
     ref.read(dataVersionProvider.notifier).increment();
   }

@@ -39,6 +39,9 @@ docs/qa/**/*.sql
 .vscode/
 *.iml
 
+# Android signing
+android/key.properties
+
 # OS files
 .DS_Store
 Thumbs.db

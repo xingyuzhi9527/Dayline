@@ -159,6 +159,68 @@ class RecordsRepository extends Repository {
   }
 }
 
+class MediaAttachmentsRepository extends Repository {
+  MediaAttachmentsRepository(LocalDatabase localDatabase)
+    : super(localDatabase, 'media_attachments');
+
+  Future<int> create({
+    required int recordId,
+    required String mediaType,
+    required String sourceType,
+    required String localPath,
+    String? thumbnailPath,
+    int? width,
+    int? height,
+    int? durationMs,
+    int sortOrder = 0,
+    DateTime? createdAt,
+  }) {
+    return insert(
+      withTimestamps({
+        'record_id': recordId,
+        'media_type': mediaType,
+        'source_type': sourceType,
+        'local_path': localPath,
+        'thumbnail_path': thumbnailPath,
+        'width': width,
+        'height': height,
+        'duration_ms': durationMs,
+        'sort_order': sortOrder,
+      }, createdAt: createdAt),
+    );
+  }
+
+  Future<List<DatabaseRow>> findByRecordId(int recordId) async {
+    final db = await localDatabase.database;
+    return db.query(
+      tableName,
+      where: 'record_id = ?',
+      whereArgs: [recordId],
+      orderBy: 'sort_order ASC, created_at ASC, id ASC',
+    );
+  }
+
+  Future<Map<int, List<DatabaseRow>>> findByRecordIds(List<int> recordIds) async {
+    if (recordIds.isEmpty) return const {};
+
+    final db = await localDatabase.database;
+    final placeholders = List.filled(recordIds.length, '?').join(', ');
+    final rows = await db.query(
+      tableName,
+      where: 'record_id IN ($placeholders)',
+      whereArgs: recordIds,
+      orderBy: 'record_id ASC, sort_order ASC, created_at ASC, id ASC',
+    );
+
+    final grouped = <int, List<DatabaseRow>>{};
+    for (final row in rows) {
+      final recordId = row['record_id'] as int;
+      grouped.putIfAbsent(recordId, () => <DatabaseRow>[]).add(row);
+    }
+    return grouped;
+  }
+}
+
 class TodosRepository extends Repository {
   TodosRepository(LocalDatabase localDatabase) : super(localDatabase, 'todos');
 
