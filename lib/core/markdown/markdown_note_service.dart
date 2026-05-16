@@ -12,19 +12,47 @@ class MarkdownNoteService {
   final MarkdownStorageService _storage;
 
   Future<String> saveDailyNote(DateTime date, String markdownContent) async {
-    final filename = MarkdownFilename.generate(
-      date,
-      mode: MarkdownNamingMode.date,
-    );
-    final relativePath = p.posix.join(
-      'daily',
-      MarkdownFilename.monthDir(date),
-      filename,
-    );
+    final relativePath = _dailyNoteRelativePath(date);
     return _storage.writeRelativeTextFile(
       relativePath: relativePath,
       content: markdownContent,
     );
+  }
+
+  Future<String?> findDailyNote(DateTime date) async {
+    final location = await dailyNoteLocation(date);
+    try {
+      await _storage.readTextFileLocation(location);
+      return location;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String> dailyNoteLocation(DateTime date) async {
+    final relativePath = _dailyNoteRelativePath(date);
+    final treeUri = await _dirService.getTreeRootUri();
+    if (treeUri != null && treeUri.isNotEmpty) {
+      return MarkdownStorageLocation.documentTree(
+        treeUri: treeUri,
+        relativePath: relativePath,
+      ).serialize();
+    }
+
+    final root = await _dirService.ensureRoot();
+    final localPath = p.joinAll([
+      root,
+      ...p.posix
+          .normalize(relativePath)
+          .split('/')
+          .where((segment) => segment.isNotEmpty),
+    ]);
+    return MarkdownStorageLocation.local(localPath).serialize();
+  }
+
+  Future<String> readDailyNote(DateTime date) async {
+    final location = await dailyNoteLocation(date);
+    return _storage.readTextFileLocation(location);
   }
 
   Future<String> saveLongNote({
@@ -81,4 +109,12 @@ class MarkdownNoteService {
 
   String _fmtTime(DateTime d) =>
       '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+  String _dailyNoteRelativePath(DateTime date) {
+    final filename = MarkdownFilename.generate(
+      date,
+      mode: MarkdownNamingMode.date,
+    );
+    return p.posix.join('daily', MarkdownFilename.monthDir(date), filename);
+  }
 }

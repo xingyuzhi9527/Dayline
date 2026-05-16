@@ -62,6 +62,21 @@ class RecordNotifier extends Notifier<RecordState> {
     );
   }
 
+  void updateParsedText(String text) {
+    final trimmedText = text.trim();
+    if (trimmedText.isEmpty) {
+      state = state.copyWith(inputText: text, errorMessage: null);
+      return;
+    }
+
+    final parsed = LuiLiteParser.parse(trimmedText);
+    state = state.copyWith(
+      inputText: text,
+      parsedInput: parsed,
+      errorMessage: null,
+    );
+  }
+
   void updateParsedTags(List<String> tags) {
     final parsed = state.parsedInput;
     if (parsed == null) return;
@@ -140,7 +155,7 @@ class RecordNotifier extends Notifier<RecordState> {
 
       case ParsedInputType.focus:
         final durationMinutes =
-            (parsed.metadata['durationMinutes'] as int?) ?? 25;
+            (parsed.metadata['durationMinutes'] as int?) ?? 0;
         await ref
             .read(focusSessionsRepositoryProvider)
             .create(

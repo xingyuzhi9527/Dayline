@@ -192,8 +192,11 @@ class LuiLiteParser {
 
     if (_KW.focus.hasMatch(input)) {
       final duration = _extractDuration(input);
-      if (duration != null) meta['durationMinutes'] = duration;
-      return ParsedInputType.focus;
+      if (duration != null) {
+        meta['durationMinutes'] = duration;
+        return ParsedInputType.focus;
+      }
+      if (_isLikelyMemo(input)) return ParsedInputType.memo;
     }
 
     final amount = _extractAmount(input);

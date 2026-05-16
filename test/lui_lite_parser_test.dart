@@ -96,8 +96,9 @@ void main() {
   });
 
   group('LuiLiteParser — focus', () {
-    test('detects 番茄 keyword', () {
-      expect(LuiLiteParser.parse('番茄 阅读').type, ParsedInputType.focus);
+    test('does not infer focus without duration', () {
+      expect(LuiLiteParser.parse('番茄 阅读').type, ParsedInputType.tracker);
+      expect(LuiLiteParser.parse('修改 app 专注功能').type, ParsedInputType.memo);
     });
 
     test('detects focus keyword + duration', () {
