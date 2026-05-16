@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,8 @@ import '../app_routes.dart';
 import '../core/database/repository_providers.dart';
 import '../core/markdown/markdown_directory_service.dart';
 import '../core/markdown/markdown_storage_service.dart';
+import '../core/media/photo_moment_service.dart';
+import '../core/stt/stt_providers.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_spacing.dart';
 import '../features/dashboard/dashboard_page.dart';
@@ -37,6 +40,17 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
     _currentIndex = widget.navigationShell.currentIndex;
     _pageController = PageController(initialPage: _currentIndex);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkOnboarding());
+    unawaited(_warmUpSpeechEngine());
+  }
+
+  Future<void> _warmUpSpeechEngine() async {
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+    try {
+      await ref.read(sttEngineProvider).initialize();
+    } catch (_) {
+      // Speech is optional; the record page will surface availability errors.
+    }
   }
 
   Future<void> _checkOnboarding() async {
@@ -57,6 +71,18 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
           lostTreeAccess) {
         if (!mounted) return;
         await showMarkdownDirectoryDialog(context, dirService);
+        unawaited(
+          ref
+              .read(photoMomentServiceProvider)
+              .syncPrivatePhotoCopiesToVisibleDocuments(),
+        );
+      } else {
+        await MarkdownStorageService(dirService).ensureCoreDirectories();
+        unawaited(
+          ref
+              .read(photoMomentServiceProvider)
+              .syncPrivatePhotoCopiesToVisibleDocuments(),
+        );
       }
     } catch (_) {
       // Keep startup resilient when storage/config providers are unavailable,

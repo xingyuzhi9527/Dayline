@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/database/repositories.dart';
+import '../../../core/media/photo_moment_service.dart';
 import '../../../core/database/repository_providers.dart';
 import '../../../core/markdown/markdown_directory_service.dart';
 import '../../../core/markdown/markdown_document_parser.dart';
@@ -13,6 +15,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../long_note/long_note_editor_page.dart';
 import '../../long_note/long_note_reader_page.dart';
+import '../../photo_moment/photo_moment_editor_page.dart';
 import '../timeline_providers.dart';
 
 extension _AsyncValueX<T> on AsyncValue<T> {
@@ -243,11 +246,16 @@ class _TimelineTile extends ConsumerWidget {
     final isRight =
         event.source == TimelineEventSource.todo || event.type == 'long_note';
     final theme = Theme.of(context);
+    final openDetails = event.type == 'long_note'
+        ? () => _openReader(context, ref)
+        : event.type == 'moment_photo'
+        ? () => _openPhotoMoment(context, ref)
+        : null;
     final card = _TimelineEventCard(
       event: event,
       color: color,
       theme: theme,
-      onTap: event.type == 'long_note' ? () => _openReader(context, ref) : null,
+      onTap: openDetails,
       onEdit: () => _openEditor(context, ref),
     );
 
@@ -333,6 +341,11 @@ class _TimelineTile extends ConsumerWidget {
   }
 
   Future<void> _openEditor(BuildContext context, WidgetRef ref) async {
+    if (event.type == 'moment_photo') {
+      await _openPhotoMoment(context, ref);
+      return;
+    }
+
     if (event.type == 'long_note') {
       Map<String, Object?>? meta;
       final rawMeta = event.data['metadata'];
@@ -477,6 +490,32 @@ class _TimelineTile extends ConsumerWidget {
     _showTimelineSnack(context, '已转成待办。');
     return true;
   }
+
+  Future<void> _openPhotoMoment(BuildContext context, WidgetRef ref) async {
+    final attachment = event.primaryAttachment;
+    final imagePath = attachment?['local_path'] as String?;
+    if (imagePath == null || imagePath.isEmpty) {
+      _showTimelineSnack(context, '这条图片片刻缺少附件文件');
+      return;
+    }
+
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => PhotoMomentEditorPage.edit(
+          recordId: event.sourceId,
+          imagePath: imagePath,
+          initialNote: event.title,
+          initialTags: event.tags,
+          capturedAt: event.timestamp,
+        ),
+      ),
+    );
+
+    if (saved == true && context.mounted) {
+      ref.invalidate(timelineEventsProvider);
+    }
+  }
 }
 
 Future<MarkdownDocumentContent> _readLongNoteDocument(
@@ -601,7 +640,17 @@ class _TimelineEventCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasDetails = event.description.isNotEmpty || event.tags.isNotEmpty;
+    final attachment = event.primaryAttachment;
+    final imagePath = attachment?['local_path'] as String?;
+    final isPhotoMoment =
+        event.type == 'moment_photo' &&
+        imagePath != null &&
+        imagePath.trim().isNotEmpty;
+    final hasTitle = event.title.trim().isNotEmpty;
+    final hasDetails =
+        (event.description.isNotEmpty && !isPhotoMoment) ||
+        event.tags.isNotEmpty ||
+        hasTitle;
 
     final card = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 72),
@@ -671,19 +720,49 @@ class _TimelineEventCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  Padding(
-                    padding: EdgeInsets.only(top: hasDetails ? 2 : 0),
-                    child: Text(
-                      event.title,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        height: 1.28,
+                  if (isPhotoMoment)
+                    Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.xs),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(
+                          AppSpacing.radiusMd,
+                        ),
+                        child: AspectRatio(
+                          aspectRatio: 4 / 3,
+                          child: Image.file(
+                            File(imagePath),
+                            fit: BoxFit.cover,
+                            cacheWidth: 720,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                color: AppColors.canvas,
+                                alignment: Alignment.center,
+                                child: Text(
+                                  '图片加载失败',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: AppColors.muted,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  if (event.description.isNotEmpty)
+                  if (hasTitle)
+                    Padding(
+                      padding: EdgeInsets.only(top: hasDetails ? 8 : 0),
+                      child: Text(
+                        event.title,
+                        maxLines: isPhotoMoment ? 2 : 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          height: 1.28,
+                        ),
+                      ),
+                    ),
+                  if (event.description.isNotEmpty && !isPhotoMoment)
                     Padding(
                       padding: const EdgeInsets.only(top: AppSpacing.xxs),
                       child: Text(
@@ -1590,6 +1669,7 @@ String _labelForType(String type) => switch (type) {
   'body' => '身体',
   'sleep' => '睡眠',
   'mood' => '情绪',
+  'moment_photo' => '图片片刻',
   _ => type,
 };
 
@@ -1603,6 +1683,7 @@ Color _colorForType(String type) => switch (type) {
   'body' => const Color(0xFF9B59B6),
   'sleep' => const Color(0xFF5C6BC0),
   'mood' => const Color(0xFFD5952F),
+  'moment_photo' => const Color(0xFF2F7D6A),
   _ => AppColors.muted,
 };
 
@@ -1750,9 +1831,16 @@ class _TrashButton extends ConsumerWidget {
                                   color: AppColors.accent.withAlpha(180),
                                 ),
                                 onPressed: () async {
-                                  await ref
-                                      .read(recordsRepositoryProvider)
-                                      .permanentDelete(id);
+                                  if ((row['type'] as String?) ==
+                                      'moment_photo') {
+                                    await ref
+                                        .read(photoMomentServiceProvider)
+                                        .permanentlyDeletePhotoMoment(id);
+                                  } else {
+                                    await ref
+                                        .read(recordsRepositoryProvider)
+                                        .permanentDelete(id);
+                                  }
                                   ref.invalidate(deletedRecordsProvider);
                                   ref
                                       .read(dataVersionProvider.notifier)

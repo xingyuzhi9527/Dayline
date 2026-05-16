@@ -13,6 +13,7 @@ class MarkdownDirectoryService {
 
   static const _keyRootPath = 'markdown_root_path';
   static const _keyRootTreeUri = 'markdown_root_tree_uri';
+  static const _keyRootTreeSubdir = 'markdown_root_tree_subdir';
   static const _keyConfigured = 'markdown_root_configured';
   static const defaultDirName = 'Liflow';
 
@@ -28,12 +29,14 @@ class MarkdownDirectoryService {
 
   Future<void> setRootPath(String path) async {
     await _settings.delete(_keyRootTreeUri);
+    await _settings.delete(_keyRootTreeSubdir);
     final existing = await _settings.findByKey(_keyRootPath);
     if (existing != null) {
       await _settings.update(_keyRootPath, path);
     } else {
       await _settings.create(key: _keyRootPath, value: path);
     }
+    await ensureCoreDirectories();
     await _markConfigured();
   }
 
@@ -44,7 +47,7 @@ class MarkdownDirectoryService {
     return value;
   }
 
-  Future<void> setTreeRootUri(String treeUri) async {
+  Future<void> setTreeRootUri(String treeUri, {String rootSubdir = ''}) async {
     await _settings.delete(_keyRootPath);
     final existing = await _settings.findByKey(_keyRootTreeUri);
     if (existing != null) {
@@ -52,7 +55,23 @@ class MarkdownDirectoryService {
     } else {
       await _settings.create(key: _keyRootTreeUri, value: treeUri);
     }
+    await setTreeRootSubdir(rootSubdir);
     await _markConfigured();
+  }
+
+  Future<String> getTreeRootSubdir() async {
+    final row = await _settings.findByKey(_keyRootTreeSubdir);
+    return (row?['value'] as String?)?.trim() ?? '';
+  }
+
+  Future<void> setTreeRootSubdir(String value) async {
+    final normalized = value.trim();
+    final existing = await _settings.findByKey(_keyRootTreeSubdir);
+    if (existing != null) {
+      await _settings.update(_keyRootTreeSubdir, normalized);
+    } else {
+      await _settings.create(key: _keyRootTreeSubdir, value: normalized);
+    }
   }
 
   Future<void> useDefaultRoot() async {
@@ -84,6 +103,16 @@ class MarkdownDirectoryService {
     return path;
   }
 
+  Future<void> ensureCoreDirectories() async {
+    final root = await ensureRoot();
+    for (final name in const ['daily', 'notes', 'documents']) {
+      final dir = Directory(p.join(root, name));
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+    }
+  }
+
   Future<String> ensureDailyDir(DateTime date) async {
     final root = await ensureRoot();
     final sub = p.join(root, 'daily', MarkdownFilename.monthDir(date));
@@ -97,6 +126,31 @@ class MarkdownDirectoryService {
   Future<String> ensureNotesDir(DateTime date) async {
     final root = await ensureRoot();
     final sub = p.join(root, 'notes', MarkdownFilename.monthDir(date));
+    final dir = Directory(sub);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return sub;
+  }
+
+  Future<String> ensurePhotoAttachmentsDir(DateTime date) async {
+    final root = await ensureRoot();
+    final sub = p.join(
+      root,
+      'documents',
+      'photos',
+      MarkdownFilename.monthDir(date),
+    );
+    final dir = Directory(sub);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return sub;
+  }
+
+  Future<String> ensureDocumentsDir() async {
+    final root = await ensureRoot();
+    final sub = p.join(root, 'documents');
     final dir = Directory(sub);
     if (!await dir.exists()) {
       await dir.create(recursive: true);

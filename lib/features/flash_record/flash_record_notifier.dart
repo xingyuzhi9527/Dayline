@@ -22,7 +22,6 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   late final SttEngine _sttEngine;
   SttListenSession? _sttSession;
   StreamSubscription<SttTranscript>? _sttSub;
-  Timer? _initTimer;
   bool _disposed = false;
   int _listenRequestId = 0;
 
@@ -31,15 +30,10 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     _sttEngine = ref.watch(sttEngineProvider);
     ref.onDispose(() {
       _disposed = true;
-      _initTimer?.cancel();
       unawaited(_sttSub?.cancel());
       unawaited(_sttSession?.cancel());
     });
-    _initTimer = Timer(const Duration(milliseconds: 900), () {
-      if (!_disposed) {
-        unawaited(_initializeStt());
-      }
-    });
+    unawaited(_initializeStt());
     return const FlashRecordState();
   }
 

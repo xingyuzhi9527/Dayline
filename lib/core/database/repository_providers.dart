@@ -40,6 +40,11 @@ final appSettingsRepositoryProvider = Provider<AppSettingsRepository>((ref) {
   return AppSettingsRepository(ref.watch(localDatabaseProvider));
 });
 
+final mediaAttachmentsRepositoryProvider =
+    Provider<MediaAttachmentsRepository>((ref) {
+      return MediaAttachmentsRepository(ref.watch(localDatabaseProvider));
+    });
+
 final dailyReviewsRepositoryProvider = Provider<DailyReviewsRepository>((ref) {
   return DailyReviewsRepository(ref.watch(localDatabaseProvider));
 });

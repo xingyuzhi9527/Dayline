@@ -14,6 +14,7 @@ void main() {
   late FocusSessionsRepository focusSessionsRepository;
   late ExpensesRepository expensesRepository;
   late BodyLogsRepository bodyLogsRepository;
+  late MediaAttachmentsRepository mediaAttachmentsRepository;
   late AppSettingsRepository appSettingsRepository;
 
   setUp(() {
@@ -28,6 +29,7 @@ void main() {
     focusSessionsRepository = FocusSessionsRepository(database);
     expensesRepository = ExpensesRepository(database);
     bodyLogsRepository = BodyLogsRepository(database);
+    mediaAttachmentsRepository = MediaAttachmentsRepository(database);
     appSettingsRepository = AppSettingsRepository(database);
   });
 
@@ -148,6 +150,43 @@ void main() {
     expect(updated?['content'], 'Updated note');
     expect(updated?['time'], '09:30');
     expect(updated?['tags'], '["日常"]');
+  });
+
+  test('groups media attachments by record ids', () async {
+    final today = DateTime(2026, 4, 30);
+    final firstRecordId = await recordsRepository.create(
+      date: today,
+      type: 'moment_photo',
+      content: 'first',
+    );
+    final secondRecordId = await recordsRepository.create(
+      date: today,
+      type: 'moment_photo',
+      content: 'second',
+    );
+
+    await mediaAttachmentsRepository.create(
+      recordId: firstRecordId,
+      mediaType: 'image',
+      sourceType: 'camera',
+      localPath: r'E:\tmp\first.jpg',
+    );
+    await mediaAttachmentsRepository.create(
+      recordId: secondRecordId,
+      mediaType: 'image',
+      sourceType: 'camera',
+      localPath: r'E:\tmp\second.jpg',
+    );
+
+    final grouped = await mediaAttachmentsRepository.findByRecordIds([
+      firstRecordId,
+      secondRecordId,
+    ]);
+
+    expect(grouped[firstRecordId], hasLength(1));
+    expect(grouped[secondRecordId], hasLength(1));
+    expect(grouped[firstRecordId]!.single['local_path'], r'E:\tmp\first.jpg');
+    expect(grouped[secondRecordId]!.single['local_path'], r'E:\tmp\second.jpg');
   });
 
   test('updates todo details', () async {

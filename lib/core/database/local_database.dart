@@ -16,7 +16,7 @@ final localDatabaseProvider = Provider<LocalDatabase>((ref) {
 
 class LocalDatabase {
   static const _databaseName = 'liflow.db';
-  static const _databaseVersion = 3;
+  static const _databaseVersion = 4;
 
   LocalDatabase({
     sqflite.DatabaseFactory? databaseFactory,
@@ -203,6 +203,28 @@ CREATE TABLE daily_reviews (
     await db.execute(
       'CREATE INDEX idx_daily_reviews_date ON daily_reviews (date)',
     );
+
+    await db.execute('''
+CREATE TABLE media_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_id INTEGER NOT NULL,
+  media_type TEXT NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'unknown',
+  local_path TEXT NOT NULL,
+  thumbnail_path TEXT,
+  width INTEGER,
+  height INTEGER,
+  duration_ms INTEGER,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (record_id) REFERENCES records (id) ON DELETE CASCADE
+)
+''');
+
+    await db.execute(
+      'CREATE INDEX idx_media_attachments_record_id ON media_attachments (record_id)',
+    );
   }
 
   Future<void> _upgradeSchema(sqflite.Database db, int oldVersion, int newVersion) async {
@@ -225,6 +247,28 @@ CREATE TABLE daily_reviews (
     if (oldVersion < 3) {
       await db.execute(
         'ALTER TABLE records ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    if (oldVersion < 4) {
+      await db.execute('''
+CREATE TABLE media_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_id INTEGER NOT NULL,
+  media_type TEXT NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'unknown',
+  local_path TEXT NOT NULL,
+  thumbnail_path TEXT,
+  width INTEGER,
+  height INTEGER,
+  duration_ms INTEGER,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (record_id) REFERENCES records (id) ON DELETE CASCADE
+)
+''');
+      await db.execute(
+        'CREATE INDEX idx_media_attachments_record_id ON media_attachments (record_id)',
       );
     }
   }
