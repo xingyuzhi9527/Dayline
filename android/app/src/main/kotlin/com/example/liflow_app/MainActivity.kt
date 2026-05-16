@@ -1,6 +1,7 @@
 package com.example.liflow_app
 
 import android.content.Intent
+import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
@@ -15,8 +16,16 @@ class MainActivity : FlutterActivity() {
     private var pendingDocumentImportResult: MethodChannel.Result? = null
     private var pendingDocumentTreeUri: String? = null
     private var pendingDocumentTargetPath: String? = null
+    private var audioChannel: MethodChannel? = null
+    private var mediaPlayer: MediaPlayer? = null
+    private var playingAudioPath: String? = null
     private val PICK_DIRECTORY = 1001
     private val PICK_DOCUMENT = 1002
+
+    override fun onDestroy() {
+        releaseAudioPlayer(notifyStop = false)
+        super.onDestroy()
+    }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -68,6 +77,80 @@ class MainActivity : FlutterActivity() {
             } catch (error: Throwable) {
                 result.error("markdown_storage_error", error.message, null)
             }
+        }
+
+        audioChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "liflow/audio_player",
+        )
+        audioChannel?.setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    "play" -> playAudio(call, result)
+                    "stop" -> {
+                        releaseAudioPlayer(notifyStop = true)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            } catch (error: Throwable) {
+                releaseAudioPlayer(notifyStop = true)
+                result.error("audio_player_error", error.message, null)
+            }
+        }
+    }
+
+    private fun playAudio(call: MethodCall, result: MethodChannel.Result) {
+        val path = call.argument<String>("path")
+            ?: throw IllegalArgumentException("Missing: path")
+        val file = File(path)
+        if (!file.exists()) {
+            throw IllegalStateException("Audio file not found: $path")
+        }
+
+        releaseAudioPlayer(notifyStop = false)
+        playingAudioPath = path
+        mediaPlayer = MediaPlayer().apply {
+            setDataSource(path)
+            setOnCompletionListener {
+                val completedPath = playingAudioPath
+                releaseAudioPlayer(notifyStop = false)
+                audioChannel?.invokeMethod(
+                    "onPlaybackComplete",
+                    mapOf("path" to completedPath),
+                )
+            }
+            setOnErrorListener { _, _, _ ->
+                val failedPath = playingAudioPath
+                releaseAudioPlayer(notifyStop = false)
+                audioChannel?.invokeMethod(
+                    "onPlaybackStop",
+                    mapOf("path" to failedPath),
+                )
+                true
+            }
+            prepare()
+            start()
+        }
+        result.success(null)
+    }
+
+    private fun releaseAudioPlayer(notifyStop: Boolean) {
+        val stoppedPath = playingAudioPath
+        mediaPlayer?.setOnCompletionListener(null)
+        mediaPlayer?.setOnErrorListener(null)
+        try {
+            if (mediaPlayer?.isPlaying == true) {
+                mediaPlayer?.stop()
+            }
+        } catch (_: Throwable) {
+        }
+        mediaPlayer?.release()
+        mediaPlayer = null
+        playingAudioPath = null
+
+        if (notifyStop && stoppedPath != null) {
+            audioChannel?.invokeMethod("onPlaybackStop", mapOf("path" to stoppedPath))
         }
     }
 

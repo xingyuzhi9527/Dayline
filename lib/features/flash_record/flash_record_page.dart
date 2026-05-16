@@ -970,19 +970,20 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         ? state.recordingMode == FlashRecordingMode.audioOnly
               ? '正在录音，松开后保存原音'
               : '正在本地识别...'
+        : state.recordingMode == FlashRecordingMode.audioOnly
+        ? '大话筒会保存原始录音'
         : state.sttLoading
         ? '正在唤醒离线大脑...'
         : state.sttReady
-        ? state.recordingMode == FlashRecordingMode.audioOnly
-              ? '大话筒会保存原始录音'
-              : '时刻准备记录你的灵感'
+        ? '时刻准备记录你的灵感'
         : state.sttStatusMessage;
 
     final liveText = state.partialText.trim().isNotEmpty
         ? state.partialText.trim()
         : state.rawText.trim();
     final errorText = state.errorMessage?.trim();
-    final voiceAvailable = state.sttReady;
+    final voiceAvailable =
+        state.recordingMode == FlashRecordingMode.audioOnly || state.sttReady;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1010,7 +1011,9 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
-        if (!state.sttReady && !state.sttLoading)
+        if (!state.sttReady &&
+            !state.sttLoading &&
+            state.recordingMode == FlashRecordingMode.transcribe)
           Text(
             state.sttStatusMessage,
             textAlign: TextAlign.center,
@@ -1052,10 +1055,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                   ? state.recordingMode == FlashRecordingMode.audioOnly
                         ? '松开后保存为一条语音片段'
                         : '松开后整理成闪记卡片'
-                  : state.sttLoading
-                  ? '首次加载稍慢，之后会热启动'
                   : state.recordingMode == FlashRecordingMode.audioOnly
                   ? '适合保留语气、环境声和完整表达'
+                  : state.sttLoading
+                  ? '首次加载稍慢，之后会热启动'
                   : '适合变成可编辑、可分类的文字记录',
               key: ValueKey('${errorText ?? ''}-$liveText'),
               textAlign: TextAlign.center,

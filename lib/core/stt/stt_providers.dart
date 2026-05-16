@@ -24,7 +24,7 @@ class _UnavailableSttEngine implements SttEngine {
   }
 
   @override
-  Future<SttListenSession> startListening() {
+  Future<SttListenSession> startListening({bool transcribe = true}) {
     throw StateError('离线语音暂不可用，请使用文字记录');
   }
 

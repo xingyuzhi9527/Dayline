@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/database/repositories.dart';
+import '../../../core/media/audio_playback_service.dart';
 import '../../../core/media/audio_recording_service.dart';
 import '../../../core/media/photo_moment_service.dart';
 import '../../../core/database/repository_providers.dart';
@@ -831,7 +832,7 @@ class _TimelineEventCard extends StatelessWidget {
   }
 }
 
-class _AudioAttachmentStrip extends StatelessWidget {
+class _AudioAttachmentStrip extends ConsumerWidget {
   const _AudioAttachmentStrip({
     required this.attachment,
     required this.color,
@@ -843,13 +844,17 @@ class _AudioAttachmentStrip extends StatelessWidget {
   final ThemeData theme;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final path = attachment['local_path'] as String? ?? '';
     final durationMs = attachment['duration_ms'] as int?;
     final duration = durationMs == null
         ? null
         : Duration(milliseconds: durationMs);
     final exists = path.isNotEmpty && File(path).existsSync();
+    final playback = ref.watch(audioPlaybackProvider);
+    final isPlaying = exists && playback.isPlaying && playback.path == path;
+    final hasPlaybackError =
+        playback.path == path && playback.errorMessage?.isNotEmpty == true;
 
     return Container(
       padding: const EdgeInsets.symmetric(
@@ -863,21 +868,42 @@ class _AudioAttachmentStrip extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(
-            exists ? Icons.graphic_eq_rounded : Icons.error_outline_rounded,
-            size: 18,
-            color: exists ? color : AppColors.accent,
+          SizedBox.square(
+            dimension: 32,
+            child: IconButton(
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              tooltip: isPlaying ? '停止播放' : '播放录音',
+              onPressed: exists
+                  ? () {
+                      ref.read(audioPlaybackProvider.notifier).toggle(path);
+                    }
+                  : null,
+              icon: Icon(
+                exists
+                    ? isPlaying
+                          ? Icons.stop_rounded
+                          : Icons.play_arrow_rounded
+                    : Icons.error_outline_rounded,
+                size: 21,
+                color: exists ? color : AppColors.accent,
+              ),
+            ),
           ),
           const SizedBox(width: AppSpacing.xs),
           Expanded(
             child: Text(
-              exists
-                  ? '录音附件${duration == null ? '' : ' ${_formatAttachmentDuration(duration)}'}'
-                  : '录音文件缺失',
+              !exists
+                  ? '录音文件缺失'
+                  : hasPlaybackError
+                  ? playback.errorMessage!
+                  : isPlaying
+                  ? '正在播放${duration == null ? '' : ' ${_formatAttachmentDuration(duration)}'}'
+                  : '录音附件${duration == null ? '' : ' ${_formatAttachmentDuration(duration)}'}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelMedium?.copyWith(
-                color: exists ? color : AppColors.accent,
+                color: exists && !hasPlaybackError ? color : AppColors.accent,
                 fontWeight: FontWeight.w700,
               ),
             ),

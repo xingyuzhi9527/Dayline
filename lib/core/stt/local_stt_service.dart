@@ -151,15 +151,18 @@ class LocalSttService implements SttEngine {
   }
 
   @override
-  Future<SttListenSession> startListening() async {
-    final availability = await initialize();
-    if (!availability.isReady) {
-      throw StateError(availability.message);
-    }
+  Future<SttListenSession> startListening({bool transcribe = true}) async {
+    SttAssetPaths? paths;
+    if (transcribe) {
+      final availability = await initialize();
+      if (!availability.isReady) {
+        throw StateError(availability.message);
+      }
 
-    final paths = _paths;
-    if (paths == null) {
-      throw StateError('离线语音引擎还没有准备好。');
+      paths = _paths;
+      if (paths == null) {
+        throw StateError('离线语音引擎还没有准备好。');
+      }
     }
 
     if (!await _recorder.hasPermission()) {
@@ -284,14 +287,14 @@ class _LocalSttListenSession implements SttListenSession {
   _LocalSttListenSession({
     required AudioRecorder recorder,
     required File wavFile,
-    required SttAssetPaths paths,
+    required SttAssetPaths? paths,
     required Future<_SenseVoiceTranscriptionResult> Function(String wavPath)
     transcribe,
     required void Function(_LocalSttListenSession session) onFinished,
   }) : _recorder = recorder,
        _wavFile = wavFile,
        _transcribe = transcribe,
-       _metadata = SttMetadata(modelVersion: paths.modelVersion),
+       _metadata = SttMetadata(modelVersion: paths?.modelVersion),
        _onFinished = onFinished;
 
   final AudioRecorder _recorder;
