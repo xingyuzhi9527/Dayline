@@ -90,25 +90,31 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       recordingDraft: null,
     );
 
-    final availability = state.sttStatus == SttAvailabilityStatus.ready
-        ? const SttAvailability.ready()
-        : await _initializeStt();
+    final shouldTranscribe =
+        state.recordingMode == FlashRecordingMode.transcribe;
+    if (shouldTranscribe) {
+      final availability = state.sttStatus == SttAvailabilityStatus.ready
+          ? const SttAvailability.ready()
+          : await _initializeStt();
 
-    if (_disposed || requestId != _listenRequestId) return;
+      if (_disposed || requestId != _listenRequestId) return;
 
-    if (!availability.isReady) {
-      state = state.copyWith(
-        phase: FlashPhase.idle,
-        errorMessage: kDebugMode ? availability.message : '离线语音暂不可用，请使用文字记录',
-      );
-      return;
+      if (!availability.isReady) {
+        state = state.copyWith(
+          phase: FlashPhase.idle,
+          errorMessage: kDebugMode ? availability.message : '离线语音暂不可用，请使用文字记录',
+        );
+        return;
+      }
     }
 
     try {
       await _sttSub?.cancel();
       await _sttSession?.cancel();
 
-      final session = await _sttEngine.startListening();
+      final session = await _sttEngine.startListening(
+        transcribe: shouldTranscribe,
+      );
       if (_disposed || requestId != _listenRequestId) {
         await session.cancel();
         return;

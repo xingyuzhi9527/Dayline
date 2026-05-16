@@ -76,7 +76,7 @@ class SttTranscript {
 abstract interface class SttEngine {
   Future<SttAvailability> initialize();
 
-  Future<SttListenSession> startListening();
+  Future<SttListenSession> startListening({bool transcribe = true});
 
   Future<void> dispose();
 }

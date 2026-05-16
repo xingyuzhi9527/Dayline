@@ -26,7 +26,7 @@ class DebugSttEngine implements SttEngine {
   Future<SttAvailability> initialize() async => const SttAvailability.ready();
 
   @override
-  Future<SttListenSession> startListening() async {
+  Future<SttListenSession> startListening({bool transcribe = true}) async {
     final session = _DebugSttListenSession(
       debugSttMockResults[_random.nextInt(debugSttMockResults.length)],
     );

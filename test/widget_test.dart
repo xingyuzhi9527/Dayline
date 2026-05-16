@@ -652,7 +652,7 @@ class _HoldToTalkSttEngine implements SttEngine {
   Future<SttAvailability> initialize() async => const SttAvailability.ready();
 
   @override
-  Future<SttListenSession> startListening() async {
+  Future<SttListenSession> startListening({bool transcribe = true}) async {
     startCount += 1;
     session = _HoldToTalkSession();
     return session!;
@@ -735,7 +735,7 @@ class _DeferredInitSttEngine implements SttEngine {
   }
 
   @override
-  Future<SttListenSession> startListening() async {
+  Future<SttListenSession> startListening({bool transcribe = true}) async {
     startCount += 1;
     session = _HoldToTalkSession();
     return session!;

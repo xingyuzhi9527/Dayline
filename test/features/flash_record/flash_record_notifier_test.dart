@@ -170,7 +170,7 @@ class _FakeSttEngine implements SttEngine {
   }
 
   @override
-  Future<SttListenSession> startListening() {
+  Future<SttListenSession> startListening({bool transcribe = true}) {
     final nextSession = session;
     if (nextSession == null) {
       throw UnimplementedError();
