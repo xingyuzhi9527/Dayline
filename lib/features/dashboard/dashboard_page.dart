@@ -19,6 +19,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   bool _expanded = false;
   DashboardSummary? _lastSummary;
 
+  void _openLibrary(BuildContext context) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const DocumentLibraryPage()));
+  }
+
   @override
   Widget build(BuildContext context) {
     final summaryAsync = ref.watch(dashboardSummaryProvider);
@@ -39,6 +45,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   ? DashboardExpandedView(
                       summary: visibleSummary,
                       onCollapse: () => setState(() => _expanded = false),
+                      onOpenLibrary: () => _openLibrary(context),
                     )
                   : _CollapsedView(
                       summary: visibleSummary,
@@ -55,17 +62,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   ),
                 ),
               ),
-            Positioned(
-              top: AppSpacing.sm,
-              right: AppSpacing.md,
-              child: _LibraryShortcut(
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const DocumentLibraryPage(),
-                  ),
-                ),
+            if (!_expanded)
+              Positioned(
+                top: AppSpacing.sm,
+                right: AppSpacing.md,
+                child: _LibraryShortcut(onTap: () => _openLibrary(context)),
               ),
-            ),
           ],
         ),
       ),

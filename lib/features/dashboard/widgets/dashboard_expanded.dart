@@ -18,11 +18,13 @@ class DashboardExpandedView extends StatelessWidget {
   const DashboardExpandedView({
     required this.summary,
     required this.onCollapse,
+    required this.onOpenLibrary,
     super.key,
   });
 
   final DashboardSummary summary;
   final VoidCallback onCollapse;
+  final VoidCallback onOpenLibrary;
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +45,11 @@ class DashboardExpandedView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _ExpandedHeader(summary: summary, onCollapse: onCollapse),
+          _ExpandedHeader(
+            summary: summary,
+            onCollapse: onCollapse,
+            onOpenLibrary: onOpenLibrary,
+          ),
           const SizedBox(height: AppSpacing.md),
           _TodayStatusCard(summary: summary),
           const SizedBox(height: AppSpacing.md),
@@ -76,10 +82,15 @@ class DashboardExpandedView extends StatelessWidget {
 }
 
 class _ExpandedHeader extends StatelessWidget {
-  const _ExpandedHeader({required this.summary, required this.onCollapse});
+  const _ExpandedHeader({
+    required this.summary,
+    required this.onCollapse,
+    required this.onOpenLibrary,
+  });
 
   final DashboardSummary summary;
   final VoidCallback onCollapse;
+  final VoidCallback onOpenLibrary;
 
   @override
   Widget build(BuildContext context) {
@@ -102,6 +113,12 @@ class _ExpandedHeader extends StatelessWidget {
         const SizedBox(width: AppSpacing.sm),
         _CompactStreakBadge(recordCount: summary.recordCount),
         const Spacer(),
+        IconButton(
+          onPressed: onOpenLibrary,
+          icon: const Icon(Icons.folder_special_rounded),
+          tooltip: '资料库',
+          color: AppColors.muted,
+        ),
         IconButton(
           onPressed: onCollapse,
           icon: const Icon(Icons.close_rounded),
