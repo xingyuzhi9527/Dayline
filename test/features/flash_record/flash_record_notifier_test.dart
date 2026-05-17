@@ -75,7 +75,7 @@ void main() {
   );
 
   test(
-    'given a voice transcript with a draft, when saving, then stores audio attachment and clears the draft file',
+    'given a transcribed voice draft, when saving, then stores text only and clears the draft file',
     () async {
       final database = LocalDatabase(
         databaseFactory: databaseFactoryFfi,
@@ -132,6 +132,7 @@ void main() {
       await notifier.startListening();
       await notifier.stopListening();
       await notifier.save();
+      await Future<void>.delayed(Duration.zero);
 
       final records = await container
           .read(recordsRepositoryProvider)
@@ -141,13 +142,9 @@ void main() {
           .findByRecordId(records.single['id'] as int);
 
       expect(records, hasLength(1));
-      expect(attachments, hasLength(1));
-      expect(attachments.single['media_type'], 'audio');
+      expect(records.single['content'], '出门');
+      expect(attachments, isEmpty);
       expect(await draftFile.exists(), isFalse);
-      expect(
-        await File(attachments.single['local_path'] as String).exists(),
-        isTrue,
-      );
       expect(container.read(flashRecordProvider).recordingDraft, isNull);
     },
   );

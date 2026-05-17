@@ -16,6 +16,7 @@ import '../core/theme/app_spacing.dart';
 import '../features/dashboard/dashboard_page.dart';
 import '../features/flash_record/flash_record_page.dart';
 import '../features/markdown_setup/markdown_directory_dialog.dart';
+import '../features/projects/projects_page.dart';
 import '../features/timeline/timeline_page.dart';
 import '../features/timeline/timeline_providers.dart';
 
@@ -148,7 +149,7 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
         onPageChanged: _onPageChanged,
         physics: const PageScrollPhysics(),
         children: [
-          for (var i = 0; i < 3; i++)
+          for (var i = 0; i < AppRoute.values.length; i++)
             TickerMode(enabled: i == _currentIndex, child: _pageWidget(i)),
         ],
       ),
@@ -162,6 +163,7 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
   Widget _pageWidget(int index) => switch (index) {
     0 => const TimelinePage(),
     1 => const FlashRecordPage(),
+    2 => const ProjectsPage(),
     _ => const DashboardPage(),
   };
 }

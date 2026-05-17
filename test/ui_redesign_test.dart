@@ -27,8 +27,8 @@ void main() {
     expect(cardShape.borderRadius, BorderRadius.circular(20));
   });
 
-  test('primary navigation follows the three-tab order', () {
-    expect(AppRoute.values.map((route) => route.label), ['线', '记', '盘']);
+  test('primary navigation follows the app tab order', () {
+    expect(AppRoute.values.map((route) => route.label), ['线', '记', '项', '盘']);
   });
 
   testWidgets('home screen opens with diary chrome and voice record page', (
@@ -44,6 +44,7 @@ void main() {
     expect(find.text('时刻准备记录你的灵感'), findsOneWidget);
     expect(find.text('线'), findsOneWidget);
     expect(find.text('记'), findsWidgets);
+    expect(find.text('项'), findsOneWidget);
     expect(find.text('盘'), findsOneWidget);
   });
 
@@ -110,21 +111,6 @@ void main() {
     // Timeline tab should be accessible
     expect(find.text('线'), findsOneWidget);
   });
-}
-
-Future<void> _pumpUntilFound(
-  WidgetTester tester,
-  Finder finder, {
-  int maxPumps = 20,
-}) async {
-  for (var i = 0; i < maxPumps; i++) {
-    if (finder.evaluate().isNotEmpty) {
-      return;
-    }
-    await tester.pump(const Duration(milliseconds: 100));
-  }
-
-  expect(finder, findsOneWidget);
 }
 
 Widget _testApp({LocalDatabase? database, DashboardSummary? dashboardSummary}) {

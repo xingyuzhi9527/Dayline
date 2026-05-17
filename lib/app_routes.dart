@@ -13,6 +13,12 @@ enum AppRoute {
     icon: Icons.mic_none_outlined,
     selectedIcon: Icons.mic,
   ),
+  projects(
+    path: '/projects',
+    label: '项',
+    icon: Icons.flag_outlined,
+    selectedIcon: Icons.flag,
+  ),
   dashboard(
     path: '/dashboard',
     label: '盘',
