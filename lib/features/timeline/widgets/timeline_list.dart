@@ -253,12 +253,14 @@ class _TimelineTile extends ConsumerWidget {
         : event.type == 'moment_photo'
         ? () => _openPhotoMoment(context, ref)
         : null;
+    final metadata = _decodeMetadata(event.data['metadata']);
+    final canEdit = metadata['projectEntryType'] != 'todo';
     final card = _TimelineEventCard(
       event: event,
       color: color,
       theme: theme,
       onTap: openDetails,
-      onEdit: () => _openEditor(context, ref),
+      onEdit: canEdit ? () => _openEditor(context, ref) : null,
     );
 
     return Column(
@@ -631,14 +633,14 @@ class _TimelineEventCard extends StatelessWidget {
     required this.color,
     required this.theme,
     this.onTap,
-    required this.onEdit,
+    this.onEdit,
   });
 
   final TimelineEvent event;
   final Color color;
   final ThemeData theme;
   final VoidCallback? onTap;
-  final VoidCallback onEdit;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -712,20 +714,23 @@ class _TimelineEventCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: AppSpacing.xxs),
-                      SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: IconButton(
-                          key: ValueKey('edit-${event.id}'),
-                          tooltip: '修改',
-                          onPressed: onEdit,
-                          icon: const Icon(Icons.edit_rounded),
-                          iconSize: 15,
-                          visualDensity: VisualDensity.compact,
-                          color: AppColors.muted,
-                          padding: EdgeInsets.zero,
+                      if (onEdit != null) ...[
+                        const SizedBox(width: AppSpacing.xxs),
+                        SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: IconButton(
+                            key: ValueKey('edit-${event.id}'),
+                            tooltip: '修改',
+                            onPressed: onEdit,
+                            icon: const Icon(Icons.edit_rounded),
+                            iconSize: 15,
+                            visualDensity: VisualDensity.compact,
+                            color: AppColors.muted,
+                            padding: EdgeInsets.zero,
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                   if (isPhotoMoment)
