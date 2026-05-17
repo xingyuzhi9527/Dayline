@@ -190,10 +190,24 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   }) {
     final recognizedText = transcript.text.trim();
     final draft = transcript.recordingDraft;
-    if (transcribed && recognizedText.isNotEmpty) {
-      _recordingDraft = draft;
+    if (transcribed) {
       if (draft != null) {
-        _audioService();
+        unawaited(_audioService().deleteDraftIfExists(draft));
+      }
+      _recordingDraft = null;
+      if (recognizedText.isEmpty) {
+        state = state.copyWith(
+          phase: FlashPhase.idle,
+          rawText: '',
+          partialText: '',
+          audioLevel: 0,
+          parsedInput: null,
+          sttMetadata: transcript.metadata,
+          transcriptFinal: true,
+          recordingDraft: null,
+          errorMessage: '没有听清，再按住说一次。',
+        );
+        return;
       }
       final parsed = LuiLiteParser.parse(recognizedText);
       state = state.copyWith(
@@ -204,10 +218,13 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         parsedInput: parsed,
         sttMetadata: transcript.metadata,
         transcriptFinal: true,
-        recordingDraft: draft,
+        recordingDraft: null,
         errorMessage: null,
       );
-    } else if (draft != null) {
+      return;
+    }
+
+    if (draft != null) {
       _recordingDraft = draft;
       _audioService();
       state = state.copyWith(
@@ -219,20 +236,19 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         sttMetadata: transcript.metadata,
         transcriptFinal: true,
         recordingDraft: draft,
-        errorMessage: transcribed ? '没有听清，可以先保存原音。' : null,
+        errorMessage: null,
       );
-      if (!transcribed) {
-        unawaited(saveAudioOnly());
-      }
-    } else {
-      state = state.copyWith(
-        phase: FlashPhase.idle,
-        rawText: '',
-        partialText: '',
-        audioLevel: 0,
-        errorMessage: '没有听清，再按住说一次。',
-      );
+      unawaited(saveAudioOnly());
+      return;
     }
+
+    state = state.copyWith(
+      phase: FlashPhase.idle,
+      rawText: '',
+      partialText: '',
+      audioLevel: 0,
+      errorMessage: '没有听清，再按住说一次。',
+    );
   }
 
   String _friendlySttError(Object error) {

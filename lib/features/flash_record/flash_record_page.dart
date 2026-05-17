@@ -1493,34 +1493,6 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           ),
         ),
         Semantics(
-          label: 'open-focus-session',
-          button: true,
-          child: IconButton(
-            key: const ValueKey('open-focus-session'),
-            onPressed: () => _openFocusSession(context),
-            icon: const Icon(
-              Icons.timer_rounded,
-              color: AppColors.muted,
-              size: 22,
-            ),
-            tooltip: '专注',
-          ),
-        ),
-        Semantics(
-          label: 'open-long-note',
-          button: true,
-          child: IconButton(
-            key: const ValueKey('open-long-note'),
-            onPressed: () => _openLongNoteEditor(context),
-            icon: const Icon(
-              Icons.edit_note_rounded,
-              color: AppColors.muted,
-              size: 22,
-            ),
-            tooltip: '长笔记',
-          ),
-        ),
-        Semantics(
           label: 'record-text-submit',
           button: true,
           child: IconButton(
