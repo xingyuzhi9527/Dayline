@@ -13,6 +13,7 @@ import '../../core/theme/app_spacing.dart';
 import '../focus/focus_session_page.dart';
 import '../long_note/long_note_editor_page.dart';
 import '../photo_moment/photo_moment_editor_page.dart';
+import '../projects/project_store.dart';
 import '../timeline/timeline_providers.dart';
 import 'flash_record_notifier.dart';
 import 'flash_record_state.dart';
@@ -1649,6 +1650,11 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 
   Widget _buildCardOverlay(FlashRecordState state, ThemeData theme) {
+    final projects = switch (ref.watch(projectOptionsProvider)) {
+      AsyncData(value: final value) => value,
+      _ => const <ProjectOption>[],
+    };
+
     return GestureDetector(
       onTap: () {},
       child: Container(
@@ -1669,6 +1675,11 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             },
             onTagsChanged: (tags) {
               ref.read(flashRecordProvider.notifier).updateParsedTags(tags);
+            },
+            projects: projects,
+            selectedProjectId: state.selectedProjectId,
+            onProjectChanged: (projectId) {
+              ref.read(flashRecordProvider.notifier).selectProject(projectId);
             },
             onSave: () {
               ref.read(flashRecordProvider.notifier).save();

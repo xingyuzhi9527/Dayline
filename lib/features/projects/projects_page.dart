@@ -6,8 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/database/repository_providers.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
-
-const _projectsSettingsKey = 'projects_state_v1';
+import 'project_markdown_service.dart';
+import 'project_store.dart';
 
 class ProjectsPage extends ConsumerStatefulWidget {
   const ProjectsPage({super.key});
@@ -35,7 +35,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
 
   Future<void> _loadProjects() async {
     final settings = ref.read(appSettingsRepositoryProvider);
-    final row = await settings.findByKey(_projectsSettingsKey);
+    final row = await settings.findByKey(projectsSettingsKey);
     if (!mounted) return;
 
     setState(() {
@@ -54,12 +54,13 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       final value = jsonEncode(
         projects.map((project) => project.toJson()).toList(),
       );
-      final existing = await settings.findByKey(_projectsSettingsKey);
+      final existing = await settings.findByKey(projectsSettingsKey);
       if (existing == null) {
-        await settings.create(key: _projectsSettingsKey, value: value);
+        await settings.create(key: projectsSettingsKey, value: value);
       } else {
-        await settings.update(_projectsSettingsKey, value);
+        await settings.update(projectsSettingsKey, value);
       }
+      ref.read(dataVersionProvider.notifier).increment();
     } finally {
       if (mounted) {
         setState(() => _saving = false);
@@ -110,6 +111,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         _ProjectUpdate(
           id: '${now.microsecondsSinceEpoch}-update',
           time: _formatUpdateTime(now),
+          createdAt: now.millisecondsSinceEpoch,
           source: '项目',
           text: '创建项目：${draft.name}',
           colorValue: AppColors.primary.toARGB32(),
@@ -122,22 +124,255 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       _selectedIndex = nextProjects.length - 1;
     });
     await _saveProjects(nextProjects);
+    await _syncProjectArchive(
+      project,
+      entry: ProjectArchiveEntry(
+        text: '创建项目：${draft.name}',
+        source: '项目',
+        createdAt: now,
+      ),
+      entryAsMajor: true,
+    );
   }
 
   Future<void> _toggleTodo(String todoId) async {
     final project = _selectedProject;
     if (project == null) return;
+    final todo = project.todoById(todoId);
+    if (todo == null) return;
+
+    final now = DateTime.now();
+    final willComplete = !todo.done;
+    final nextProjects = [
+      for (final item in _projects)
+        if (item.id == project.id)
+          item.toggleTodo(todoId, updatedAt: now)
+        else
+          item,
+    ];
+    setState(() => _projects = nextProjects);
+    await _createProjectTimelineRecord(
+      project: project,
+      content: '${willComplete ? '完成待办' : '恢复待办'}：${todo.title}',
+      entryType: 'todo',
+      createdAt: now,
+    );
+    await _saveProjects(nextProjects);
+    await _syncProjectArchive(
+      _projectById(project.id) ?? project,
+      entry: ProjectArchiveEntry(
+        text: '${willComplete ? '完成待办' : '恢复待办'}：${todo.title}',
+        source: '待办',
+        createdAt: now,
+      ),
+    );
+  }
+
+  Future<void> _openAddTodo() async {
+    final project = _selectedProject;
+    if (project == null) return;
+
+    final title = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _ProjectTextEntrySheet(
+        title: '添加待办',
+        subtitle: project.name,
+        hintText: '例如：修复登录页 bug',
+        submitLabel: '保存待办',
+        emptyErrorText: '写一个具体的下一步。',
+      ),
+    );
+    if (title == null || title.trim().isEmpty || !mounted) return;
 
     final now = DateTime.now();
     final nextProjects = [
       for (final item in _projects)
         if (item.id == project.id)
-          item.toggleTodo(todoId, updatedAt: _formatUpdateTime(now))
+          item.addTodo(title.trim(), createdAt: now)
         else
           item,
     ];
     setState(() => _projects = nextProjects);
+    await _createProjectTimelineRecord(
+      project: project,
+      content: '添加待办：${title.trim()}',
+      entryType: 'todo',
+      createdAt: now,
+    );
     await _saveProjects(nextProjects);
+    await _syncProjectArchive(
+      _projectById(project.id) ?? project,
+      entry: ProjectArchiveEntry(
+        text: '添加待办：${title.trim()}',
+        source: '待办',
+        createdAt: now,
+      ),
+    );
+  }
+
+  Future<void> _openEditTodo(String todoId) async {
+    final project = _selectedProject;
+    final todo = project?.todoById(todoId);
+    if (project == null || todo == null) return;
+
+    final title = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _ProjectTextEntrySheet(
+        title: '修改待办',
+        subtitle: project.name,
+        hintText: '例如：修复登录页 bug',
+        submitLabel: '保存修改',
+        initialText: todo.title,
+        emptyErrorText: '待办内容不能为空。',
+      ),
+    );
+    if (title == null || title.trim().isEmpty || !mounted) return;
+
+    final now = DateTime.now();
+    final nextProjects = [
+      for (final item in _projects)
+        if (item.id == project.id)
+          item.renameTodo(todoId, title.trim(), updatedAt: now)
+        else
+          item,
+    ];
+    setState(() => _projects = nextProjects);
+    await _createProjectTimelineRecord(
+      project: project,
+      content: '修改待办：${title.trim()}',
+      entryType: 'todo',
+      createdAt: now,
+    );
+    await _saveProjects(nextProjects);
+    await _syncProjectArchive(
+      _projectById(project.id) ?? project,
+      entry: ProjectArchiveEntry(
+        text: '修改待办：${title.trim()}',
+        source: '待办',
+        createdAt: now,
+      ),
+    );
+  }
+
+  Future<void> _openAddUpdate() async {
+    final project = _selectedProject;
+    if (project == null) return;
+
+    final text = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _ProjectTextEntrySheet(
+        title: '添加最近更新',
+        subtitle: project.name,
+        hintText: '记录这个项目刚推进了什么',
+        submitLabel: '保存更新',
+        emptyErrorText: '写一点推进内容。',
+        maxLines: 3,
+      ),
+    );
+    if (text == null || text.trim().isEmpty || !mounted) return;
+
+    final now = DateTime.now();
+    final nextProjects = [
+      for (final item in _projects)
+        if (item.id == project.id)
+          item.addUpdate(text.trim(), createdAt: now)
+        else
+          item,
+    ];
+    setState(() => _projects = nextProjects);
+    await _createProjectTimelineRecord(
+      project: project,
+      content: text.trim(),
+      entryType: 'update',
+      createdAt: now,
+    );
+    await _saveProjects(nextProjects);
+    await _syncProjectArchive(
+      _projectById(project.id) ?? project,
+      entry: ProjectArchiveEntry(
+        text: text.trim(),
+        source: '最近更新',
+        createdAt: now,
+      ),
+      entryAsMajor: true,
+    );
+  }
+
+  Future<void> _saveArchiveSnapshot() async {
+    final project = _selectedProject;
+    if (project == null) return;
+    await _syncProjectArchive(project, showConfirmation: true);
+  }
+
+  Future<void> _syncProjectArchive(
+    _ProjectInfo project, {
+    ProjectArchiveEntry? entry,
+    bool entryAsMajor = false,
+    bool showConfirmation = false,
+  }) async {
+    try {
+      final settings = ref.read(appSettingsRepositoryProvider);
+      final location = await ProjectMarkdownService(settings).syncArchive(
+        project: project.toJson(),
+        entry: entry,
+        entryAsMajor: entryAsMajor,
+      );
+      if (!mounted) return;
+      if (location != project.archiveLocation) {
+        final nextProjects = [
+          for (final item in _projects)
+            if (item.id == project.id)
+              item.copyWith(archiveLocation: location)
+            else
+              item,
+        ];
+        setState(() => _projects = nextProjects);
+        await _saveProjects(nextProjects);
+      }
+      if (showConfirmation && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('项目档案已更新')));
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('项目档案暂时没有写入成功，项目内容已保存')));
+    }
+  }
+
+  _ProjectInfo? _projectById(String projectId) {
+    for (final project in _projects) {
+      if (project.id == projectId) return project;
+    }
+    return null;
+  }
+
+  Future<void> _createProjectTimelineRecord({
+    required _ProjectInfo project,
+    required String content,
+    required String entryType,
+    required DateTime createdAt,
+  }) {
+    return ref
+        .read(recordsRepositoryProvider)
+        .create(
+          date: createdAt,
+          type: 'memo',
+          content: content,
+          tags: ['项目', project.name],
+          metadata: {
+            'projectId': project.id,
+            'projectName': project.name,
+            'projectEntryType': entryType,
+            'source': 'project_page',
+          },
+          createdAt: createdAt,
+        );
   }
 
   @override
@@ -189,9 +424,15 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                             _TodoSection(
                               project: project,
                               onToggle: _toggleTodo,
+                              onAddTodo: _openAddTodo,
+                              onEditTodo: _openEditTodo,
                             ),
                             const SizedBox(height: AppSpacing.md),
-                            _UpdatesSection(project: project),
+                            _UpdatesSection(
+                              project: project,
+                              onAddUpdate: _openAddUpdate,
+                              onSaveArchive: _saveArchiveSnapshot,
+                            ),
                             const SizedBox(height: AppSpacing.md),
                           ],
                           _HeatmapSection(projects: _projects),
@@ -484,10 +725,17 @@ class _CurrentProjectHint extends StatelessWidget {
 }
 
 class _TodoSection extends StatelessWidget {
-  const _TodoSection({required this.project, required this.onToggle});
+  const _TodoSection({
+    required this.project,
+    required this.onToggle,
+    required this.onAddTodo,
+    required this.onEditTodo,
+  });
 
   final _ProjectInfo project;
   final ValueChanged<String> onToggle;
+  final VoidCallback onAddTodo;
+  final ValueChanged<String> onEditTodo;
 
   @override
   Widget build(BuildContext context) {
@@ -496,23 +744,64 @@ class _TodoSection extends StatelessWidget {
       trailing: project.todos.isEmpty
           ? '还没有下一步'
           : '${project.todos.length} 个下一步',
+      action: TextButton.icon(
+        onPressed: onAddTodo,
+        icon: const Icon(Icons.add_rounded, size: 16),
+        label: const Text('添加'),
+      ),
       child: project.todos.isEmpty
-          ? const _SoftEmptyText('可以在新建项目时先写一个很小的下一步。')
+          ? _EmptyTodoPrompt(onAddTodo: onAddTodo)
           : Column(
               children: [
                 for (final todo in project.todos)
-                  _TodoRow(todo: todo, onTap: () => onToggle(todo.id)),
+                  _TodoRow(
+                    todo: todo,
+                    onTap: () => onToggle(todo.id),
+                    onEdit: () => onEditTodo(todo.id),
+                  ),
               ],
             ),
     );
   }
 }
 
+class _EmptyTodoPrompt extends StatelessWidget {
+  const _EmptyTodoPrompt({required this.onAddTodo});
+
+  final VoidCallback onAddTodo;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '这里放这个项目自己的下一步。',
+          style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        OutlinedButton.icon(
+          onPressed: onAddTodo,
+          icon: const Icon(Icons.add_rounded, size: 18),
+          label: const Text('添加待办'),
+        ),
+      ],
+    );
+  }
+}
+
 class _TodoRow extends StatelessWidget {
-  const _TodoRow({required this.todo, required this.onTap});
+  const _TodoRow({
+    required this.todo,
+    required this.onTap,
+    required this.onEdit,
+  });
 
   final _ProjectTodo todo;
   final VoidCallback onTap;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -566,6 +855,14 @@ class _TodoRow extends StatelessWidget {
                     ),
                   ),
                 ),
+                IconButton(
+                  tooltip: '修改待办',
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_rounded),
+                  iconSize: 18,
+                  visualDensity: VisualDensity.compact,
+                  color: AppColors.muted,
+                ),
               ],
             ),
           ),
@@ -576,17 +873,38 @@ class _TodoRow extends StatelessWidget {
 }
 
 class _UpdatesSection extends StatelessWidget {
-  const _UpdatesSection({required this.project});
+  const _UpdatesSection({
+    required this.project,
+    required this.onAddUpdate,
+    required this.onSaveArchive,
+  });
 
   final _ProjectInfo project;
+  final VoidCallback onAddUpdate;
+  final VoidCallback onSaveArchive;
 
   @override
   Widget build(BuildContext context) {
     return _SectionCard(
       title: '最近更新',
       trailing: '来自项目和待办',
+      action: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextButton.icon(
+            onPressed: onSaveArchive,
+            icon: const Icon(Icons.save_alt_rounded, size: 16),
+            label: const Text('存档'),
+          ),
+          TextButton.icon(
+            onPressed: onAddUpdate,
+            icon: const Icon(Icons.add_rounded, size: 16),
+            label: const Text('添加'),
+          ),
+        ],
+      ),
       child: project.updates.isEmpty
-          ? const _SoftEmptyText('项目创建后，你的推进会出现在这里。')
+          ? _EmptyUpdatePrompt(onAddUpdate: onAddUpdate)
           : Column(
               children: [
                 for (var i = 0; i < project.updates.length; i++)
@@ -596,6 +914,33 @@ class _UpdatesSection extends StatelessWidget {
                   ),
               ],
             ),
+    );
+  }
+}
+
+class _EmptyUpdatePrompt extends StatelessWidget {
+  const _EmptyUpdatePrompt({required this.onAddUpdate});
+
+  final VoidCallback onAddUpdate;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '项目推进的片刻会出现在这里。',
+          style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        OutlinedButton.icon(
+          onPressed: onAddUpdate,
+          icon: const Icon(Icons.add_rounded, size: 18),
+          label: const Text('添加更新'),
+        ),
+      ],
     );
   }
 }
@@ -670,31 +1015,50 @@ class _UpdateRow extends StatelessWidget {
   }
 }
 
-class _HeatmapSection extends StatelessWidget {
+class _HeatmapSection extends StatefulWidget {
   const _HeatmapSection({required this.projects});
 
   final List<_ProjectInfo> projects;
 
   @override
+  State<_HeatmapSection> createState() => _HeatmapSectionState();
+}
+
+class _HeatmapSectionState extends State<_HeatmapSection> {
+  DateTime? _selectedDate;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final activityCount = projects.fold<int>(
-      0,
-      (sum, project) => sum + project.updates.length,
+    final today = _dateOnly(DateTime.now());
+    final currentWeekStart = today.subtract(
+      Duration(days: today.weekday - DateTime.monday),
     );
+    final startDate = currentWeekStart.subtract(const Duration(days: 77));
+    final dayEntries = _buildDayEntries(widget.projects, startDate, today);
+    final selectedDate = _selectedDate;
+    final selectedEntries = selectedDate == null
+        ? const <_ProjectHeatEntry>[]
+        : dayEntries[_dateKey(selectedDate)] ?? const <_ProjectHeatEntry>[];
 
     return _SectionCard(
-      title: '推进热力图',
+      title: '全部项目推进',
       trailing: '全部项目',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '记录、待办、长笔记和专注都会点亮这里。',
+            '项目更新、待办变化和归属项目的记录都会点亮这里。',
             style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
           ),
           const SizedBox(height: AppSpacing.md),
-          _ContributionGrid(activityCount: activityCount),
+          _ContributionCalendar(
+            startDate: startDate,
+            today: today,
+            entriesByDate: dayEntries,
+            selectedDate: selectedDate,
+            onSelected: (date) => setState(() => _selectedDate = date),
+          ),
           const SizedBox(height: AppSpacing.sm),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
@@ -715,54 +1079,209 @@ class _HeatmapSection extends StatelessWidget {
               Text('多', style: theme.textTheme.bodySmall),
             ],
           ),
+          if (selectedDate != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            _SelectedDayProjectEntries(
+              date: selectedDate,
+              entries: selectedEntries,
+            ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _ContributionGrid extends StatelessWidget {
-  const _ContributionGrid({required this.activityCount});
+class _ContributionCalendar extends StatelessWidget {
+  const _ContributionCalendar({
+    required this.startDate,
+    required this.today,
+    required this.entriesByDate,
+    required this.selectedDate,
+    required this.onSelected,
+  });
 
-  final int activityCount;
+  final DateTime startDate;
+  final DateTime today;
+  final Map<String, List<_ProjectHeatEntry>> entriesByDate;
+  final DateTime? selectedDate;
+  final ValueChanged<DateTime> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final columns = List.generate(12, (week) {
+      return List.generate(7, (weekday) {
+        return startDate.add(Duration(days: week * 7 + weekday));
+      });
+    });
+    final monthLabels = <int, String>{};
+    for (var index = 0; index < columns.length; index++) {
+      final monthStart = columns[index].firstWhere(
+        (date) => index == 0 || date.day == 1,
+        orElse: () => columns[index].first,
+      );
+      if (index == 0 || monthStart.day == 1) {
+        monthLabels[index] = '${monthStart.month}月';
+      }
+    }
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (var column = 0; column < 14; column++)
-          Padding(
-            padding: const EdgeInsets.only(right: 5),
-            child: Column(
-              children: [
-                for (var row = 0; row < 7; row++)
-                  _HeatmapCell(value: _heatValue(column, row)),
-              ],
-            ),
+        SizedBox(
+          height: 16,
+          child: Row(
+            children: [
+              for (var column = 0; column < columns.length; column++)
+                SizedBox(
+                  width: 18,
+                  child: Text(
+                    monthLabels[column] ?? '',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.muted,
+                      fontSize: 10,
+                    ),
+                  ),
+                ),
+            ],
           ),
+        ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final week in columns)
+              Padding(
+                padding: const EdgeInsets.only(right: 5),
+                child: Column(
+                  children: [
+                    for (final date in week)
+                      _HeatmapCell(
+                        date: date,
+                        count: date.isAfter(today)
+                            ? 0
+                            : entriesByDate[_dateKey(date)]?.length ?? 0,
+                        selected:
+                            selectedDate != null &&
+                            _sameDay(selectedDate!, date),
+                        enabled: !date.isAfter(today),
+                        onTap: () => onSelected(date),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ],
     );
   }
-
-  int _heatValue(int column, int row) {
-    final index = column * 7 + row;
-    if (activityCount == 0) return 0;
-    if (index > 97 - activityCount.clamp(1, 28)) {
-      return (index + activityCount) % 4 + 1;
-    }
-    return (index + activityCount) % 13 == 0 ? 1 : 0;
-  }
 }
 
-class _HeatmapCell extends StatelessWidget {
-  const _HeatmapCell({required this.value});
+class _SelectedDayProjectEntries extends StatelessWidget {
+  const _SelectedDayProjectEntries({required this.date, required this.entries});
 
-  final int value;
+  final DateTime date;
+  final List<_ProjectHeatEntry> entries;
 
   @override
   Widget build(BuildContext context) {
-    final alpha = switch (value) {
+    final theme = Theme.of(context);
+    final label = '${date.month}月${date.day}日';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLow.withAlpha(120),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            entries.isEmpty
+                ? '$label · 暂无项目推进'
+                : '$label · ${entries.length} 条项目推进',
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: AppColors.primary,
+            ),
+          ),
+          if (entries.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.xs),
+            for (final entry in entries.take(6))
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
+                child: Text(
+                  '${entry.projectName}：${entry.text}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppColors.ink,
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ProjectHeatEntry {
+  const _ProjectHeatEntry({
+    required this.projectName,
+    required this.text,
+    required this.createdAt,
+  });
+
+  final String projectName;
+  final String text;
+  final DateTime createdAt;
+}
+
+Map<String, List<_ProjectHeatEntry>> _buildDayEntries(
+  List<_ProjectInfo> projects,
+  DateTime startDate,
+  DateTime today,
+) {
+  final result = <String, List<_ProjectHeatEntry>>{};
+  for (final project in projects) {
+    for (final update in project.updates) {
+      final date = _dateOnly(
+        DateTime.fromMillisecondsSinceEpoch(update.createdAt),
+      );
+      if (date.isBefore(startDate) || date.isAfter(today)) continue;
+      result
+          .putIfAbsent(_dateKey(date), () => [])
+          .add(
+            _ProjectHeatEntry(
+              projectName: project.name,
+              text: update.text,
+              createdAt: date,
+            ),
+          );
+    }
+  }
+  return result;
+}
+
+class _HeatmapCell extends StatelessWidget {
+  const _HeatmapCell({
+    required this.date,
+    required this.count,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final DateTime date;
+  final int count;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final alpha = switch (count) {
       0 => 26,
       1 => 62,
       2 => 104,
@@ -770,23 +1289,39 @@ class _HeatmapCell extends StatelessWidget {
       _ => 205,
     };
 
-    return Container(
-      width: 13,
-      height: 13,
-      margin: const EdgeInsets.only(bottom: 5),
-      decoration: BoxDecoration(
-        color: AppColors.primary.withAlpha(alpha),
-        borderRadius: BorderRadius.circular(3),
+    return Semantics(
+      button: true,
+      label: '${date.month}月${date.day}日，$count 条项目推进',
+      child: GestureDetector(
+        onTap: enabled ? onTap : null,
+        child: Container(
+          width: 13,
+          height: 13,
+          margin: const EdgeInsets.only(bottom: 5),
+          decoration: BoxDecoration(
+            color: enabled
+                ? AppColors.primary.withAlpha(alpha)
+                : AppColors.border.withAlpha(90),
+            borderRadius: BorderRadius.circular(3),
+            border: selected ? Border.all(color: AppColors.primary) : null,
+          ),
+        ),
       ),
     );
   }
 }
 
 class _SectionCard extends StatelessWidget {
-  const _SectionCard({required this.title, required this.child, this.trailing});
+  const _SectionCard({
+    required this.title,
+    required this.child,
+    this.trailing,
+    this.action,
+  });
 
   final String title;
   final String? trailing;
+  final Widget? action;
   final Widget child;
 
   @override
@@ -824,6 +1359,11 @@ class _SectionCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                ],
+                if (action != null) ...[
+                  if (trailing == null) const Spacer(),
+                  const SizedBox(width: AppSpacing.xs),
+                  action!,
                 ],
               ],
             ),
@@ -993,6 +1533,121 @@ class _AddProjectPage extends StatefulWidget {
 
   @override
   State<_AddProjectPage> createState() => _AddProjectPageState();
+}
+
+class _ProjectTextEntrySheet extends StatefulWidget {
+  const _ProjectTextEntrySheet({
+    required this.title,
+    required this.subtitle,
+    required this.hintText,
+    required this.submitLabel,
+    required this.emptyErrorText,
+    this.initialText = '',
+    this.maxLines = 1,
+  });
+
+  final String title;
+  final String subtitle;
+  final String hintText;
+  final String submitLabel;
+  final String emptyErrorText;
+  final String initialText;
+  final int maxLines;
+
+  @override
+  State<_ProjectTextEntrySheet> createState() => _ProjectTextEntrySheetState();
+}
+
+class _ProjectTextEntrySheetState extends State<_ProjectTextEntrySheet> {
+  late final TextEditingController _controller;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialText);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final title = _controller.text.trim();
+    if (title.isEmpty) {
+      setState(() => _errorText = widget.emptyErrorText);
+      return;
+    }
+    Navigator.of(context).pop(title);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.containerMargin,
+          AppSpacing.lg,
+          AppSpacing.containerMargin,
+          AppSpacing.lg + bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: AppColors.ink,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xxs),
+            Text(
+              widget.subtitle,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppColors.muted,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              textInputAction: TextInputAction.done,
+              minLines: widget.maxLines,
+              maxLines: widget.maxLines,
+              onSubmitted: (_) => _submit(),
+              decoration: InputDecoration(hintText: widget.hintText),
+            ),
+            if (_errorText != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                _errorText!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: AppColors.accent,
+                ),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.lg),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _submit,
+                icon: const Icon(Icons.check_rounded),
+                label: Text(widget.submitLabel),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _AddProjectPageState extends State<_AddProjectPage> {
@@ -1235,6 +1890,7 @@ class _ProjectInfo {
     required this.lastUpdate,
     required this.todos,
     required this.updates,
+    this.archiveLocation,
   });
 
   final String id;
@@ -1244,8 +1900,17 @@ class _ProjectInfo {
   final String lastUpdate;
   final List<_ProjectTodo> todos;
   final List<_ProjectUpdate> updates;
+  final String? archiveLocation;
 
-  _ProjectInfo toggleTodo(String todoId, {required String updatedAt}) {
+  _ProjectTodo? todoById(String todoId) {
+    for (final todo in todos) {
+      if (todo.id == todoId) return todo;
+    }
+    return null;
+  }
+
+  _ProjectInfo toggleTodo(String todoId, {required DateTime updatedAt}) {
+    final writtenAt = _formatUpdateTime(updatedAt);
     _ProjectTodo? changedTodo;
     final nextTodos = [
       for (final todo in todos)
@@ -1258,14 +1923,94 @@ class _ProjectInfo {
     if (changed == null) return this;
 
     return copyWith(
-      lastUpdate: updatedAt,
+      lastUpdate: writtenAt,
       todos: nextTodos,
       updates: [
         _ProjectUpdate(
-          id: '${DateTime.now().microsecondsSinceEpoch}-update',
-          time: updatedAt,
+          id: '${updatedAt.microsecondsSinceEpoch}-update',
+          time: writtenAt,
+          createdAt: updatedAt.millisecondsSinceEpoch,
           source: '待办',
           text: '${changed.done ? '完成' : '恢复'}：${changed.title}',
+          colorValue: AppColors.todo.toARGB32(),
+        ),
+        ...updates.take(9),
+      ],
+    );
+  }
+
+  _ProjectInfo renameTodo(
+    String todoId,
+    String title, {
+    required DateTime updatedAt,
+  }) {
+    final writtenAt = _formatUpdateTime(updatedAt);
+    var changed = false;
+    final nextTodos = [
+      for (final todo in todos)
+        if (todo.id == todoId)
+          () {
+            changed = true;
+            return todo.copyWith(title: title);
+          }()
+        else
+          todo,
+    ];
+    if (!changed) return this;
+
+    return copyWith(
+      lastUpdate: writtenAt,
+      todos: nextTodos,
+      updates: [
+        _ProjectUpdate(
+          id: '${updatedAt.microsecondsSinceEpoch}-todo-edit-update',
+          time: writtenAt,
+          createdAt: updatedAt.millisecondsSinceEpoch,
+          source: '待办',
+          text: '修改待办：$title',
+          colorValue: AppColors.todo.toARGB32(),
+        ),
+        ...updates.take(9),
+      ],
+    );
+  }
+
+  _ProjectInfo addUpdate(String text, {required DateTime createdAt}) {
+    final writtenAt = _formatUpdateTime(createdAt);
+    return copyWith(
+      lastUpdate: writtenAt,
+      updates: [
+        _ProjectUpdate(
+          id: '${createdAt.microsecondsSinceEpoch}-manual-update',
+          time: writtenAt,
+          createdAt: createdAt.millisecondsSinceEpoch,
+          source: '文本记录',
+          text: text,
+          colorValue: AppColors.primary.toARGB32(),
+        ),
+        ...updates.take(9),
+      ],
+    );
+  }
+
+  _ProjectInfo addTodo(String title, {required DateTime createdAt}) {
+    final writtenAt = _formatUpdateTime(createdAt);
+    return copyWith(
+      lastUpdate: writtenAt,
+      todos: [
+        ...todos,
+        _ProjectTodo(
+          id: '${createdAt.microsecondsSinceEpoch}-todo',
+          title: title,
+        ),
+      ],
+      updates: [
+        _ProjectUpdate(
+          id: '${createdAt.microsecondsSinceEpoch}-todo-update',
+          time: writtenAt,
+          createdAt: createdAt.millisecondsSinceEpoch,
+          source: '待办',
+          text: '添加待办：$title',
           colorValue: AppColors.todo.toARGB32(),
         ),
         ...updates.take(9),
@@ -1277,6 +2022,7 @@ class _ProjectInfo {
     String? lastUpdate,
     List<_ProjectTodo>? todos,
     List<_ProjectUpdate>? updates,
+    String? archiveLocation,
   }) {
     return _ProjectInfo(
       id: id,
@@ -1286,6 +2032,7 @@ class _ProjectInfo {
       lastUpdate: lastUpdate ?? this.lastUpdate,
       todos: todos ?? this.todos,
       updates: updates ?? this.updates,
+      archiveLocation: archiveLocation ?? this.archiveLocation,
     );
   }
 
@@ -1298,6 +2045,7 @@ class _ProjectInfo {
       'lastUpdate': lastUpdate,
       'todos': todos.map((todo) => todo.toJson()).toList(),
       'updates': updates.map((update) => update.toJson()).toList(),
+      if (archiveLocation != null) 'archiveLocation': archiveLocation,
     };
   }
 
@@ -1313,6 +2061,7 @@ class _ProjectInfo {
       status: raw['status'] as String? ?? '进行中',
       goal: raw['goal'] as String? ?? '慢慢推进这件事',
       lastUpdate: raw['lastUpdate'] as String? ?? '刚刚',
+      archiveLocation: raw['archiveLocation'] as String?,
       todos: [
         for (final item in (raw['todos'] as List? ?? const []))
           if (_ProjectTodo.fromJson(item) != null) _ProjectTodo.fromJson(item)!,
@@ -1337,8 +2086,12 @@ class _ProjectTodo {
   final String title;
   final bool done;
 
-  _ProjectTodo copyWith({bool? done}) {
-    return _ProjectTodo(id: id, title: title, done: done ?? this.done);
+  _ProjectTodo copyWith({String? title, bool? done}) {
+    return _ProjectTodo(
+      id: id,
+      title: title ?? this.title,
+      done: done ?? this.done,
+    );
   }
 
   Map<String, Object?> toJson() => {'id': id, 'title': title, 'done': done};
@@ -1356,6 +2109,7 @@ class _ProjectUpdate {
   const _ProjectUpdate({
     required this.id,
     required this.time,
+    required this.createdAt,
     required this.source,
     required this.text,
     required this.colorValue,
@@ -1363,6 +2117,7 @@ class _ProjectUpdate {
 
   final String id;
   final String time;
+  final int createdAt;
   final String source;
   final String text;
   final int colorValue;
@@ -1371,6 +2126,7 @@ class _ProjectUpdate {
     return {
       'id': id,
       'time': time,
+      'createdAt': createdAt,
       'source': source,
       'text': text,
       'colorValue': colorValue,
@@ -1385,6 +2141,7 @@ class _ProjectUpdate {
     return _ProjectUpdate(
       id: id,
       time: raw['time'] as String? ?? '刚刚',
+      createdAt: raw['createdAt'] as int? ?? _createdAtFromProjectUpdateId(id),
       source: raw['source'] as String? ?? '项目',
       text: text,
       colorValue: raw['colorValue'] as int? ?? AppColors.primary.toARGB32(),
@@ -1404,6 +2161,28 @@ List<_ProjectInfo> _decodeProjects(String? raw) {
   } catch (_) {
     return const [];
   }
+}
+
+DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
+
+String _dateKey(DateTime date) {
+  final month = date.month.toString().padLeft(2, '0');
+  final day = date.day.toString().padLeft(2, '0');
+  return '${date.year}-$month-$day';
+}
+
+bool _sameDay(DateTime a, DateTime b) {
+  return a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+int _createdAtFromProjectUpdateId(String id) {
+  final rawMicroseconds = int.tryParse(id.split('-').first);
+  if (rawMicroseconds == null) {
+    return DateTime.now().millisecondsSinceEpoch;
+  }
+  return DateTime.fromMicrosecondsSinceEpoch(
+    rawMicroseconds,
+  ).millisecondsSinceEpoch;
 }
 
 String _formatUpdateTime(DateTime time) {

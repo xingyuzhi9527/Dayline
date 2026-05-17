@@ -27,6 +27,7 @@ class FlashRecordState {
     this.recordingMode = FlashRecordingMode.transcribe,
     this.textSaving = false,
     this.savedSequence = 0,
+    this.selectedProjectId,
   });
 
   final FlashPhase phase;
@@ -44,6 +45,7 @@ class FlashRecordState {
   final FlashRecordingMode recordingMode;
   final bool textSaving;
   final int savedSequence;
+  final String? selectedProjectId;
 
   bool get hasResult => parsedInput != null;
   bool get isInputActive =>
@@ -67,6 +69,7 @@ class FlashRecordState {
     FlashRecordingMode? recordingMode,
     bool? textSaving,
     int? savedSequence,
+    Object? selectedProjectId = _unchanged,
   }) {
     return FlashRecordState(
       phase: phase ?? this.phase,
@@ -92,6 +95,9 @@ class FlashRecordState {
       recordingMode: recordingMode ?? this.recordingMode,
       textSaving: textSaving ?? this.textSaving,
       savedSequence: savedSequence ?? this.savedSequence,
+      selectedProjectId: identical(selectedProjectId, _unchanged)
+          ? this.selectedProjectId
+          : selectedProjectId as String?,
     );
   }
 }

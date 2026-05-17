@@ -10,6 +10,7 @@ import '../../core/parser/lui_lite_parser.dart';
 import '../../core/parser/parsed_input_time.dart';
 import '../../core/stt/stt_engine.dart';
 import '../../core/stt/stt_providers.dart';
+import '../projects/project_store.dart';
 import 'flash_record_state.dart';
 
 final flashRecordProvider =
@@ -88,6 +89,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       source: 'voice',
       transcriptFinal: false,
       recordingDraft: null,
+      selectedProjectId: null,
     );
 
     final shouldTranscribe =
@@ -307,6 +309,10 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     );
   }
 
+  void selectProject(String? projectId) {
+    state = state.copyWith(selectedProjectId: projectId, errorMessage: null);
+  }
+
   void cancelConfirm() {
     unawaited(_discardRecordingDraft());
     state = _idleStateKeepingStt();
@@ -326,13 +332,18 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       final draftConsumed = await _persist(
         parsed,
         recordingDraft: draft,
+        selectedProjectId: state.selectedProjectId,
       ).timeout(_saveTimeout);
       if (!draftConsumed) {
         await _audioRecordingService?.deleteDraftIfExists(draft);
       }
       ref.read(dataVersionProvider.notifier).increment();
       _recordingDraft = null;
-      state = state.copyWith(phase: FlashPhase.saved, recordingDraft: null);
+      state = state.copyWith(
+        phase: FlashPhase.saved,
+        recordingDraft: null,
+        selectedProjectId: null,
+      );
     } on TimeoutException {
       state = state.copyWith(
         phase: FlashPhase.confirming,
@@ -437,9 +448,22 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   Future<bool> _persist(
     ParsedInput parsed, {
     SttRecordingDraft? recordingDraft,
+    String? selectedProjectId,
   }) async {
     final now = DateTime.now();
     final createdAt = parsedInputTimeToDateTime(now, parsed.time) ?? now;
+    final project = selectedProjectId == null
+        ? null
+        : await findProjectOption(ref, selectedProjectId);
+
+    if (project != null) {
+      return _saveProjectEntry(
+        parsed,
+        project: project,
+        now: now,
+        createdAt: createdAt,
+      );
+    }
 
     switch (parsed.type) {
       case ParsedInputType.memo:
@@ -534,6 +558,68 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         await _saveTrackerLog(parsed, now, createdAt);
         return false;
     }
+  }
+
+  Future<bool> _saveProjectEntry(
+    ParsedInput parsed, {
+    required ProjectOption project,
+    required DateTime now,
+    required DateTime createdAt,
+  }) async {
+    final content = parsed.content.trim().isEmpty
+        ? state.rawText.trim()
+        : parsed.content.trim();
+    final title = content.isEmpty ? state.rawText.trim() : content;
+    final tags = _normalizeTags([...parsed.tags, '项目', project.name]);
+    final metadata = {
+      ...parsed.metadata,
+      'projectId': project.id,
+      'projectName': project.name,
+      'projectEntryType': parsed.type == ParsedInputType.todo
+          ? 'todo'
+          : 'update',
+      'originalParsedType': parsed.type.name,
+    };
+
+    if (parsed.type == ParsedInputType.todo) {
+      await addProjectTodo(
+        ref,
+        projectId: project.id,
+        title: title,
+        updatedAt: createdAt,
+      );
+      await ref
+          .read(recordsRepositoryProvider)
+          .create(
+            date: now,
+            type: 'memo',
+            content: '添加待办：$title',
+            time: parsed.time,
+            tags: tags,
+            metadata: metadata,
+            createdAt: createdAt,
+          );
+      return false;
+    }
+
+    await addProjectUpdate(
+      ref,
+      projectId: project.id,
+      text: title,
+      updatedAt: createdAt,
+    );
+    await ref
+        .read(recordsRepositoryProvider)
+        .create(
+          date: now,
+          type: 'memo',
+          content: title,
+          time: parsed.time,
+          tags: tags,
+          metadata: metadata,
+          createdAt: createdAt,
+        );
+    return false;
   }
 
   Future<bool> _createRecordWithOptionalAudio({

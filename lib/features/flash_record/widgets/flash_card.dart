@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/parser/lui_lite_parser.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../projects/project_store.dart';
 
 class FlashCard extends StatelessWidget {
   const FlashCard({
@@ -11,6 +12,9 @@ class FlashCard extends StatelessWidget {
     required this.onTextChanged,
     required this.onTypeChanged,
     required this.onTagsChanged,
+    required this.projects,
+    required this.selectedProjectId,
+    required this.onProjectChanged,
     required this.onSave,
     required this.onCancel,
     super.key,
@@ -21,6 +25,9 @@ class FlashCard extends StatelessWidget {
   final ValueChanged<String> onTextChanged;
   final ValueChanged<ParsedInputType> onTypeChanged;
   final ValueChanged<List<String>> onTagsChanged;
+  final List<ProjectOption> projects;
+  final String? selectedProjectId;
+  final ValueChanged<String?> onProjectChanged;
   final VoidCallback onSave;
   final VoidCallback onCancel;
 
@@ -92,6 +99,12 @@ class FlashCard extends StatelessWidget {
                 _TypeMenu(
                   selectedType: parsedInput.type,
                   onChanged: onTypeChanged,
+                ),
+                const Spacer(),
+                _ProjectMenu(
+                  projects: projects,
+                  selectedProjectId: selectedProjectId,
+                  onChanged: onProjectChanged,
                 ),
               ],
             ),
@@ -221,6 +234,92 @@ class _TypeMenu extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(selectedMeta.label),
+            const SizedBox(width: AppSpacing.xxs),
+            const Icon(Icons.expand_more_rounded, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProjectMenu extends StatelessWidget {
+  const _ProjectMenu({
+    required this.projects,
+    required this.selectedProjectId,
+    required this.onChanged,
+  });
+
+  final List<ProjectOption> projects;
+  final String? selectedProjectId;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    ProjectOption? selectedProject;
+    for (final project in projects) {
+      if (project.id == selectedProjectId) {
+        selectedProject = project;
+        break;
+      }
+    }
+    final enabled = projects.isNotEmpty;
+    final label = selectedProject?.name ?? '项目';
+    final tint = selectedProject == null ? AppColors.muted : AppColors.primary;
+
+    return PopupMenuButton<String?>(
+      enabled: enabled,
+      initialValue: selectedProjectId,
+      tooltip: enabled ? '归属项目' : '暂无项目',
+      onSelected: onChanged,
+      itemBuilder: (context) {
+        return [
+          const PopupMenuItem<String?>(
+            value: null,
+            child: Row(
+              children: [
+                Icon(Icons.radio_button_unchecked_rounded, size: 18),
+                SizedBox(width: AppSpacing.xs),
+                Text('无项目'),
+              ],
+            ),
+          ),
+          for (final project in projects)
+            PopupMenuItem<String?>(
+              value: project.id,
+              child: Row(
+                children: [
+                  Icon(
+                    project.id == selectedProjectId
+                        ? Icons.check_circle_rounded
+                        : Icons.flag_outlined,
+                    size: 18,
+                    color: project.id == selectedProjectId
+                        ? AppColors.primary
+                        : null,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Flexible(
+                    child: Text(
+                      project.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ];
+      },
+      child: Chip(
+        avatar: Icon(Icons.flag_outlined, size: 16, color: tint),
+        label: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 96),
+              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
             const SizedBox(width: AppSpacing.xxs),
             const Icon(Icons.expand_more_rounded, size: 16),
           ],
