@@ -2,8 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'app_routes.dart';
-import 'features/flash_record/flash_record_page.dart';
 import 'features/dashboard/dashboard_page.dart';
+import 'features/flash_record/flash_record_page.dart';
+import 'features/projects/projects_page.dart';
 import 'features/timeline/timeline_page.dart';
 import 'shell/liflow_shell.dart';
 
@@ -38,6 +39,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 path: AppRoute.record.path,
                 name: AppRoute.record.name,
                 builder: (context, state) => const FlashRecordPage(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoute.projects.path,
+                name: AppRoute.projects.name,
+                builder: (context, state) => const ProjectsPage(),
               ),
             ],
           ),

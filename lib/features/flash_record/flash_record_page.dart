@@ -988,14 +988,6 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _RecordingModeToggle(
-          mode: state.recordingMode,
-          enabled: state.phase != FlashPhase.listening,
-          onChanged: (mode) {
-            ref.read(flashRecordProvider.notifier).setRecordingMode(mode);
-          },
-        ),
-        const SizedBox(height: AppSpacing.sm),
         RepaintBoundary(
           child: VoiceButton(
             phase: state.phase.name,
@@ -1009,6 +1001,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               unawaited(ref.read(flashRecordProvider.notifier).stopListening());
             },
           ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        _RecordingModeToggle(
+          mode: state.recordingMode,
+          enabled: state.phase != FlashPhase.listening,
+          onChanged: (mode) {
+            ref.read(flashRecordProvider.notifier).setRecordingMode(mode);
+          },
         ),
         const SizedBox(height: AppSpacing.sm),
         if (!state.sttReady &&
@@ -1042,37 +1042,18 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
-        SizedBox(
-          width: 300,
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
-            child: Text(
-              errorText?.isNotEmpty == true
-                  ? errorText!
-                  : liveText.isNotEmpty
-                  ? liveText
-                  : state.phase == FlashPhase.listening
-                  ? state.recordingMode == FlashRecordingMode.audioOnly
-                        ? '松开后保存为一条语音片段'
-                        : '松开后整理成闪记卡片'
-                  : state.recordingMode == FlashRecordingMode.audioOnly
-                  ? '适合保留语气、环境声和完整表达'
-                  : state.sttLoading
-                  ? '首次加载稍慢，之后会热启动'
-                  : '适合变成可编辑、可分类的文字记录',
-              key: ValueKey('${errorText ?? ''}-$liveText'),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: errorText?.isNotEmpty == true
-                    ? AppColors.accent
-                    : state.transcriptFinal
-                    ? AppColors.ink
-                    : AppColors.muted,
-              ),
-            ),
-          ),
+        _VoiceHelperText(
+          text: errorText?.isNotEmpty == true
+              ? errorText!
+              : liveText.isNotEmpty
+              ? liveText
+              : state.phase == FlashPhase.listening
+              ? state.recordingMode == FlashRecordingMode.audioOnly
+                    ? '松开后保存为一条语音片段'
+                    : '松开后整理成闪记卡片'
+              : '',
+          isError: errorText?.isNotEmpty == true,
+          isFinal: state.transcriptFinal,
         ),
       ],
     );
@@ -1970,30 +1951,32 @@ class _RecordingModeToggle extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Container(
-      width: 248,
+      width: 132,
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: AppColors.surface.withAlpha(220),
-        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        borderRadius: BorderRadius.circular(999),
         border: Border.all(color: AppColors.border.withAlpha(180)),
       ),
       child: Row(
         children: [
           _RecordingModeSegment(
-            icon: Icons.graphic_eq_rounded,
-            label: '留原音',
-            selected: mode == FlashRecordingMode.audioOnly,
-            enabled: enabled,
-            theme: theme,
-            onTap: () => onChanged(FlashRecordingMode.audioOnly),
-          ),
-          _RecordingModeSegment(
             icon: Icons.notes_rounded,
-            label: '转文字',
+            label: '文',
+            semanticsLabel: '转文字',
             selected: mode == FlashRecordingMode.transcribe,
             enabled: enabled,
             theme: theme,
             onTap: () => onChanged(FlashRecordingMode.transcribe),
+          ),
+          _RecordingModeSegment(
+            icon: Icons.graphic_eq_rounded,
+            label: '音',
+            semanticsLabel: '留原音',
+            selected: mode == FlashRecordingMode.audioOnly,
+            enabled: enabled,
+            theme: theme,
+            onTap: () => onChanged(FlashRecordingMode.audioOnly),
           ),
         ],
       ),
@@ -2005,6 +1988,7 @@ class _RecordingModeSegment extends StatelessWidget {
   const _RecordingModeSegment({
     required this.icon,
     required this.label,
+    required this.semanticsLabel,
     required this.selected,
     required this.enabled,
     required this.theme,
@@ -2013,6 +1997,7 @@ class _RecordingModeSegment extends StatelessWidget {
 
   final IconData icon;
   final String label;
+  final String semanticsLabel;
   final bool selected;
   final bool enabled;
   final ThemeData theme;
@@ -2024,20 +2009,21 @@ class _RecordingModeSegment extends StatelessWidget {
 
     return Expanded(
       child: Semantics(
+        label: semanticsLabel,
         button: true,
         selected: selected,
         child: InkWell(
-          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+          borderRadius: BorderRadius.circular(999),
           onTap: enabled ? onTap : null,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
-            height: 34,
+            height: 32,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: selected
                   ? AppColors.primary.withAlpha(28)
                   : Colors.transparent,
-              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+              borderRadius: BorderRadius.circular(999),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -2064,6 +2050,47 @@ class _RecordingModeSegment extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _VoiceHelperText extends StatelessWidget {
+  const _VoiceHelperText({
+    required this.text,
+    required this.isError,
+    required this.isFinal,
+  });
+
+  final String text;
+  final bool isError;
+  final bool isFinal;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SizedBox(
+      width: 300,
+      height: 34,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        child: text.isEmpty
+            ? const SizedBox.shrink(key: ValueKey('voice-helper-empty'))
+            : Text(
+                text,
+                key: ValueKey(text),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: isError
+                      ? AppColors.accent
+                      : isFinal
+                      ? AppColors.ink
+                      : AppColors.muted,
+                ),
+              ),
       ),
     );
   }

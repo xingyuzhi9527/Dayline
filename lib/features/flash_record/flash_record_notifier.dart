@@ -191,11 +191,11 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     final recognizedText = transcript.text.trim();
     final draft = transcript.recordingDraft;
     if (transcribed) {
-      if (draft != null) {
-        unawaited(_audioService().deleteDraftIfExists(draft));
-      }
-      _recordingDraft = null;
       if (recognizedText.isEmpty) {
+        if (draft != null) {
+          unawaited(_audioService().deleteDraftIfExists(draft));
+        }
+        _recordingDraft = null;
         state = state.copyWith(
           phase: FlashPhase.idle,
           rawText: '',
@@ -209,6 +209,10 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         );
         return;
       }
+      if (draft != null) {
+        unawaited(_audioService().deleteDraftIfExists(draft));
+      }
+      _recordingDraft = null;
       final parsed = LuiLiteParser.parse(recognizedText);
       state = state.copyWith(
         phase: FlashPhase.confirming,
