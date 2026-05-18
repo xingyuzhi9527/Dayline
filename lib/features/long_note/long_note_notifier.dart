@@ -4,6 +4,7 @@ import '../../core/markdown/markdown_directory_service.dart';
 import '../../core/markdown/markdown_note_service.dart';
 import '../../core/markdown/markdown_storage_service.dart';
 import '../../core/database/repository_providers.dart';
+import '../projects/project_store.dart';
 import 'long_note_state.dart';
 
 final longNoteProvider = NotifierProvider<LongNoteNotifier, LongNoteState>(
@@ -22,7 +23,7 @@ class LongNoteNotifier extends Notifier<LongNoteState> {
     state = state.copyWith(body: body, errorMessage: null);
   }
 
-  Future<bool> save(String title, String body) async {
+  Future<bool> save(String title, String body, {ProjectOption? project}) async {
     final trimmedTitle = title.trim();
     final trimmedBody = body.trim();
     if (trimmedTitle.isEmpty && trimmedBody.isEmpty) return false;
@@ -39,6 +40,8 @@ class LongNoteNotifier extends Notifier<LongNoteState> {
         title: trimmedTitle,
         body: trimmedBody,
         dateTime: now,
+        projectId: project?.id,
+        projectName: project?.name,
       );
 
       // Write timeline index
@@ -51,7 +54,7 @@ class LongNoteNotifier extends Notifier<LongNoteState> {
 
       final content = trimmedTitle.isNotEmpty ? trimmedTitle : _fallbackTitle();
 
-      await ref
+      final recordId = await ref
           .read(recordsRepositoryProvider)
           .create(
             date: now,
@@ -64,8 +67,24 @@ class LongNoteNotifier extends Notifier<LongNoteState> {
                 path,
               ),
               'wordCount': wordCount,
+              if (project != null) ...{
+                'projectId': project.id,
+                'projectName': project.name,
+                'projectEntryType': 'long_note',
+              },
             },
           );
+
+      if (project != null) {
+        await addProjectLongNote(
+          ref,
+          projectId: project.id,
+          title: content,
+          path: path,
+          recordId: recordId,
+          updatedAt: now,
+        );
+      }
 
       ref.read(dataVersionProvider.notifier).increment();
 

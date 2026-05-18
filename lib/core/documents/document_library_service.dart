@@ -127,7 +127,7 @@ class DocumentLibraryService {
 
   Future<DocumentLibrarySnapshot> _loadTree(String treeUri) async {
     final rows = await _storageService.listTreeFiles(
-      roots: const ['daily', 'notes', 'documents'],
+      roots: const ['daily', 'notes', 'projects', 'documents'],
     );
     final notes = <DocumentLibraryItem>[];
     final documents = <DocumentLibraryItem>[];
@@ -137,7 +137,8 @@ class DocumentLibraryService {
       if (relativePath.isEmpty) continue;
       final isMarkdown =
           relativePath.startsWith('daily/') ||
-          relativePath.startsWith('notes/');
+          relativePath.startsWith('notes/') ||
+          relativePath.startsWith('projects/');
       final item = _itemFromTreeRow(
         treeUri,
         row,
@@ -162,7 +163,7 @@ class DocumentLibraryService {
     final notes = <DocumentLibraryItem>[];
     final documents = <DocumentLibraryItem>[];
 
-    for (final dirName in const ['daily', 'notes']) {
+    for (final dirName in const ['daily', 'notes', 'projects']) {
       final dir = Directory(p.join(root, dirName));
       if (!await dir.exists()) continue;
       await for (final entity in dir.list(

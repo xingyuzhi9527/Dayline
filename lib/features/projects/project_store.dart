@@ -41,7 +41,7 @@ Future<ProjectOption?> findProjectOption(Ref ref, String projectId) async {
 }
 
 Future<void> addProjectTodo(
-  Ref ref, {
+  dynamic ref, {
   required String projectId,
   required String title,
   required DateTime updatedAt,
@@ -87,7 +87,7 @@ Future<void> addProjectTodo(
 }
 
 Future<void> addProjectUpdate(
-  Ref ref, {
+  dynamic ref, {
   required String projectId,
   required String text,
   required DateTime updatedAt,
@@ -124,8 +124,85 @@ Future<void> addProjectUpdate(
   );
 }
 
+Future<void> addProjectLongNote(
+  dynamic ref, {
+  required String projectId,
+  required String title,
+  required String path,
+  required int recordId,
+  required DateTime updatedAt,
+}) async {
+  await _updateProject(
+    ref,
+    projectId: projectId,
+    updatedAt: updatedAt,
+    archiveEntry: ProjectArchiveEntry(
+      text: '长笔记：$title',
+      source: '长笔记',
+      createdAt: updatedAt,
+    ),
+    update: (project) {
+      final updates = _listOfMaps(project['updates']);
+      final writtenAt = _formatProjectTime(updatedAt);
+      return {
+        ...project,
+        'lastUpdate': writtenAt,
+        'updates': [
+          {
+            'id': '${updatedAt.microsecondsSinceEpoch}-long-note-update',
+            'time': writtenAt,
+            'createdAt': updatedAt.millisecondsSinceEpoch,
+            'source': '长笔记',
+            'text': title,
+            'entryType': 'long_note',
+            'notePath': path,
+            'recordId': recordId,
+            'colorValue': AppColors.primary.toARGB32(),
+          },
+          ...updates.take(9),
+        ],
+      };
+    },
+  );
+}
+
+Future<void> updateProjectLongNoteTitle(
+  dynamic ref, {
+  required String projectId,
+  required String title,
+  required String path,
+  int? recordId,
+  required DateTime updatedAt,
+}) async {
+  await _updateProject(
+    ref,
+    projectId: projectId,
+    updatedAt: updatedAt,
+    update: (project) {
+      final updates = _listOfMaps(project['updates']);
+      var changed = false;
+      final nextUpdates = [
+        for (final update in updates)
+          if (_matchesLongNoteUpdate(update, path: path, recordId: recordId))
+            () {
+              changed = true;
+              return {...update, 'text': title};
+            }()
+          else
+            update,
+      ];
+      if (!changed) return project;
+      return {
+        ...project,
+        'lastUpdate': _formatProjectTime(updatedAt),
+        'updates': nextUpdates,
+      };
+    },
+  );
+}
+
 Future<void> _updateProject(
-  Ref ref, {
+  dynamic ref, {
   required String projectId,
   required DateTime updatedAt,
   ProjectArchiveEntry? archiveEntry,
@@ -175,7 +252,17 @@ Future<void> _updateProject(
   await _saveProjects(ref, projectsToSave, updatedAt: updatedAt);
 }
 
-Future<List<Map<String, Object?>>> _loadProjects(Ref ref) async {
+bool _matchesLongNoteUpdate(
+  Map<String, Object?> update, {
+  required String path,
+  required int? recordId,
+}) {
+  if (update['entryType'] != 'long_note') return false;
+  if (recordId != null && update['recordId'] == recordId) return true;
+  return update['notePath'] == path;
+}
+
+Future<List<Map<String, Object?>>> _loadProjects(dynamic ref) async {
   final settings = ref.read(appSettingsRepositoryProvider);
   final row = await settings.findByKey(projectsSettingsKey);
   final raw = row?['value'] as String?;
@@ -193,7 +280,7 @@ Future<List<Map<String, Object?>>> _loadProjects(Ref ref) async {
 }
 
 Future<void> _saveProjects(
-  Ref ref,
+  dynamic ref,
   List<Map<String, Object?>> projects, {
   required DateTime updatedAt,
 }) async {

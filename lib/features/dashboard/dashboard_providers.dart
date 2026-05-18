@@ -127,6 +127,7 @@ final dashboardSummaryForDateProvider =
       final longestGapMinutes = _calcLongestGap(timestamps);
       final densestHourRange = _calcDensestHour(timestamps);
       final insights = _generateInsights(
+        dayLabel: dashboardNarrativeDayLabel(day),
         recordCount: records.length,
         totalTodos: todos.length,
         completedTodos: todos
@@ -170,6 +171,16 @@ final dashboardSummaryProvider = FutureProvider<DashboardSummary>((ref) {
   return ref.watch(dashboardSummaryForDateProvider(DateTime.now()).future);
 });
 
+String dashboardNarrativeDayLabel(DateTime date, {DateTime? today}) {
+  final anchor = today ?? DateTime.now();
+  final day = DateTime(date.year, date.month, date.day);
+  final todayOnly = DateTime(anchor.year, anchor.month, anchor.day);
+  if (day == todayOnly) return '今天';
+  if (day == todayOnly.subtract(const Duration(days: 1))) return '昨天';
+  if (day == todayOnly.subtract(const Duration(days: 2))) return '前天';
+  return '这一天';
+}
+
 String _pad(int n) => n.toString().padLeft(2, '0');
 
 int _calcLongestGap(List<int> sortedTimestamps) {
@@ -203,6 +214,7 @@ String _calcDensestHour(List<int> sortedTimestamps) {
 }
 
 List<String> _generateInsights({
+  required String dayLabel,
   required int recordCount,
   required int totalTodos,
   required int completedTodos,
@@ -218,14 +230,14 @@ List<String> _generateInsights({
   if (recordCount < 3) return insights;
 
   if (densestHourRange != '-') {
-    insights.add('今天最密集的记录出现在 $densestHourRange。');
+    insights.add('$dayLabel最密集的记录出现在 $densestHourRange。');
   }
 
   if (topTags.isNotEmpty) {
     final topTag = topTags.first;
     final topCount = tagCounts[topTag] ?? 0;
     if (topCount >= 2) {
-      insights.add('今天"$topTag"相关内容最多。');
+      insights.add('$dayLabel"$topTag"相关内容最多。');
     }
   }
 
@@ -235,19 +247,19 @@ List<String> _generateInsights({
     final gapText = hours > 0
         ? '$hours小时${mins > 0 ? '$mins分钟' : ''}'
         : '$longestGapMinutes分钟';
-    insights.add('今天存在较长的空白时段（$gapText）。');
+    insights.add('$dayLabel存在较长的空白时段（$gapText）。');
   }
 
   if (totalTodos > 0 && completedTodos == 0) {
-    insights.add('今天有待办事项未完成，可以先标记。');
+    insights.add('$dayLabel有待办事项未完成，可以先标记。');
   }
 
   if (totalTodos > 0 && completedTodos == totalTodos) {
-    insights.add('今天的待办全部完成。');
+    insights.add('$dayLabel的待办全部完成。');
   }
 
   if (focusMinutes >= 60) {
-    insights.add('今天专注了 $focusMinutes 分钟，表现很好。');
+    insights.add('$dayLabel专注了 $focusMinutes 分钟，表现很好。');
   }
 
   return insights.take(3).toList();

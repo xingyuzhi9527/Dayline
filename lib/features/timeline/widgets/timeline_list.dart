@@ -336,6 +336,7 @@ class _TimelineTile extends ConsumerWidget {
           filePath: path ?? '',
           body: document.body,
           recordId: event.sourceId,
+          projectId: meta?['projectId'] as String?,
         ),
       ),
     );
@@ -369,6 +370,7 @@ class _TimelineTile extends ConsumerWidget {
           builder: (_) => LongNoteEditorPage(
             initialTitle: document.title,
             initialBody: document.body,
+            initialProjectId: meta?['projectId'] as String?,
             existingPath: path,
             recordId: event.sourceId,
           ),

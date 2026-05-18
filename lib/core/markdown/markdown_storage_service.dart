@@ -122,7 +122,12 @@ class MarkdownStorageService {
       await ensureTreeRootSubdir();
       await _channel.invokeMethod<void>('ensureDirectories', {
         'treeUri': treeUri,
-        'paths': await _treePaths(const ['daily', 'notes', 'documents']),
+        'paths': await _treePaths(const [
+          'daily',
+          'notes',
+          'documents',
+          'projects',
+        ]),
       });
       return;
     }

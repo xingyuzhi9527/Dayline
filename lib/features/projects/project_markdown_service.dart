@@ -1,9 +1,8 @@
 import 'dart:convert';
 
-import 'package:path/path.dart' as p;
-
 import '../../core/database/repositories.dart';
 import '../../core/markdown/markdown_directory_service.dart';
+import '../../core/markdown/project_markdown_paths.dart';
 import '../../core/markdown/markdown_storage_service.dart';
 
 class ProjectArchiveEntry {
@@ -119,7 +118,7 @@ class ProjectMarkdownService {
     final status = _string(project['status'], fallback: '进行中');
     return '---\n'
         'type: project\n'
-        'source: dayline\n'
+        'source: liflow\n'
         'project_id: ${_yamlString(id)}\n'
         'title: ${_yamlString(name)}\n'
         'status: ${_yamlString(status)}\n'
@@ -154,18 +153,10 @@ class ProjectMarkdownService {
   String _relativePath(Map<String, Object?> project) {
     final name = _string(project['name'], fallback: 'project');
     final id = _string(project['id'], fallback: DateTime.now().toString());
-    final safeName = _safeFilePart(name);
-    final suffix = String.fromCharCodes(_safeFilePart(id).runes.take(8));
-    return p.posix.join('projects', '$safeName-$suffix.md');
-  }
-
-  String _safeFilePart(String value) {
-    final cleaned = value
-        .trim()
-        .replaceAll(RegExp(r'[\\/:*?"<>|#\r\n]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), '-');
-    if (cleaned.isEmpty) return 'project';
-    return String.fromCharCodes(cleaned.runes.take(36));
+    return ProjectMarkdownPaths.projectArchive(
+      projectId: id,
+      projectName: name,
+    );
   }
 
   String _markedBody(String source, String start, String end) {
