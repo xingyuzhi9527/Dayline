@@ -176,6 +176,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 
   void _submitText() {
+    if (ref.read(flashRecordProvider).textSaving) return;
     final text = _textController.text.trim();
     if (text.isEmpty) return;
     _textController.clear();
@@ -1257,6 +1258,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             _buildToolDrawer(theme),
             const SizedBox(height: AppSpacing.sm),
           ],
+          if (!expanded && !compact) ...[
+            _buildIntentDragHandle(theme),
+            const SizedBox(height: 4),
+          ],
           LayoutBuilder(
             builder: (context, constraints) {
               final expandedWidth = constraints.maxWidth.isFinite
@@ -1412,9 +1417,6 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         onLongPress: isListening ? null : () => _handleIntentLongPress(state),
         onLongPressEnd: isListening ? null : (_) => _handleIntentLongPressEnd(),
         onLongPressUp: isListening ? null : _handleIntentLongPressEnd,
-        onPanStart: _handleIntentPanStart,
-        onPanUpdate: _handleIntentPanUpdate,
-        onPanEnd: _handleIntentPanEnd,
         child: Stack(
           alignment: Alignment.center,
           children: [
@@ -1444,6 +1446,39 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     );
   }
 
+  Widget _buildIntentDragHandle(ThemeData theme) {
+    return Center(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanStart: _handleIntentPanStart,
+        onPanUpdate: _handleIntentPanUpdate,
+        onPanEnd: _handleIntentPanEnd,
+        child: Semantics(
+          button: true,
+          label: '上滑打开时间树和待办',
+          child: Container(
+            width: 76,
+            height: 18,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppColors.surface.withAlpha(188),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+              border: Border.all(color: AppColors.border.withAlpha(120)),
+            ),
+            child: Container(
+              width: 34,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withAlpha(105),
+                borderRadius: BorderRadius.circular(99),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildExpandedIntentInput(FlashRecordState state, ThemeData theme) {
     return Row(
       key: const ValueKey('expanded-intent-input'),
@@ -1454,7 +1489,6 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             key: const ValueKey('record-text-input'),
             focusNode: _textFocusNode,
             controller: _textController,
-            onTapOutside: (_) => _collapseIntentInput(reason: 'tap-outside'),
             textInputAction: TextInputAction.send,
             onSubmitted: (_) => _submitText(),
             maxLines: 1,
@@ -1479,7 +1513,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           button: true,
           child: IconButton(
             key: const ValueKey('record-text-submit'),
-            onPressed: _submitText,
+            onPressed: state.textSaving ? null : _submitText,
             icon: AnimatedSwitcher(
               duration: const Duration(milliseconds: 160),
               child: state.textSaving
@@ -1834,8 +1868,11 @@ class _TodoPanelEventCard extends ConsumerWidget {
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         onTap: () => _toggleTodo(ref, isCompleted),
         child: Container(
-          constraints: const BoxConstraints(minHeight: 54),
-          padding: const EdgeInsets.all(AppSpacing.xs),
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.xs,
+            vertical: AppSpacing.xxs,
+          ),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
             border: Border.all(color: AppColors.border.withAlpha(210)),
@@ -1846,7 +1883,7 @@ class _TodoPanelEventCard extends ConsumerWidget {
               Icon(
                 isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
                 color: isCompleted ? AppColors.todo : AppColors.muted,
-                size: 22,
+                size: 19,
               ),
               const SizedBox(width: AppSpacing.xs),
               Expanded(
@@ -1856,13 +1893,14 @@ class _TodoPanelEventCard extends ConsumerWidget {
                   children: [
                     Text(
                       event.title,
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall?.copyWith(
+                      style: theme.textTheme.bodySmall?.copyWith(
                         color: isCompleted
                             ? AppColors.muted
                             : AppColors.primary,
                         fontWeight: FontWeight.w700,
+                        height: 1.22,
                         decoration: isCompleted
                             ? TextDecoration.lineThrough
                             : null,

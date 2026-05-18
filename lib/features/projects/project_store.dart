@@ -24,10 +24,11 @@ Future<List<ProjectOption>> loadProjectOptions(Ref ref) async {
   final projects = await _loadProjects(ref);
   return [
     for (final project in projects)
-      ProjectOption(
-        id: project['id'] as String,
-        name: project['name'] as String,
-      ),
+      if (project['status'] != '归档')
+        ProjectOption(
+          id: project['id'] as String,
+          name: project['name'] as String,
+        ),
   ];
 }
 

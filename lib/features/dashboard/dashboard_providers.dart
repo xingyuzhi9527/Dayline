@@ -59,102 +59,115 @@ class DashboardSummary {
   bool get hasUnfinishedTodos => totalTodos > completedTodos;
 }
 
-final dashboardSummaryProvider = FutureProvider<DashboardSummary>((ref) async {
-  ref.watch(dataVersionProvider);
-  final today = DateTime.now();
-  final dateStr = dateKey(today);
+final dashboardSummaryForDateProvider =
+    FutureProvider.family<DashboardSummary, DateTime>((ref, date) async {
+      ref.watch(dataVersionProvider);
+      final day = DateTime(date.year, date.month, date.day);
+      final dateStr = dateKey(day);
 
-  final records = await ref.read(recordsRepositoryProvider).findByDate(today);
-  final todos = await ref.read(todosRepositoryProvider).findByDate(today);
-  final trackerLogs = await ref
-      .read(trackerLogsRepositoryProvider)
-      .findByDate(today);
-  final focusMinutes = await ref
-      .read(focusSessionsRepositoryProvider)
-      .sumMinutesByDate(today);
-  final expenses = await ref.read(expensesRepositoryProvider).findByDate(today);
-  final expenseTotal = await ref
-      .read(expensesRepositoryProvider)
-      .sumAmountByDate(today);
-  final monthExpenseTotal = await ref
-      .read(expensesRepositoryProvider)
-      .sumAmountByMonth(today);
-  final bodyLogs = await ref.read(bodyLogsRepositoryProvider).findByDate(today);
+      final records = await ref.read(recordsRepositoryProvider).findByDate(day);
+      final todos = await ref.read(todosRepositoryProvider).findByDate(day);
+      final trackerLogs = await ref
+          .read(trackerLogsRepositoryProvider)
+          .findByDate(day);
+      final focusMinutes = await ref
+          .read(focusSessionsRepositoryProvider)
+          .sumMinutesByDate(day);
+      final expenses = await ref
+          .read(expensesRepositoryProvider)
+          .findByDate(day);
+      final expenseTotal = await ref
+          .read(expensesRepositoryProvider)
+          .sumAmountByDate(day);
+      final monthExpenseTotal = await ref
+          .read(expensesRepositoryProvider)
+          .sumAmountByMonth(day);
+      final bodyLogs = await ref
+          .read(bodyLogsRepositoryProvider)
+          .findByDate(day);
 
-  final review = await ref
-      .read(dailyReviewsRepositoryProvider)
-      .findByDate(dateStr);
+      final review = await ref
+          .read(dailyReviewsRepositoryProvider)
+          .findByDate(dateStr);
 
-  final tagCounts = <String, int>{};
-  for (final r in records) {
-    final tags = _parseTags(r['tags'] as String);
-    for (final tag in tags) {
-      tagCounts[tag] = (tagCounts[tag] ?? 0) + 1;
-    }
-  }
-  final sortedTags = tagCounts.entries.toList()
-    ..sort((a, b) => b.value.compareTo(a.value));
-  final topTags = sortedTags.take(5).map((e) => e.key).toList();
+      final tagCounts = <String, int>{};
+      for (final r in records) {
+        final tags = _parseTags(r['tags'] as String);
+        for (final tag in tags) {
+          tagCounts[tag] = (tagCounts[tag] ?? 0) + 1;
+        }
+      }
+      final sortedTags = tagCounts.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      final topTags = sortedTags.take(5).map((e) => e.key).toList();
 
-  final timestamps = <int>[];
-  for (final r in records) {
-    timestamps.add(r['created_at'] as int);
-  }
-  for (final t in todos) {
-    timestamps.add(t['created_at'] as int);
-    final completedAt = t['completed_at'];
-    if (completedAt != null) timestamps.add(completedAt as int);
-  }
-  for (final l in trackerLogs) {
-    timestamps.add(l['created_at'] as int);
-  }
-  for (final e in expenses) {
-    timestamps.add(e['created_at'] as int);
-  }
-  for (final b in bodyLogs) {
-    timestamps.add(b['created_at'] as int);
-  }
-  timestamps.sort();
+      final timestamps = <int>[];
+      for (final r in records) {
+        timestamps.add(r['created_at'] as int);
+      }
+      for (final t in todos) {
+        timestamps.add(t['created_at'] as int);
+        final completedAt = t['completed_at'];
+        if (completedAt != null) timestamps.add(completedAt as int);
+      }
+      for (final l in trackerLogs) {
+        timestamps.add(l['created_at'] as int);
+      }
+      for (final e in expenses) {
+        timestamps.add(e['created_at'] as int);
+      }
+      for (final b in bodyLogs) {
+        timestamps.add(b['created_at'] as int);
+      }
+      timestamps.sort();
 
-  final firstActivityTime = timestamps.isNotEmpty ? timestamps.first : null;
-  final lastActivityTime = timestamps.isNotEmpty ? timestamps.last : null;
+      final firstActivityTime = timestamps.isNotEmpty ? timestamps.first : null;
+      final lastActivityTime = timestamps.isNotEmpty ? timestamps.last : null;
 
-  final longestGapMinutes = _calcLongestGap(timestamps);
-  final densestHourRange = _calcDensestHour(timestamps);
-  final insights = _generateInsights(
-    recordCount: records.length,
-    totalTodos: todos.length,
-    completedTodos: todos.where((t) => (t['is_completed'] as int) == 1).length,
-    focusMinutes: focusMinutes,
-    topTags: topTags,
-    tagCounts: tagCounts,
-    firstActivityTime: firstActivityTime,
-    lastActivityTime: lastActivityTime,
-    longestGapMinutes: longestGapMinutes,
-    densestHourRange: densestHourRange,
-  );
+      final longestGapMinutes = _calcLongestGap(timestamps);
+      final densestHourRange = _calcDensestHour(timestamps);
+      final insights = _generateInsights(
+        recordCount: records.length,
+        totalTodos: todos.length,
+        completedTodos: todos
+            .where((t) => (t['is_completed'] as int) == 1)
+            .length,
+        focusMinutes: focusMinutes,
+        topTags: topTags,
+        tagCounts: tagCounts,
+        firstActivityTime: firstActivityTime,
+        lastActivityTime: lastActivityTime,
+        longestGapMinutes: longestGapMinutes,
+        densestHourRange: densestHourRange,
+      );
 
-  return DashboardSummary(
-    date: dateStr,
-    recordCount: records.length,
-    totalTodos: todos.length,
-    completedTodos: todos.where((t) => (t['is_completed'] as int) == 1).length,
-    trackerCount: trackerLogs.length,
-    focusMinutes: focusMinutes,
-    expenseTotal: expenseTotal,
-    monthExpenseTotal: monthExpenseTotal,
-    expenseCount: expenses.length,
-    bodyLogCount: bodyLogs.length,
-    topTags: topTags,
-    categoryCounts: tagCounts,
-    firstActivityTime: firstActivityTime,
-    lastActivityTime: lastActivityTime,
-    longestGapMinutes: longestGapMinutes,
-    densestHourRange: densestHourRange,
-    insights: insights,
-    allTimestamps: timestamps,
-    isReviewed: review != null,
-  );
+      return DashboardSummary(
+        date: dateStr,
+        recordCount: records.length,
+        totalTodos: todos.length,
+        completedTodos: todos
+            .where((t) => (t['is_completed'] as int) == 1)
+            .length,
+        trackerCount: trackerLogs.length,
+        focusMinutes: focusMinutes,
+        expenseTotal: expenseTotal,
+        monthExpenseTotal: monthExpenseTotal,
+        expenseCount: expenses.length,
+        bodyLogCount: bodyLogs.length,
+        topTags: topTags,
+        categoryCounts: tagCounts,
+        firstActivityTime: firstActivityTime,
+        lastActivityTime: lastActivityTime,
+        longestGapMinutes: longestGapMinutes,
+        densestHourRange: densestHourRange,
+        insights: insights,
+        allTimestamps: timestamps,
+        isReviewed: review != null,
+      );
+    });
+
+final dashboardSummaryProvider = FutureProvider<DashboardSummary>((ref) {
+  return ref.watch(dashboardSummaryForDateProvider(DateTime.now()).future);
 });
 
 String _pad(int n) => n.toString().padLeft(2, '0');
@@ -220,8 +233,8 @@ List<String> _generateInsights({
     final hours = longestGapMinutes ~/ 60;
     final mins = longestGapMinutes % 60;
     final gapText = hours > 0
-        ? '${hours}小时${mins > 0 ? '$mins分钟' : ''}'
-        : '${longestGapMinutes}分钟';
+        ? '$hours小时${mins > 0 ? '$mins分钟' : ''}'
+        : '$longestGapMinutes分钟';
     insights.add('今天存在较长的空白时段（$gapText）。');
   }
 
@@ -249,10 +262,13 @@ List<String> _parseTags(String raw) {
   }
 }
 
-final dashboardReviewProvider = FutureProvider<Map<String, Object?>?>((
-  ref,
-) async {
-  ref.watch(dataVersionProvider);
-  final today = DateTime.now();
-  return ref.read(dailyReviewsRepositoryProvider).findByDate(dateKey(today));
+final dashboardReviewForDateProvider =
+    FutureProvider.family<Map<String, Object?>?, DateTime>((ref, date) async {
+      ref.watch(dataVersionProvider);
+      final day = DateTime(date.year, date.month, date.day);
+      return ref.read(dailyReviewsRepositoryProvider).findByDate(dateKey(day));
+    });
+
+final dashboardReviewProvider = FutureProvider<Map<String, Object?>?>((ref) {
+  return ref.watch(dashboardReviewForDateProvider(DateTime.now()).future);
 });

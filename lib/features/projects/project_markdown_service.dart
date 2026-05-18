@@ -116,11 +116,13 @@ class ProjectMarkdownService {
   String _frontMatter(Map<String, Object?> project, DateTime updatedAt) {
     final name = _string(project['name'], fallback: '未命名项目');
     final id = _string(project['id'], fallback: '');
+    final status = _string(project['status'], fallback: '进行中');
     return '---\n'
         'type: project\n'
         'source: dayline\n'
         'project_id: ${_yamlString(id)}\n'
         'title: ${_yamlString(name)}\n'
+        'status: ${_yamlString(status)}\n'
         'updated_at: ${updatedAt.toIso8601String()}\n'
         'tags: [项目]\n'
         '---\n';
