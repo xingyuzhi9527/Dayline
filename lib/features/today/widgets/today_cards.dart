@@ -18,6 +18,12 @@ String formatDate(DateTime date) {
   return '${date.month}月${date.day}日 ${weekdays[date.weekday - 1]}';
 }
 
+String _dateKey(DateTime date) {
+  final month = date.month.toString().padLeft(2, '0');
+  final day = date.day.toString().padLeft(2, '0');
+  return '${date.year}-$month-$day';
+}
+
 class DateHeaderCard extends StatelessWidget {
   const DateHeaderCard({super.key});
 
@@ -426,33 +432,126 @@ class _TodayTodosCardState extends ConsumerState<TodayTodosCard> {
 
   @override
   Widget build(BuildContext context) {
-    final todos = ref.watch(todayTodoListProvider);
+    final todos = ref.watch(todayTodoAgendaProvider);
     final freshTodos = todos.valueOrNull;
     if (freshTodos != null) {
       _lastTodoList = freshTodos;
     }
-    final todoList = [..._lastTodoList]
-      ..sort((a, b) {
-        final createdA = a['created_at'] as int? ?? 0;
-        final createdB = b['created_at'] as int? ?? 0;
-        return createdA.compareTo(createdB);
-      });
+    final todoList = _sortedAgendaRows(_lastTodoList);
+    final visibleTodos = todoList.take(7).toList();
+    final hiddenCount = todoList.length - visibleTodos.length;
+    final groups = _groupTodoAgenda(visibleTodos);
+    final todayKey = _dateKey(DateTime.now());
+    final openCount = todoList
+        .where((t) => (t['is_completed'] as int? ?? 0) == 0)
+        .length;
+    final todayCount = todoList.where((t) => t['date'] == todayKey).length;
 
     return _SectionCard(
-      title: '今日待办',
+      title: '待办概览',
       icon: Icons.check_circle_outline,
       child: todoList.isEmpty && !todos.isLoading
-          ? const _EmptyText('今天还没有待办。')
+          ? const _EmptyText('没有待办。')
           : Column(
-              children: todoList.map((t) {
-                return _TodoRow(
-                  key: ValueKey('dashboard-todo-${t['id']}'),
-                  id: t['id'] as int,
-                  title: t['title'] as String,
-                  isCompleted: (t['is_completed'] as int) == 1,
-                );
-              }).toList(),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$openCount 个未完成 · 今天 $todayCount 个',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: AppColors.muted),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                for (final group in groups) ...[
+                  _TodoGroupLabel(group.label),
+                  ...group.todos.map((t) {
+                    return _TodoRow(
+                      key: ValueKey('dashboard-todo-${t['id']}'),
+                      id: t['id'] as int,
+                      title: t['title'] as String,
+                      isCompleted: (t['is_completed'] as int) == 1,
+                    );
+                  }),
+                ],
+                if (hiddenCount > 0) ...[
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    '还有 $hiddenCount 个待办在完整列表里。',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: AppColors.muted),
+                  ),
+                ],
+              ],
             ),
+    );
+  }
+
+  List<Map<String, Object?>> _sortedAgendaRows(
+    List<Map<String, Object?>> rows,
+  ) {
+    return [...rows]..sort((a, b) {
+      final dateCompare = (a['date'] as String? ?? '').compareTo(
+        b['date'] as String? ?? '',
+      );
+      if (dateCompare != 0) return dateCompare;
+      final completedA = a['is_completed'] as int? ?? 0;
+      final completedB = b['is_completed'] as int? ?? 0;
+      if (completedA != completedB) return completedA.compareTo(completedB);
+      final createdA = a['created_at'] as int? ?? 0;
+      final createdB = b['created_at'] as int? ?? 0;
+      return createdA.compareTo(createdB);
+    });
+  }
+
+  List<_TodoAgendaGroup> _groupTodoAgenda(List<Map<String, Object?>> rows) {
+    final today = _dateKey(DateTime.now());
+    final overdue = <Map<String, Object?>>[];
+    final current = <Map<String, Object?>>[];
+    final upcoming = <Map<String, Object?>>[];
+
+    for (final row in rows) {
+      final date = row['date'] as String? ?? today;
+      if (date.compareTo(today) < 0) {
+        overdue.add(row);
+      } else if (date == today) {
+        current.add(row);
+      } else {
+        upcoming.add(row);
+      }
+    }
+
+    return [
+      if (overdue.isNotEmpty) _TodoAgendaGroup('遗留', overdue),
+      if (current.isNotEmpty) _TodoAgendaGroup('今天', current),
+      if (upcoming.isNotEmpty) _TodoAgendaGroup('接下来', upcoming),
+    ];
+  }
+}
+
+class _TodoAgendaGroup {
+  const _TodoAgendaGroup(this.label, this.todos);
+
+  final String label;
+  final List<Map<String, Object?>> todos;
+}
+
+class _TodoGroupLabel extends StatelessWidget {
+  const _TodoGroupLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs, bottom: 2),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: AppColors.primary,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 }
@@ -530,6 +629,8 @@ class _TodoRowState extends ConsumerState<_TodoRow> {
       } else {
         await repo.complete(widget.id);
       }
+      ref.invalidate(todayTodoAgendaProvider);
+      ref.invalidate(todayTodoListProvider);
       ref.invalidate(todayTodoStatsProvider);
       ref.read(dataVersionProvider.notifier).increment();
     } catch (_) {
