@@ -4,8 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repository_providers.dart';
+import '../../core/markdown/markdown_directory_service.dart';
+import '../../core/markdown/markdown_document_parser.dart';
+import '../../core/markdown/markdown_storage_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
+import '../long_note/long_note_reader_page.dart';
 import 'project_markdown_service.dart';
 import 'project_store.dart';
 
@@ -379,6 +383,44 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     await _syncProjectArchive(project, showConfirmation: true);
   }
 
+  Future<void> _openProjectLongNote(_ProjectUpdate update) async {
+    final path = update.notePath;
+    if (path == null || path.isEmpty) return;
+    try {
+      final settings = ref.read(appSettingsRepositoryProvider);
+      final storage = MarkdownStorageService(
+        MarkdownDirectoryService(settings),
+      );
+      final raw = await storage.readTextFileLocation(path);
+      final document = parseMarkdownDocument(raw, fallbackTitle: update.text);
+      if (!mounted) return;
+      final saved = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => LongNoteReaderPage(
+            title: document.title,
+            filePath: path,
+            body: document.body,
+            recordId: update.recordId,
+            projectId: _selectedProject?.id,
+          ),
+        ),
+      );
+      if (saved == true && mounted) {
+        await _loadProjects();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('打开长笔记失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
+
   Future<void> _syncProjectArchive(
     _ProjectInfo project, {
     ProjectArchiveEntry? entry,
@@ -571,6 +613,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                                 project: project,
                                 onAddUpdate: _openAddUpdate,
                                 onSaveArchive: _saveArchiveSnapshot,
+                                onOpenUpdate: _openProjectLongNote,
                               ),
                             ],
                             const SizedBox(height: AppSpacing.md),
@@ -1221,11 +1264,13 @@ class _UpdatesSection extends StatelessWidget {
     required this.project,
     required this.onAddUpdate,
     required this.onSaveArchive,
+    required this.onOpenUpdate,
   });
 
   final _ProjectInfo project;
   final VoidCallback onAddUpdate;
   final VoidCallback onSaveArchive;
+  final ValueChanged<_ProjectUpdate> onOpenUpdate;
 
   @override
   Widget build(BuildContext context) {
@@ -1255,6 +1300,9 @@ class _UpdatesSection extends StatelessWidget {
                   _UpdateRow(
                     update: project.updates[i],
                     isLast: i == project.updates.length - 1,
+                    onTap: project.updates[i].isLongNote
+                        ? () => onOpenUpdate(project.updates[i])
+                        : null,
                   ),
               ],
             ),
@@ -1290,15 +1338,25 @@ class _EmptyUpdatePrompt extends StatelessWidget {
 }
 
 class _UpdateRow extends StatelessWidget {
-  const _UpdateRow({required this.update, required this.isLast});
+  const _UpdateRow({required this.update, required this.isLast, this.onTap});
 
   final _ProjectUpdate update;
   final bool isLast;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final color = Color(update.colorValue);
+
+    final text = Text(
+      update.text,
+      style: theme.textTheme.bodyLarge?.copyWith(
+        color: onTap == null ? AppColors.ink : AppColors.primary,
+        height: 1.45,
+        fontWeight: onTap == null ? null : FontWeight.w700,
+      ),
+    );
 
     return IntrinsicHeight(
       child: Row(
@@ -1342,13 +1400,27 @@ class _UpdateRow extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: AppSpacing.xxs),
-                  Text(
-                    update.text,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      color: AppColors.ink,
-                      height: 1.45,
+                  if (onTap == null)
+                    text
+                  else
+                    InkWell(
+                      onTap: onTap,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            Expanded(child: text),
+                            const SizedBox(width: AppSpacing.xs),
+                            Icon(
+                              Icons.open_in_new_rounded,
+                              size: 16,
+                              color: AppColors.primary.withAlpha(180),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -2716,6 +2788,9 @@ class _ProjectUpdate {
     required this.source,
     required this.text,
     required this.colorValue,
+    this.entryType,
+    this.notePath,
+    this.recordId,
   });
 
   final String id;
@@ -2724,6 +2799,12 @@ class _ProjectUpdate {
   final String source;
   final String text;
   final int colorValue;
+  final String? entryType;
+  final String? notePath;
+  final int? recordId;
+
+  bool get isLongNote =>
+      entryType == 'long_note' && notePath != null && notePath!.isNotEmpty;
 
   Map<String, Object?> toJson() {
     return {
@@ -2733,6 +2814,9 @@ class _ProjectUpdate {
       'source': source,
       'text': text,
       'colorValue': colorValue,
+      if (entryType != null) 'entryType': entryType,
+      if (notePath != null) 'notePath': notePath,
+      if (recordId != null) 'recordId': recordId,
     };
   }
 
@@ -2748,6 +2832,9 @@ class _ProjectUpdate {
       source: raw['source'] as String? ?? '项目',
       text: text,
       colorValue: raw['colorValue'] as int? ?? AppColors.primary.toARGB32(),
+      entryType: raw['entryType'] as String?,
+      notePath: raw['notePath'] as String?,
+      recordId: raw['recordId'] as int?,
     );
   }
 }

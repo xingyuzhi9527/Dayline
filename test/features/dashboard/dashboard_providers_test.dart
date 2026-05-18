@@ -158,6 +158,44 @@ void main() {
     });
 
     test(
+      'dashboardSummaryForDateProvider labels yesterday insights correctly',
+      () async {
+        final db = _memoryDatabase();
+        final container = ProviderContainer(
+          overrides: [localDatabaseProvider.overrideWithValue(db)],
+        );
+
+        final today = DateTime.now();
+        final yesterday = DateTime(
+          today.year,
+          today.month,
+          today.day,
+        ).subtract(const Duration(days: 1));
+        final recordsRepo = container.read(recordsRepositoryProvider);
+        for (var i = 0; i < 3; i++) {
+          await recordsRepo.create(
+            date: yesterday,
+            type: 'memo',
+            content: '复盘 $i',
+            tags: ['复盘'],
+            createdAt: yesterday.add(Duration(hours: 8 + i)),
+          );
+        }
+
+        final summary = await container.read(
+          dashboardSummaryForDateProvider(yesterday).future,
+        );
+
+        expect(summary.date, dateKey(yesterday));
+        expect(summary.insights, isNotEmpty);
+        expect(summary.insights.join('\n'), contains('昨天'));
+        expect(summary.insights.join('\n'), isNot(contains('今天')));
+
+        container.dispose();
+      },
+    );
+
+    test(
       'dashboardReviewProvider returns null when no review exists',
       () async {
         final db = _memoryDatabase();

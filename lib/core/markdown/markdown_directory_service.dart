@@ -105,7 +105,7 @@ class MarkdownDirectoryService {
 
   Future<void> ensureCoreDirectories() async {
     final root = await ensureRoot();
-    for (final name in const ['daily', 'notes', 'documents']) {
+    for (final name in const ['daily', 'notes', 'documents', 'projects']) {
       final dir = Directory(p.join(root, name));
       if (!await dir.exists()) {
         await dir.create(recursive: true);

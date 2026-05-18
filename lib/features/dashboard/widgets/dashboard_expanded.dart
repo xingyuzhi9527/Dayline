@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/database/repositories.dart';
 import '../../../core/database/repository_providers.dart';
-import '../../../core/markdown/daily_review_markdown.dart';
 import '../../../core/markdown/markdown_directory_service.dart';
 import '../../../core/markdown/markdown_document_parser.dart';
 import '../../../core/markdown/markdown_note_service.dart';
@@ -13,9 +12,21 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../today/widgets/today_cards.dart';
 import '../daily_note_draft.dart';
+import '../daily_review_writer.dart';
 import '../dashboard_providers.dart';
 
-class DashboardExpandedView extends StatelessWidget {
+bool _sameDate(DateTime a, DateTime b) {
+  return a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+String _relativeDateLabel(DateTime date, DateTime today) {
+  if (_sameDate(date, today)) return '今天';
+  if (_sameDate(date, today.subtract(const Duration(days: 1)))) return '昨天';
+  if (_sameDate(date, today.subtract(const Duration(days: 2)))) return '前天';
+  return dateKey(date);
+}
+
+class DashboardExpandedView extends StatefulWidget {
   const DashboardExpandedView({
     required this.summary,
     required this.onCollapse,
@@ -28,11 +39,31 @@ class DashboardExpandedView extends StatelessWidget {
   final VoidCallback onOpenLibrary;
 
   @override
+  State<DashboardExpandedView> createState() => _DashboardExpandedViewState();
+}
+
+class _DashboardExpandedViewState extends State<DashboardExpandedView> {
+  late final DateTime _today;
+  late final List<DateTime> _availableDates;
+  late DateTime _selectedDate;
+
+  @override
+  void initState() {
+    super.initState();
+    _today = _dateOnly(DateTime.now());
+    _selectedDate = _today;
+    _availableDates = List.generate(
+      3,
+      (index) => _today.subtract(Duration(days: index)),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    if (!summary.hasData) {
-      return _EmptyExpanded(theme: theme, onBack: onCollapse);
+    if (!widget.summary.hasData) {
+      return _EmptyExpanded(theme: theme, onBack: widget.onCollapse);
     }
 
     return SingleChildScrollView(
@@ -47,14 +78,14 @@ class DashboardExpandedView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _ExpandedHeader(
-            summary: summary,
-            onCollapse: onCollapse,
-            onOpenLibrary: onOpenLibrary,
+            summary: widget.summary,
+            onCollapse: widget.onCollapse,
+            onOpenLibrary: widget.onOpenLibrary,
           ),
           const SizedBox(height: AppSpacing.md),
-          _TodayStatusCard(summary: summary),
+          _TodayStatusCard(summary: widget.summary),
           const SizedBox(height: AppSpacing.md),
-          _DayRhythmBar(summary: summary),
+          _DayRhythmBar(summary: widget.summary),
           const SizedBox(height: AppSpacing.md),
           TodayTrackersCard(),
           const SizedBox(height: AppSpacing.sm),
@@ -62,23 +93,39 @@ class DashboardExpandedView extends StatelessWidget {
           const SizedBox(height: AppSpacing.lg),
           _DividerLabel(label: '今天由什么组成'),
           const SizedBox(height: AppSpacing.sm),
-          _CompositionCapsules(summary: summary),
+          _CompositionCapsules(summary: widget.summary),
           const SizedBox(height: AppSpacing.lg),
           _DividerLabel(label: '今日洞察'),
           const SizedBox(height: AppSpacing.sm),
-          _TodayInsights(summary: summary),
+          _TodayInsights(summary: widget.summary),
           const SizedBox(height: AppSpacing.lg),
           _DividerLabel(label: '晚间复盘'),
           const SizedBox(height: AppSpacing.sm),
-          const _EveningReviewInput(),
-          const SizedBox(height: AppSpacing.lg),
-          _DividerLabel(label: '今日日记'),
+          _JournalDateSelector(
+            today: _today,
+            availableDates: _availableDates,
+            selectedDate: _selectedDate,
+            onChanged: (date) => setState(() => _selectedDate = date),
+          ),
           const SizedBox(height: AppSpacing.sm),
-          _GenerateNoteSection(summary: summary),
+          _EveningReviewInput(date: _selectedDate, today: _today),
+          const SizedBox(height: AppSpacing.lg),
+          _DividerLabel(label: '日记'),
+          const SizedBox(height: AppSpacing.sm),
+          _GenerateNoteSection(
+            selectedDate: _selectedDate,
+            today: _today,
+            availableDates: _availableDates,
+            onDateChanged: (date) => setState(() => _selectedDate = date),
+          ),
           const SizedBox(height: AppSpacing.md),
         ],
       ),
     );
+  }
+
+  DateTime _dateOnly(DateTime date) {
+    return DateTime(date.year, date.month, date.day);
   }
 }
 
@@ -572,8 +619,41 @@ class _TodayInsights extends StatelessWidget {
 
 // ── Section 5: Evening Review Input ──
 
+class _JournalDateSelector extends StatelessWidget {
+  const _JournalDateSelector({
+    required this.today,
+    required this.availableDates,
+    required this.selectedDate,
+    required this.onChanged,
+  });
+
+  final DateTime today;
+  final List<DateTime> availableDates;
+  final DateTime selectedDate;
+  final ValueChanged<DateTime> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: AppSpacing.xs,
+      runSpacing: AppSpacing.xs,
+      children: [
+        for (final date in availableDates)
+          ChoiceChip(
+            label: Text(_relativeDateLabel(date, today)),
+            selected: _sameDate(date, selectedDate),
+            onSelected: (_) => onChanged(date),
+          ),
+      ],
+    );
+  }
+}
+
 class _EveningReviewInput extends ConsumerStatefulWidget {
-  const _EveningReviewInput();
+  const _EveningReviewInput({required this.date, required this.today});
+
+  final DateTime date;
+  final DateTime today;
 
   @override
   ConsumerState<_EveningReviewInput> createState() =>
@@ -584,8 +664,25 @@ class _EveningReviewInputState extends ConsumerState<_EveningReviewInput> {
   final _keptController = TextEditingController();
   final _adjustController = TextEditingController();
   final _nextActionController = TextEditingController();
-  bool _loaded = false;
   bool _saving = false;
+  DateTime? _loadingDate;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _EveningReviewInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_sameDate(oldWidget.date, widget.date)) {
+      _keptController.clear();
+      _adjustController.clear();
+      _nextActionController.clear();
+      _load();
+    }
+  }
 
   @override
   void dispose() {
@@ -596,55 +693,49 @@ class _EveningReviewInputState extends ConsumerState<_EveningReviewInput> {
   }
 
   Future<void> _load() async {
-    final review = await ref.read(dashboardReviewProvider.future);
+    final date = DateTime(widget.date.year, widget.date.month, widget.date.day);
+    _loadingDate = date;
+    final review = await ref
+        .read(dailyReviewsRepositoryProvider)
+        .findByDate(dateKey(date));
     if (!mounted) return;
+    if (_loadingDate != date) return;
     if (review != null) {
       _keptController.text = review['kept'] as String? ?? '';
       _adjustController.text = review['adjust'] as String? ?? '';
       _nextActionController.text = review['next_action'] as String? ?? '';
     }
-    if (mounted) setState(() => _loaded = true);
   }
 
   Future<void> _save() async {
     if (_saving) return;
     setState(() => _saving = true);
     try {
-      final today = DateTime.now();
+      final day = DateTime(
+        widget.date.year,
+        widget.date.month,
+        widget.date.day,
+      );
       final kept = _keptController.text.trim();
       final adjust = _adjustController.text.trim();
       final nextAction = _nextActionController.text.trim();
-      await ref
-          .read(dailyReviewsRepositoryProvider)
-          .upsert(
-            date: dateKey(today),
-            kept: kept,
-            adjust: adjust,
-            nextAction: nextAction,
-          );
-      var syncedNote = false;
-      Object? syncError;
-      try {
-        syncedNote = await _syncDailyNoteReview(
-          today,
-          kept: kept,
-          adjust: adjust,
-          nextAction: nextAction,
-        );
-      } catch (e) {
-        syncError = e;
-      }
-      ref.read(dataVersionProvider.notifier).increment();
+      final result = await saveDailyReviewForDate(
+        ref,
+        date: day,
+        kept: kept,
+        adjust: adjust,
+        nextAction: nextAction,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
             content: Text(
-              syncError != null
-                  ? '复盘已保存，但今日日记更新失败：$syncError'
-                  : syncedNote
-                  ? '复盘已保存，今日日记已更新'
+              result.syncError != null
+                  ? '复盘已保存，但${_relativeDateLabel(day, widget.today)}日记更新失败：${result.syncError}'
+                  : result.syncedNote
+                  ? '复盘已保存，${_relativeDateLabel(day, widget.today)}日记已更新'
                   : '复盘已保存',
             ),
             behavior: SnackBarBehavior.floating,
@@ -666,43 +757,12 @@ class _EveningReviewInputState extends ConsumerState<_EveningReviewInput> {
     }
   }
 
-  Future<bool> _syncDailyNoteReview(
-    DateTime today, {
-    required String kept,
-    required String adjust,
-    required String nextAction,
-  }) async {
-    final settings = ref.read(appSettingsRepositoryProvider);
-    final dirService = MarkdownDirectoryService(settings);
-    if (!await dirService.isConfigured()) return false;
-
-    final noteService = MarkdownNoteService(dirService);
-    final location = await noteService.findDailyNote(today);
-    if (location == null) return false;
-
-    final storage = MarkdownStorageService(dirService);
-    final raw = await storage.readTextFileLocation(location);
-    final updated = upsertDailyReviewSection(
-      raw,
-      kept: kept,
-      adjust: adjust,
-      nextAction: nextAction,
-    );
-    await storage.writeTextFileLocation(location, updated);
-    return true;
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (!_loaded) {
-      _load();
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(AppSpacing.md),
-          child: Center(child: CircularProgressIndicator()),
-        ),
-      );
-    }
+    final dayLabel = _relativeDateLabel(widget.date, widget.today);
+    final nextActionLabel = _sameDate(widget.date, widget.today)
+        ? '明天最小行动是'
+        : '下一天最小行动是';
 
     return Card(
       child: Padding(
@@ -714,15 +774,15 @@ class _EveningReviewInputState extends ConsumerState<_EveningReviewInput> {
               controller: _keptController,
               icon: Icons.thumb_up_alt_outlined,
               iconColor: AppColors.tracker,
-              question: '今天值得保留的是',
-              hint: '记录今天做得好的地方…',
+              question: '$dayLabel值得保留的是',
+              hint: '记录$dayLabel做得好的地方…',
             ),
             const SizedBox(height: AppSpacing.md),
             _ReviewField(
               controller: _adjustController,
               icon: Icons.tune_rounded,
               iconColor: AppColors.focus,
-              question: '今天可以调整的是',
+              question: '$dayLabel可以调整的是',
               hint: '哪些地方可以改进…',
             ),
             const SizedBox(height: AppSpacing.md),
@@ -730,8 +790,9 @@ class _EveningReviewInputState extends ConsumerState<_EveningReviewInput> {
               controller: _nextActionController,
               icon: Icons.lightbulb_outline_rounded,
               iconColor: AppColors.body,
-              question: '明天最小行动是',
-              hint: '明天最重要的一件事…',
+              question: nextActionLabel,
+              hint:
+                  '${_sameDate(widget.date, widget.today) ? '明天' : '下一天'}最重要的一件事…',
             ),
             const SizedBox(height: AppSpacing.md),
             Align(
@@ -835,9 +896,17 @@ class _ReviewField extends StatelessWidget {
 // ── Section 6: Generate Note ──
 
 class _GenerateNoteSection extends ConsumerStatefulWidget {
-  const _GenerateNoteSection({required this.summary});
+  const _GenerateNoteSection({
+    required this.selectedDate,
+    required this.today,
+    required this.availableDates,
+    required this.onDateChanged,
+  });
 
-  final DashboardSummary summary;
+  final DateTime selectedDate;
+  final DateTime today;
+  final List<DateTime> availableDates;
+  final ValueChanged<DateTime> onDateChanged;
 
   @override
   ConsumerState<_GenerateNoteSection> createState() =>
@@ -847,20 +916,11 @@ class _GenerateNoteSection extends ConsumerStatefulWidget {
 class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
   bool _checkingNote = true;
   bool _isGenerating = false;
-  late final DateTime _today;
-  late final List<DateTime> _availableDates;
-  late DateTime _selectedDate;
   Map<String, DailyNoteInfo> _noteInfoByDate = const {};
 
   @override
   void initState() {
     super.initState();
-    _today = _dateOnly(DateTime.now());
-    _selectedDate = _today;
-    _availableDates = List.generate(
-      3,
-      (index) => _today.subtract(Duration(days: index)),
-    );
     _loadDailyNoteState();
   }
 
@@ -871,7 +931,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
       if (mounted) {
         setState(() {
           _noteInfoByDate = {
-            for (final date in _availableDates)
+            for (final date in widget.availableDates)
               dateKey(date): DailyNoteInfo(
                 date: date,
                 status: DailyNoteStatus.missing,
@@ -884,7 +944,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     }
 
     final entries = await Future.wait(
-      _availableDates.map((date) async {
+      widget.availableDates.map((date) async {
         final info = await loadDailyNoteInfo(ref, date);
         return MapEntry(dateKey(date), info);
       }),
@@ -899,9 +959,16 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final selectedInfo = _infoFor(_selectedDate);
+    final selectedInfo = _infoFor(widget.selectedDate);
     final buttonLabel = _buttonLabel(selectedInfo);
     final pendingDraft = _pendingPastDraft();
+    final reviewAsync = ref.watch(
+      dashboardReviewForDateProvider(widget.selectedDate),
+    );
+    final isReviewed = reviewAsync.maybeWhen(
+      data: (review) => review != null,
+      orElse: () => false,
+    );
 
     return Card(
       child: Padding(
@@ -923,7 +990,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
                         ),
                       ),
                       const Spacer(),
-                      if (widget.summary.isReviewed)
+                      if (isReviewed)
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: AppSpacing.xs,
@@ -945,43 +1012,27 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
                     ],
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  Wrap(
-                    spacing: AppSpacing.xs,
-                    runSpacing: AppSpacing.xs,
-                    children: [
-                      for (final date in _availableDates)
-                        ChoiceChip(
-                          label: Text(_dateLabel(date)),
-                          selected: _sameDate(date, _selectedDate),
-                          onSelected: _isGenerating
-                              ? null
-                              : (_) => setState(() => _selectedDate = date),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
                   if (pendingDraft != null &&
-                      !_sameDate(pendingDraft.date, _selectedDate)) ...[
+                      !_sameDate(pendingDraft.date, widget.selectedDate)) ...[
                     _NoteHintBanner(
                       icon: Icons.edit_calendar_rounded,
-                      text: '${_dateLabel(pendingDraft.date)}还有日记草稿未生成最终稿。',
+                      text:
+                          '${_relativeDateLabel(pendingDraft.date, widget.today)}还有日记草稿未生成最终稿。',
                       actionLabel: '继续补写',
                       onPressed: _isGenerating
                           ? null
-                          : () => setState(
-                              () => _selectedDate = pendingDraft.date,
-                            ),
+                          : () => widget.onDateChanged(pendingDraft.date),
                     ),
                     const SizedBox(height: AppSpacing.sm),
                   ],
-                  if (!_sameDate(_selectedDate, _today)) ...[
+                  if (!_sameDate(widget.selectedDate, widget.today)) ...[
                     _NoteHintBanner(
                       icon: Icons.schedule_rounded,
-                      text: '当前内容会保存到 ${dateKey(_selectedDate)}，跨天后也不会丢。',
+                      text: '当前内容会保存到 ${dateKey(widget.selectedDate)}，跨天后也不会丢。',
                       actionLabel: '改存今天',
                       onPressed: _isGenerating
                           ? null
-                          : () => setState(() => _selectedDate = _today),
+                          : () => widget.onDateChanged(widget.today),
                     ),
                     const SizedBox(height: AppSpacing.sm),
                   ],
@@ -1066,7 +1117,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     }
 
     final noteService = MarkdownNoteService(dirService);
-    final date = _selectedDate;
+    final date = widget.selectedDate;
     final existingLocation = await noteService.findDailyNote(date);
     if (!context.mounted) return;
     if (existingLocation != null) {
@@ -1153,6 +1204,11 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     final results = await Future.wait([summaryAsync, reviewAsync]);
     final summary = results[0] as DashboardSummary;
     final review = results[1] as Map<String, Object?>?;
+    final now = DateTime.now();
+    final isToday = _sameDate(day, DateTime(now.year, now.month, now.day));
+    final dayLabel = isToday ? '今天' : '这一天';
+    final sectionPrefix = isToday ? '今日' : '当日';
+    final nextActionTitle = isToday ? '明天最小行动是' : '下一天最小行动是';
 
     final buf = StringBuffer();
 
@@ -1163,7 +1219,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     buf.writeln('source: liflow');
     buf.writeln('version: 1');
     buf.writeln('status: final');
-    buf.writeln('generated_at: ${DateTime.now().toIso8601String()}');
+    buf.writeln('generated_at: ${now.toIso8601String()}');
     buf.writeln('record_count: ${summary.recordCount}');
     buf.writeln('todo_completed: ${summary.completedTodos}');
     buf.writeln('todo_total: ${summary.totalTodos}');
@@ -1178,10 +1234,10 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     buf.writeln();
     buf.writeln('# ${summary.date} 日记');
     buf.writeln();
-    buf.writeln('## 今日概览');
+    buf.writeln('## $sectionPrefix概览');
     buf.writeln();
     final statusBuf = StringBuffer();
-    statusBuf.write('今天留下了 ${summary.recordCount} 条记录');
+    statusBuf.write('$dayLabel留下了 ${summary.recordCount} 条记录');
     if (summary.totalTodos > 0) {
       statusBuf.write(
         '，完成 ${summary.completedTodos}/${summary.totalTodos} 个待办',
@@ -1201,7 +1257,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     statusBuf.write('。');
     buf.writeln(statusBuf.toString());
     buf.writeln();
-    buf.writeln('## 今日节奏');
+    buf.writeln('## $sectionPrefix节奏');
     buf.writeln();
     final firstTime = summary.firstActivityTime != null
         ? _fmtMs(summary.firstActivityTime!)
@@ -1220,7 +1276,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     final entries = summary.categoryCounts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
     if (entries.isNotEmpty) {
-      buf.writeln('## 今天由什么组成');
+      buf.writeln('## ${isToday ? '今天' : '这一天'}由什么组成');
       buf.writeln();
       for (final entry in entries) {
         buf.writeln('- ${entry.key}：${entry.value}');
@@ -1229,7 +1285,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     }
 
     if (summary.insights.isNotEmpty) {
-      buf.writeln('## 今日洞察');
+      buf.writeln('## $sectionPrefix洞察');
       buf.writeln();
       for (final insight in summary.insights) {
         buf.writeln('- $insight');
@@ -1239,15 +1295,15 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
 
     buf.writeln('## 晚间复盘');
     buf.writeln();
-    buf.writeln('### 今天值得保留的是');
+    buf.writeln('### $dayLabel值得保留的是');
     buf.writeln();
     buf.writeln(review?['kept'] as String? ?? '...');
     buf.writeln();
-    buf.writeln('### 今天可以调整的是');
+    buf.writeln('### $dayLabel可以调整的是');
     buf.writeln();
     buf.writeln(review?['adjust'] as String? ?? '...');
     buf.writeln();
-    buf.writeln('### 明天最小行动是');
+    buf.writeln('### $nextActionTitle');
     buf.writeln();
     buf.writeln(review?['next_action'] as String? ?? '...');
     buf.writeln();
@@ -1271,7 +1327,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
   }
 
   DailyNoteInfo? _pendingPastDraft() {
-    for (final date in _availableDates.skip(1)) {
+    for (final date in widget.availableDates.skip(1)) {
       final info = _infoFor(date);
       if (info.isDraft) return info;
     }
@@ -1299,21 +1355,6 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
       DailyNoteStatus.draft => Icons.edit_calendar_rounded,
       DailyNoteStatus.finalNote => Icons.check_circle_outline_rounded,
     };
-  }
-
-  String _dateLabel(DateTime date) {
-    if (_sameDate(date, _today)) return '今天';
-    if (_sameDate(date, _today.subtract(const Duration(days: 1)))) {
-      return '昨天';
-    }
-    if (_sameDate(date, _today.subtract(const Duration(days: 2)))) {
-      return '前天';
-    }
-    return dateKey(date);
-  }
-
-  bool _sameDate(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
   DateTime _dateOnly(DateTime date) {

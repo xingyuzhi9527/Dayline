@@ -75,6 +75,7 @@ class _MarkdownDirectoryDialogState extends State<_MarkdownDirectoryDialog> {
               'Liflow 会把日常记录和长笔记保存成 Markdown。默认结构是：\n'
               'Liflow/daily/年月/日期.md\n'
               'Liflow/notes/年月/时间_标题.md\n'
+              'Liflow/projects/项目-ID/notes/时间_标题.md\n'
               'Liflow/documents/导入的文档',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: AppColors.ink,

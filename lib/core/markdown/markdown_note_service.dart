@@ -3,6 +3,7 @@ import 'package:path/path.dart' as p;
 import 'markdown_directory_service.dart';
 import 'markdown_filename.dart';
 import 'markdown_storage_service.dart';
+import 'project_markdown_paths.dart';
 
 class MarkdownNoteService {
   MarkdownNoteService(this._dirService)
@@ -59,6 +60,8 @@ class MarkdownNoteService {
     required String? title,
     required String body,
     required DateTime dateTime,
+    String? projectId,
+    String? projectName,
   }) async {
     final filename = MarkdownFilename.generate(
       dateTime,
@@ -75,13 +78,25 @@ class MarkdownNoteService {
       type: 'note',
       title: resolvedTitle,
       dateTime: dateTime,
+      projectId: projectId,
+      projectName: projectName,
     );
     final content = '$front\n# $resolvedTitle\n\n$body\n';
-    final relativePath = p.posix.join(
-      'notes',
-      MarkdownFilename.monthDir(dateTime),
-      filename,
-    );
+    final relativePath =
+        projectId != null &&
+            projectId.trim().isNotEmpty &&
+            projectName != null &&
+            projectName.trim().isNotEmpty
+        ? ProjectMarkdownPaths.projectLongNote(
+            projectId: projectId,
+            projectName: projectName,
+            dateTime: dateTime,
+            filename: filename,
+          )
+        : ProjectMarkdownPaths.normalLongNote(
+            dateTime: dateTime,
+            filename: filename,
+          );
     return _storage.writeRelativeTextFile(
       relativePath: relativePath,
       content: content,
@@ -92,15 +107,24 @@ class MarkdownNoteService {
     required String type,
     required String title,
     required DateTime dateTime,
+    String? projectId,
+    String? projectName,
   }) {
     final iso = dateTime.toIso8601String();
+    final hasProject =
+        projectId != null &&
+        projectId.trim().isNotEmpty &&
+        projectName != null &&
+        projectName.trim().isNotEmpty;
     return '---\n'
         'type: $type\n'
         'source: liflow\n'
         'created_at: $iso\n'
         'updated_at: $iso\n'
         'title: $title\n'
-        'tags: []\n'
+        '${hasProject ? 'project_id: ${ProjectMarkdownPaths.yamlString(projectId.trim())}\n' : ''}'
+        '${hasProject ? 'project_name: ${ProjectMarkdownPaths.yamlString(projectName.trim())}\n' : ''}'
+        'tags: ${hasProject ? '[项目, ${ProjectMarkdownPaths.yamlString(projectName.trim())}]' : '[]'}\n'
         '---\n';
   }
 

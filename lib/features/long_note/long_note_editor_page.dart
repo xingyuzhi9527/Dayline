@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,6 +9,7 @@ import '../../core/markdown/markdown_filename.dart';
 import '../../core/markdown/markdown_storage_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
+import '../projects/project_store.dart';
 import 'long_note_notifier.dart';
 import 'widgets/markdown_toolbar.dart';
 
@@ -14,6 +17,7 @@ class LongNoteEditorPage extends ConsumerStatefulWidget {
   const LongNoteEditorPage({
     this.initialTitle,
     this.initialBody,
+    this.initialProjectId,
     this.existingPath,
     this.recordId,
     super.key,
@@ -21,6 +25,7 @@ class LongNoteEditorPage extends ConsumerStatefulWidget {
 
   final String? initialTitle;
   final String? initialBody;
+  final String? initialProjectId;
   final String? existingPath;
   final int? recordId;
 
@@ -33,6 +38,7 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
   final _bodyController = TextEditingController();
   bool _isEditMode = false;
   bool _saving = false;
+  String? _selectedProjectId;
 
   @override
   void initState() {
@@ -44,6 +50,7 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
     if (widget.initialBody != null) {
       _bodyController.text = widget.initialBody!;
     }
+    _selectedProjectId = widget.initialProjectId;
   }
 
   @override
@@ -60,29 +67,62 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
     if (_isEditMode && widget.existingPath != null) {
       try {
         final now = DateTime.now();
+        final record = widget.recordId == null
+            ? null
+            : await ref
+                  .read(recordsRepositoryProvider)
+                  .findById(widget.recordId!);
+        final existingMetadata = _decodeMetadata(record?['metadata']);
+        final existingTags = _decodeTags(record?['tags']);
+        final projectId =
+            existingMetadata['projectId'] as String? ?? widget.initialProjectId;
+        final projectName = existingMetadata['projectName'] as String?;
         final title = _titleController.text.trim().isNotEmpty
             ? _titleController.text.trim()
             : '${now.year}-${_pad(now.month)}-${_pad(now.day)} ${_pad(now.hour)}:${_pad(now.minute)}';
-        final content = _buildContent(title, now);
+        final content = _buildContent(
+          title,
+          now,
+          projectId: projectId,
+          projectName: projectName,
+        );
         final settings = ref.read(appSettingsRepositoryProvider);
         final storage = MarkdownStorageService(
           MarkdownDirectoryService(settings),
         );
         await storage.writeTextFileLocation(widget.existingPath!, content);
         if (widget.recordId != null) {
+          final nextMetadata = {
+            ...existingMetadata,
+            'path': widget.existingPath!,
+            'title': title,
+            'displayPath': MarkdownStorageService.displayPathForLocation(
+              widget.existingPath!,
+            ),
+            if (projectId != null && projectName != null) ...{
+              'projectId': projectId,
+              'projectName': projectName,
+              'projectEntryType': 'long_note',
+            },
+          };
           await ref
               .read(recordsRepositoryProvider)
               .updateDetails(
                 widget.recordId!,
                 content: title,
-                metadata: {
-                  'path': widget.existingPath!,
-                  'title': title,
-                  'displayPath': MarkdownStorageService.displayPathForLocation(
-                    widget.existingPath!,
-                  ),
-                },
+                tags: existingTags,
+                metadata: nextMetadata,
               );
+          if (projectId != null) {
+            await updateProjectLongNoteTitle(
+              ref,
+              projectId: projectId,
+              title: title,
+              path: widget.existingPath!,
+              recordId: widget.recordId,
+              updatedAt: now,
+            );
+          }
           ref.read(dataVersionProvider.notifier).increment();
         }
         if (!mounted) return;
@@ -111,10 +151,13 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
       return;
     }
 
+    final projects = await ref.read(projectOptionsProvider.future);
+    final project = _selectedProject(projects);
     final notifier = ref.read(longNoteProvider.notifier);
     final saved = await notifier.save(
       _titleController.text,
       _bodyController.text,
+      project: project,
     );
     if (!mounted) return;
 
@@ -185,6 +228,8 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
 
   @override
   Widget build(BuildContext context) {
+    final projects = ref.watch(projectOptionsProvider);
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
@@ -250,6 +295,25 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
               ),
             ),
             const SizedBox(height: AppSpacing.xs),
+            if (!_isEditMode)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  0,
+                  AppSpacing.md,
+                  AppSpacing.sm,
+                ),
+                child: projects.when(
+                  data: (items) => _ProjectPicker(
+                    projects: items,
+                    selectedProjectId: _selectedProjectId,
+                    onChanged: (value) =>
+                        setState(() => _selectedProjectId = value),
+                  ),
+                  loading: () => const LinearProgressIndicator(minHeight: 2),
+                  error: (_, _) => const SizedBox.shrink(),
+                ),
+              ),
             MarkdownToolbar(controller: _bodyController),
             const Divider(height: 1),
             Expanded(
@@ -308,16 +372,58 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
     );
   }
 
-  String _buildContent(String title, DateTime now) {
+  ProjectOption? _selectedProject(List<ProjectOption> projects) {
+    final selectedId = _selectedProjectId;
+    if (selectedId == null || selectedId.isEmpty) return null;
+    for (final project in projects) {
+      if (project.id == selectedId) return project;
+    }
+    return null;
+  }
+
+  Map<String, Object?> _decodeMetadata(Object? raw) {
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) return decoded.cast<String, Object?>();
+      } catch (_) {}
+    }
+    if (raw is Map) return raw.cast<String, Object?>();
+    return const {};
+  }
+
+  List<String> _decodeTags(Object? raw) {
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) return decoded.whereType<String>().toList();
+      } catch (_) {}
+    }
+    return const [];
+  }
+
+  String _buildContent(
+    String title,
+    DateTime now, {
+    String? projectId,
+    String? projectName,
+  }) {
     final iso = now.toIso8601String();
     final body = _bodyController.text;
+    final hasProject =
+        projectId != null &&
+        projectId.trim().isNotEmpty &&
+        projectName != null &&
+        projectName.trim().isNotEmpty;
     return '---\n'
         'type: note\n'
         'source: liflow\n'
         'created_at: $iso\n'
         'updated_at: $iso\n'
         'title: $title\n'
-        'tags: []\n'
+        '${hasProject ? 'project_id: ${jsonEncode(projectId.trim())}\n' : ''}'
+        '${hasProject ? 'project_name: ${jsonEncode(projectName.trim())}\n' : ''}'
+        'tags: ${hasProject ? '[项目, ${jsonEncode(projectName.trim())}]' : '[]'}\n'
         '---\n'
         '\n'
         '# $title\n'
@@ -326,4 +432,49 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
   }
 
   String _pad(int n) => n.toString().padLeft(2, '0');
+}
+
+class _ProjectPicker extends StatelessWidget {
+  const _ProjectPicker({
+    required this.projects,
+    required this.selectedProjectId,
+    required this.onChanged,
+  });
+
+  final List<ProjectOption> projects;
+  final String? selectedProjectId;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    if (projects.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return DropdownButtonFormField<String>(
+      key: const ValueKey('long-note-project-field'),
+      initialValue: selectedProjectId ?? '',
+      isExpanded: true,
+      decoration: const InputDecoration(
+        labelText: '归属项目',
+        prefixIcon: Icon(Icons.folder_open_rounded),
+        border: OutlineInputBorder(),
+        isDense: true,
+      ),
+      items: [
+        const DropdownMenuItem<String>(value: '', child: Text('不归属项目')),
+        for (final project in projects)
+          DropdownMenuItem<String>(
+            value: project.id,
+            child: Text(
+              project.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+      ],
+      onChanged: (value) =>
+          onChanged(value == null || value.isEmpty ? null : value),
+    );
+  }
 }

@@ -13,14 +13,16 @@ class LongNoteReaderPage extends ConsumerStatefulWidget {
     required this.title,
     required this.filePath,
     required this.body,
-    required this.recordId,
+    this.recordId,
+    this.projectId,
     super.key,
   });
 
   final String title;
   final String filePath;
   final String body;
-  final int recordId;
+  final int? recordId;
+  final String? projectId;
 
   @override
   ConsumerState<LongNoteReaderPage> createState() => _LongNoteReaderPageState();
@@ -73,6 +75,7 @@ class _LongNoteReaderPageState extends ConsumerState<LongNoteReaderPage> {
           initialBody: _body,
           existingPath: widget.filePath,
           recordId: widget.recordId,
+          initialProjectId: widget.projectId,
         ),
       ),
     );
