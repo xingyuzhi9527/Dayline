@@ -18,14 +18,27 @@ class ProjectsPage extends ConsumerStatefulWidget {
 
 class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   var _projects = <_ProjectInfo>[];
-  var _selectedIndex = 0;
+  var _projectRecordHeatEntries = <_ProjectHeatEntry>[];
+  String? _selectedProjectId;
+  var _completedExpanded = false;
   var _loading = true;
   var _saving = false;
 
   _ProjectInfo? get _selectedProject {
-    if (_projects.isEmpty) return null;
-    return _projects[_selectedIndex.clamp(0, _projects.length - 1)];
+    final selectedId = _selectedProjectId;
+    if (selectedId != null) {
+      final selected = _projectById(selectedId);
+      if (selected != null) return selected;
+    }
+    return _firstProject(_activeProjects) ??
+        (_completedExpanded ? _firstProject(_completedProjects) : null);
   }
+
+  List<_ProjectInfo> get _activeProjects =>
+      _projects.where((project) => project.isActiveForDaily).toList();
+
+  List<_ProjectInfo> get _completedProjects =>
+      _projects.where((project) => project.isCompleted).toList();
 
   @override
   void initState() {
@@ -36,13 +49,18 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   Future<void> _loadProjects() async {
     final settings = ref.read(appSettingsRepositoryProvider);
     final row = await settings.findByKey(projectsSettingsKey);
+    final projects = _decodeProjects(row?['value'] as String?);
+    final projectRecordHeatEntries = await _loadProjectRecordHeatEntries(
+      projects,
+    );
     if (!mounted) return;
 
     setState(() {
-      _projects = _decodeProjects(row?['value'] as String?);
-      _selectedIndex = _projects.isEmpty
-          ? 0
-          : _selectedIndex.clamp(0, _projects.length - 1);
+      _projects = projects;
+      _projectRecordHeatEntries = projectRecordHeatEntries;
+      _selectedProjectId =
+          _projectById(_selectedProjectId ?? '')?.id ??
+          _firstProject(_activeProjects)?.id;
       _loading = false;
     });
   }
@@ -83,7 +101,10 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       (project) => project.id == selectedId,
     );
     if (nextIndex >= 0) {
-      setState(() => _selectedIndex = nextIndex);
+      setState(() {
+        _selectedProjectId = _projects[nextIndex].id;
+        if (_projects[nextIndex].isCompleted) _completedExpanded = true;
+      });
     }
   }
 
@@ -121,7 +142,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     final nextProjects = [..._projects, project];
     setState(() {
       _projects = nextProjects;
-      _selectedIndex = nextProjects.length - 1;
+      _selectedProjectId = project.id;
     });
     await _saveProjects(nextProjects);
     await _syncProjectArchive(
@@ -132,6 +153,57 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         createdAt: now,
       ),
       entryAsMajor: true,
+    );
+  }
+
+  Future<void> _openEditProject(_ProjectInfo project) async {
+    final draft = await showModalBottomSheet<_ProjectEditDraft>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _EditProjectSheet(project: project),
+    );
+    if (draft == null || !mounted) return;
+
+    final name = draft.name.trim();
+    final status = draft.archiveRequested ? '归档' : draft.status.trim();
+    if (name.isEmpty || (name == project.name && status == project.status)) {
+      return;
+    }
+
+    final now = DateTime.now();
+    final updatedProject = project.updateBasics(
+      name: name,
+      status: status,
+      updatedAt: now,
+    );
+    final nextProjects = [
+      for (final item in _projects)
+        if (item.id == project.id) updatedProject else item,
+    ];
+    setState(() {
+      _projects = nextProjects;
+      if (status == '归档' || status == '完成') {
+        _completedExpanded = false;
+        _selectedProjectId = _firstProject(_activeProjects)?.id;
+      } else {
+        _selectedProjectId = updatedProject.id;
+      }
+      _projectRecordHeatEntries = _projectRecordHeatEntries
+          .map(
+            (entry) => entry.projectName == project.name
+                ? entry.copyWith(projectName: name)
+                : entry,
+          )
+          .toList();
+    });
+    await _saveProjects(nextProjects);
+    await _syncProjectArchive(
+      updatedProject,
+      entry: ProjectArchiveEntry(
+        text: _projectStatusChangeText(project, name, status),
+        source: '项目',
+        createdAt: now,
+      ),
     );
   }
 
@@ -352,6 +424,61 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     return null;
   }
 
+  void _toggleCompletedStack() {
+    setState(() {
+      _completedExpanded = !_completedExpanded;
+      final selected = _selectedProject;
+      if (!_completedExpanded && (selected?.isCompleted ?? false)) {
+        _selectedProjectId = _firstProject(_activeProjects)?.id;
+      } else if (_completedExpanded && selected == null) {
+        _selectedProjectId = _firstProject(_completedProjects)?.id;
+      }
+    });
+  }
+
+  Future<List<_ProjectHeatEntry>> _loadProjectRecordHeatEntries(
+    List<_ProjectInfo> projects,
+  ) async {
+    if (projects.isEmpty) return const [];
+
+    final projectNames = {
+      for (final project in projects) project.id: project.name,
+    };
+    final records = ref.read(recordsRepositoryProvider);
+    final today = _dateOnly(DateTime.now());
+    final startDate = _heatmapStartDate(today);
+    final entries = <_ProjectHeatEntry>[];
+
+    for (var offset = 0; offset < 84; offset++) {
+      final date = startDate.add(Duration(days: offset));
+      if (date.isAfter(today)) break;
+
+      final rows = await records.findByDate(date);
+      for (final row in rows) {
+        final metadata = _decodeMetadata(row['metadata']);
+        if (metadata['projectEntryType'] != 'update') continue;
+
+        final projectId = metadata['projectId'] as String?;
+        if (projectId == null || !projectNames.containsKey(projectId)) {
+          continue;
+        }
+
+        final createdAtMillis = row['created_at'] as int?;
+        entries.add(
+          _ProjectHeatEntry(
+            projectName: projectNames[projectId]!,
+            source: '文本记录',
+            text: row['content'] as String? ?? '',
+            createdAt: createdAtMillis == null
+                ? date
+                : DateTime.fromMillisecondsSinceEpoch(createdAtMillis),
+          ),
+        );
+      }
+    }
+    return entries;
+  }
+
   Future<void> _createProjectTimelineRecord({
     required _ProjectInfo project,
     required String content,
@@ -378,6 +505,8 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   @override
   Widget build(BuildContext context) {
     final project = _selectedProject;
+    final activeProjects = _activeProjects;
+    final completedProjects = _completedProjects;
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -403,10 +532,14 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                   else ...[
                     SliverToBoxAdapter(
                       child: _ProjectCardCarousel(
-                        projects: _projects,
-                        selectedIndex: _selectedIndex,
-                        onSelected: (index) =>
-                            setState(() => _selectedIndex = index),
+                        activeProjects: activeProjects,
+                        completedProjects: completedProjects,
+                        completedExpanded: _completedExpanded,
+                        selectedProjectId: project?.id,
+                        onSelected: (project) =>
+                            setState(() => _selectedProjectId = project.id),
+                        onEdit: _openEditProject,
+                        onToggleCompleted: _toggleCompletedStack,
                       ),
                     ),
                     SliverPadding(
@@ -421,21 +554,31 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                           if (project != null) ...[
                             _CurrentProjectHint(project: project),
                             const SizedBox(height: AppSpacing.md),
-                            _TodoSection(
-                              project: project,
-                              onToggle: _toggleTodo,
-                              onAddTodo: _openAddTodo,
-                              onEditTodo: _openEditTodo,
-                            ),
-                            const SizedBox(height: AppSpacing.md),
-                            _UpdatesSection(
-                              project: project,
-                              onAddUpdate: _openAddUpdate,
-                              onSaveArchive: _saveArchiveSnapshot,
-                            ),
+                            if (project.isArchived)
+                              _ArchivedProjectNotice(
+                                project: project,
+                                onEdit: () => _openEditProject(project),
+                              )
+                            else ...[
+                              _TodoSection(
+                                project: project,
+                                onToggle: _toggleTodo,
+                                onAddTodo: _openAddTodo,
+                                onEditTodo: _openEditTodo,
+                              ),
+                              const SizedBox(height: AppSpacing.md),
+                              _UpdatesSection(
+                                project: project,
+                                onAddUpdate: _openAddUpdate,
+                                onSaveArchive: _saveArchiveSnapshot,
+                              ),
+                            ],
                             const SizedBox(height: AppSpacing.md),
                           ],
-                          _HeatmapSection(projects: _projects),
+                          _HeatmapSection(
+                            projects: _projects,
+                            recordEntries: _projectRecordHeatEntries,
+                          ),
                         ],
                       ),
                     ),
@@ -559,31 +702,59 @@ class _EmptyProjects extends StatelessWidget {
 
 class _ProjectCardCarousel extends StatelessWidget {
   const _ProjectCardCarousel({
-    required this.projects,
-    required this.selectedIndex,
+    required this.activeProjects,
+    required this.completedProjects,
+    required this.completedExpanded,
+    required this.selectedProjectId,
     required this.onSelected,
+    required this.onEdit,
+    required this.onToggleCompleted,
   });
 
-  final List<_ProjectInfo> projects;
-  final int selectedIndex;
-  final ValueChanged<int> onSelected;
+  final List<_ProjectInfo> activeProjects;
+  final List<_ProjectInfo> completedProjects;
+  final bool completedExpanded;
+  final String? selectedProjectId;
+  final ValueChanged<_ProjectInfo> onSelected;
+  final ValueChanged<_ProjectInfo> onEdit;
+  final VoidCallback onToggleCompleted;
 
   @override
   Widget build(BuildContext context) {
+    final cards = [
+      ...activeProjects.map<_ProjectShelfItem>(_ProjectShelfCard.new),
+      if (completedProjects.isNotEmpty)
+        if (completedExpanded) ...[
+          ...completedProjects.map<_ProjectShelfItem>(_ProjectShelfCard.new),
+          _ProjectShelfStack(completedProjects),
+        ] else
+          _ProjectShelfStack(completedProjects),
+    ];
+
     return SizedBox(
-      height: 142,
+      height: 150,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.containerMargin,
         ),
         scrollDirection: Axis.horizontal,
-        itemCount: projects.length,
+        itemCount: cards.length,
         separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
         itemBuilder: (context, index) {
+          final item = cards[index];
+          if (item is _ProjectShelfStack) {
+            return _CompletedProjectsStack(
+              projects: item.projects,
+              expanded: completedExpanded,
+              onTap: onToggleCompleted,
+            );
+          }
+          final project = (item as _ProjectShelfCard).project;
           return _ProjectCard(
-            project: projects[index],
-            selected: index == selectedIndex,
-            onTap: () => onSelected(index),
+            project: project,
+            selected: project.id == selectedProjectId,
+            onTap: () => onSelected(project),
+            onEdit: () => onEdit(project),
           );
         },
       ),
@@ -591,16 +762,34 @@ class _ProjectCardCarousel extends StatelessWidget {
   }
 }
 
+sealed class _ProjectShelfItem {
+  const _ProjectShelfItem();
+}
+
+class _ProjectShelfCard extends _ProjectShelfItem {
+  const _ProjectShelfCard(this.project);
+
+  final _ProjectInfo project;
+}
+
+class _ProjectShelfStack extends _ProjectShelfItem {
+  const _ProjectShelfStack(this.projects);
+
+  final List<_ProjectInfo> projects;
+}
+
 class _ProjectCard extends StatelessWidget {
   const _ProjectCard({
     required this.project,
     required this.selected,
     required this.onTap,
+    required this.onEdit,
   });
 
   final _ProjectInfo project;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -617,7 +806,7 @@ class _ProjectCard extends StatelessWidget {
           onTap: onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            width: selected ? 188 : 164,
+            width: selected ? 204 : 178,
             padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
               color: selected ? AppColors.surface : AppColors.surfaceLow,
@@ -652,7 +841,7 @@ class _ProjectCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    _StatusPill(status: project.status),
+                    _StatusEditPill(status: project.status, onEdit: onEdit),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.sm),
@@ -692,6 +881,126 @@ class _ProjectCard extends StatelessWidget {
   }
 }
 
+class _CompletedProjectsStack extends StatelessWidget {
+  const _CompletedProjectsStack({
+    required this.projects,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  final List<_ProjectInfo> projects;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final topProject = projects.first;
+
+    return Semantics(
+      button: true,
+      label: expanded ? '收起已完成项目' : '展开已完成项目',
+      child: SizedBox(
+        width: 154,
+        height: 150,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              left: 10,
+              top: 14,
+              right: 0,
+              bottom: 4,
+              child: _StackPaperLayer(alpha: 150),
+            ),
+            Positioned(
+              left: 5,
+              top: 8,
+              right: 5,
+              bottom: 10,
+              child: _StackPaperLayer(alpha: 190),
+            ),
+            Positioned.fill(
+              child: Material(
+                color: AppColors.surface,
+                elevation: 2,
+                shadowColor: AppColors.softShadow,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: onTap,
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.auto_stories_rounded,
+                              size: 18,
+                              color: AppColors.tracker,
+                            ),
+                            const Spacer(),
+                            _StatusPill(status: '完成'),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          expanded ? '收起完成' : '已完成',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: AppColors.ink,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          expanded ? '放回纸堆' : '${projects.length} 个项目',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: AppColors.muted,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          topProject.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StackPaperLayer extends StatelessWidget {
+  const _StackPaperLayer({required this.alpha});
+
+  final int alpha;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLow.withAlpha(alpha),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border.withAlpha(180)),
+      ),
+    );
+  }
+}
+
 class _CurrentProjectHint extends StatelessWidget {
   const _CurrentProjectHint({required this.project});
 
@@ -720,6 +1029,41 @@ class _CurrentProjectHint extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ArchivedProjectNotice extends StatelessWidget {
+  const _ArchivedProjectNotice({required this.project, required this.onEdit});
+
+  final _ProjectInfo project;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return _SectionCard(
+      title: '归档项目',
+      trailing: '已收起',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${project.name} 已收进归档，日常项目区不会再显示它。',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: AppColors.muted,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          OutlinedButton.icon(
+            onPressed: onEdit,
+            icon: const Icon(Icons.unarchive_rounded, size: 18),
+            label: const Text('恢复项目'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1016,9 +1360,10 @@ class _UpdateRow extends StatelessWidget {
 }
 
 class _HeatmapSection extends StatefulWidget {
-  const _HeatmapSection({required this.projects});
+  const _HeatmapSection({required this.projects, required this.recordEntries});
 
   final List<_ProjectInfo> projects;
+  final List<_ProjectHeatEntry> recordEntries;
 
   @override
   State<_HeatmapSection> createState() => _HeatmapSectionState();
@@ -1031,11 +1376,13 @@ class _HeatmapSectionState extends State<_HeatmapSection> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final today = _dateOnly(DateTime.now());
-    final currentWeekStart = today.subtract(
-      Duration(days: today.weekday - DateTime.monday),
+    final startDate = _heatmapStartDate(today);
+    final dayEntries = _buildDayEntries(
+      widget.projects,
+      widget.recordEntries,
+      startDate,
+      today,
     );
-    final startDate = currentWeekStart.subtract(const Duration(days: 77));
-    final dayEntries = _buildDayEntries(widget.projects, startDate, today);
     final selectedDate = _selectedDate;
     final selectedEntries = selectedDate == null
         ? const <_ProjectHeatEntry>[]
@@ -1211,7 +1558,7 @@ class _SelectedDayProjectEntries extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
                 child: Text(
-                  '${entry.projectName}：${entry.text}',
+                  '${entry.source} · ${entry.projectName}：${entry.text}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
@@ -1229,37 +1576,63 @@ class _SelectedDayProjectEntries extends StatelessWidget {
 class _ProjectHeatEntry {
   const _ProjectHeatEntry({
     required this.projectName,
+    required this.source,
     required this.text,
     required this.createdAt,
   });
 
   final String projectName;
+  final String source;
   final String text;
   final DateTime createdAt;
+
+  _ProjectHeatEntry copyWith({String? projectName}) {
+    return _ProjectHeatEntry(
+      projectName: projectName ?? this.projectName,
+      source: source,
+      text: text,
+      createdAt: createdAt,
+    );
+  }
 }
 
 Map<String, List<_ProjectHeatEntry>> _buildDayEntries(
   List<_ProjectInfo> projects,
+  List<_ProjectHeatEntry> recordEntries,
   DateTime startDate,
   DateTime today,
 ) {
   final result = <String, List<_ProjectHeatEntry>>{};
+  final seen = <String>{};
+
+  void addEntry(_ProjectHeatEntry entry) {
+    final date = _dateOnly(entry.createdAt);
+    if (date.isBefore(startDate) || date.isAfter(today)) return;
+
+    final key =
+        '${_dateKey(date)}|${entry.projectName}|${entry.source}|${entry.text}';
+    if (!seen.add(key)) return;
+
+    result.putIfAbsent(_dateKey(date), () => []).add(entry);
+  }
+
   for (final project in projects) {
     for (final update in project.updates) {
       final date = _dateOnly(
         DateTime.fromMillisecondsSinceEpoch(update.createdAt),
       );
-      if (date.isBefore(startDate) || date.isAfter(today)) continue;
-      result
-          .putIfAbsent(_dateKey(date), () => [])
-          .add(
-            _ProjectHeatEntry(
-              projectName: project.name,
-              text: update.text,
-              createdAt: date,
-            ),
-          );
+      addEntry(
+        _ProjectHeatEntry(
+          projectName: project.name,
+          source: update.source,
+          text: update.text,
+          createdAt: date,
+        ),
+      );
     }
+  }
+  for (final entry in recordEntries) {
+    addEntry(entry);
   }
   return result;
 }
@@ -1409,8 +1782,8 @@ class _AllProjectsPageState extends State<_AllProjectsPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final visibleProjects = widget.projects.where((project) {
-      if (_filter == '全部项目') return true;
-      if (_filter == '归档') return false;
+      if (_filter == '全部项目') return !project.isArchived;
+      if (_filter == '归档') return project.isArchived;
       return project.status == _filter;
     }).toList();
 
@@ -1446,7 +1819,7 @@ class _AllProjectsPageState extends State<_AllProjectsPage> {
               spacing: AppSpacing.xs,
               runSpacing: AppSpacing.xs,
               children: [
-                for (final label in ['全部项目', '进行中', '暂停', '完成', '归档'])
+                for (final label in ['全部项目', ..._projectStatuses, '归档'])
                   ChoiceChip(
                     label: Text(label),
                     selected: _filter == label,
@@ -1650,6 +2023,147 @@ class _ProjectTextEntrySheetState extends State<_ProjectTextEntrySheet> {
   }
 }
 
+class _EditProjectSheet extends StatefulWidget {
+  const _EditProjectSheet({required this.project});
+
+  final _ProjectInfo project;
+
+  @override
+  State<_EditProjectSheet> createState() => _EditProjectSheetState();
+}
+
+class _EditProjectSheetState extends State<_EditProjectSheet> {
+  late final TextEditingController _nameController;
+  late String _status;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.project.name);
+    _status = widget.project.isArchived ? '暂停' : widget.project.status;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _errorText = '项目名称不能为空。');
+      return;
+    }
+    Navigator.of(context).pop(_ProjectEditDraft(name: name, status: _status));
+  }
+
+  void _archive() {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _errorText = '项目名称不能为空。');
+      return;
+    }
+    Navigator.of(context).pop(
+      _ProjectEditDraft(name: name, status: _status, archiveRequested: true),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.containerMargin,
+          AppSpacing.lg,
+          AppSpacing.containerMargin,
+          AppSpacing.lg + bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '编辑项目',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: AppColors.ink,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xxs),
+            Text(
+              widget.project.isArchived
+                  ? '保存后会从归档恢复到日常项目。'
+                  : '名称和状态会同步到项目总览与 Markdown 档案。',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppColors.muted,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            _ProjectTextField(
+              controller: _nameController,
+              label: '项目名称',
+              hintText: '例如：做 Dayline',
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              '当前状态',
+              style: theme.textTheme.labelLarge?.copyWith(color: AppColors.ink),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              children: [
+                for (final status in _projectStatuses)
+                  ChoiceChip(
+                    label: Text(status),
+                    selected: _status == status,
+                    onSelected: (_) => setState(() => _status = status),
+                  ),
+              ],
+            ),
+            if (_errorText != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                _errorText!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: AppColors.accent,
+                ),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.lg),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _submit,
+                icon: const Icon(Icons.check_rounded),
+                label: Text(widget.project.isArchived ? '恢复项目' : '保存修改'),
+              ),
+            ),
+            if (!widget.project.isArchived) ...[
+              const SizedBox(height: AppSpacing.sm),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _archive,
+                  icon: const Icon(Icons.inventory_2_outlined),
+                  label: const Text('归档项目'),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _AddProjectPageState extends State<_AddProjectPage> {
   final _nameController = TextEditingController();
   final _goalController = TextEditingController();
@@ -1730,7 +2244,7 @@ class _AddProjectPageState extends State<_AddProjectPage> {
             Wrap(
               spacing: AppSpacing.xs,
               children: [
-                for (final status in ['进行中', '暂停', '未开始'])
+                for (final status in _projectStatuses)
                   ChoiceChip(
                     label: Text(status),
                     selected: _status == status,
@@ -1816,12 +2330,7 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (status) {
-      '进行中' => AppColors.primary,
-      '暂停' => AppColors.secondary,
-      '完成' => AppColors.tracker,
-      _ => AppColors.muted,
-    };
+    final color = _statusColor(status);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
@@ -1839,6 +2348,56 @@ class _StatusPill extends StatelessWidget {
       ),
     );
   }
+}
+
+class _StatusEditPill extends StatelessWidget {
+  const _StatusEditPill({required this.status, required this.onEdit});
+
+  final String status;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _statusColor(status);
+
+    return Material(
+      color: color.withAlpha(20),
+      borderRadius: BorderRadius.circular(99),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(99),
+        onTap: onEdit,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                status,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.edit_rounded, size: 13, color: color),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Color _statusColor(String status) {
+  return switch (status) {
+    '进行中' => AppColors.primary,
+    '暂停' => AppColors.secondary,
+    '完成' => AppColors.tracker,
+    '未开始' => AppColors.focus,
+    '归档' => AppColors.muted,
+    _ => AppColors.muted,
+  };
 }
 
 class _SourceChip extends StatelessWidget {
@@ -1881,6 +2440,20 @@ class _ProjectDraft {
   final String firstTodo;
 }
 
+class _ProjectEditDraft {
+  const _ProjectEditDraft({
+    required this.name,
+    required this.status,
+    this.archiveRequested = false,
+  });
+
+  final String name;
+  final String status;
+  final bool archiveRequested;
+}
+
+const _projectStatuses = ['进行中', '暂停', '未开始', '完成'];
+
 class _ProjectInfo {
   const _ProjectInfo({
     required this.id,
@@ -1901,6 +2474,10 @@ class _ProjectInfo {
   final List<_ProjectTodo> todos;
   final List<_ProjectUpdate> updates;
   final String? archiveLocation;
+
+  bool get isCompleted => status == '完成';
+  bool get isArchived => status == '归档';
+  bool get isActiveForDaily => !isCompleted && !isArchived;
 
   _ProjectTodo? todoById(String todoId) {
     for (final todo in todos) {
@@ -2018,7 +2595,33 @@ class _ProjectInfo {
     );
   }
 
+  _ProjectInfo updateBasics({
+    required String name,
+    required String status,
+    required DateTime updatedAt,
+  }) {
+    final writtenAt = _formatUpdateTime(updatedAt);
+    return copyWith(
+      name: name,
+      status: status,
+      lastUpdate: writtenAt,
+      updates: [
+        _ProjectUpdate(
+          id: '${updatedAt.microsecondsSinceEpoch}-project-edit-update',
+          time: writtenAt,
+          createdAt: updatedAt.millisecondsSinceEpoch,
+          source: '项目',
+          text: '更新项目：${this.name} → $name，状态：$status',
+          colorValue: AppColors.primary.toARGB32(),
+        ),
+        ...updates.take(9),
+      ],
+    );
+  }
+
   _ProjectInfo copyWith({
+    String? name,
+    String? status,
     String? lastUpdate,
     List<_ProjectTodo>? todos,
     List<_ProjectUpdate>? updates,
@@ -2026,8 +2629,8 @@ class _ProjectInfo {
   }) {
     return _ProjectInfo(
       id: id,
-      name: name,
-      status: status,
+      name: name ?? this.name,
+      status: status ?? this.status,
       goal: goal,
       lastUpdate: lastUpdate ?? this.lastUpdate,
       todos: todos ?? this.todos,
@@ -2165,6 +2768,27 @@ List<_ProjectInfo> _decodeProjects(String? raw) {
 
 DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
 
+_ProjectInfo? _firstProject(List<_ProjectInfo> projects) {
+  return projects.isEmpty ? null : projects.first;
+}
+
+String _projectStatusChangeText(
+  _ProjectInfo previous,
+  String nextName,
+  String nextStatus,
+) {
+  if (nextStatus == '归档') return '归档项目：$nextName';
+  if (previous.isArchived) return '恢复项目：$nextName，状态：$nextStatus';
+  return '更新项目：${previous.name} → $nextName，状态：$nextStatus';
+}
+
+DateTime _heatmapStartDate(DateTime today) {
+  final currentWeekStart = today.subtract(
+    Duration(days: today.weekday - DateTime.monday),
+  );
+  return currentWeekStart.subtract(const Duration(days: 77));
+}
+
 String _dateKey(DateTime date) {
   final month = date.month.toString().padLeft(2, '0');
   final day = date.day.toString().padLeft(2, '0');
@@ -2173,6 +2797,17 @@ String _dateKey(DateTime date) {
 
 bool _sameDay(DateTime a, DateTime b) {
   return a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+Map<String, Object?> _decodeMetadata(Object? raw) {
+  if (raw is! String || raw.isEmpty) return const {};
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is Map) return decoded.cast<String, Object?>();
+  } catch (_) {
+    return const {};
+  }
+  return const {};
 }
 
 int _createdAtFromProjectUpdateId(String id) {

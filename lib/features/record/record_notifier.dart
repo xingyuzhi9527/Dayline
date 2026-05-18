@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/database/repository_providers.dart';
 import '../../core/parser/lui_lite_parser.dart';
 import '../../core/parser/parsed_input_time.dart';
+import '../dashboard/daily_note_draft.dart';
 import 'record_state.dart';
 
 final recordNotifierProvider = NotifierProvider<RecordNotifier, RecordState>(
@@ -43,6 +44,7 @@ class RecordNotifier extends Notifier<RecordState> {
 
     try {
       await _persist(parsed, asMemo: asMemo);
+      await ensureDailyDraftAfterActivity(ref, DateTime.now());
       ref.read(dataVersionProvider.notifier).increment();
       state = const RecordState();
       return true;
@@ -103,6 +105,7 @@ class RecordNotifier extends Notifier<RecordState> {
 
     try {
       await _persist(parsed, asMemo: asMemo);
+      await ensureDailyDraftAfterActivity(ref, DateTime.now());
       ref.read(dataVersionProvider.notifier).increment();
       state = const RecordState();
     } catch (e) {

@@ -10,6 +10,7 @@ import '../../core/parser/lui_lite_parser.dart';
 import '../../core/parser/parsed_input_time.dart';
 import '../../core/stt/stt_engine.dart';
 import '../../core/stt/stt_providers.dart';
+import '../dashboard/daily_note_draft.dart';
 import '../projects/project_store.dart';
 import 'flash_record_state.dart';
 
@@ -334,6 +335,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         recordingDraft: draft,
         selectedProjectId: state.selectedProjectId,
       ).timeout(_saveTimeout);
+      await ensureDailyDraftAfterActivity(ref, DateTime.now());
       if (!draftConsumed) {
         await _audioRecordingService?.deleteDraftIfExists(draft);
       }
@@ -420,6 +422,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
 
     try {
       await _persist(parsed).timeout(_saveTimeout);
+      await ensureDailyDraftAfterActivity(ref, DateTime.now());
       ref.read(dataVersionProvider.notifier).incrementSoon();
       state = state.copyWith(
         phase: FlashPhase.idle,
