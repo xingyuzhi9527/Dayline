@@ -16,6 +16,14 @@ final todayTodoListProvider = FutureProvider<List<Map<String, Object?>>>((
   return ref.read(todosRepositoryProvider).findByDate(today);
 });
 
+final todayTodoAgendaProvider = FutureProvider<List<Map<String, Object?>>>((
+  ref,
+) async {
+  ref.watch(dataVersionProvider);
+  final today = DateTime.now();
+  return ref.read(todosRepositoryProvider).findAgenda(anchorDate: today);
+});
+
 final todayTodoStatsProvider = FutureProvider<(int, int)>((ref) async {
   ref.watch(dataVersionProvider);
   final today = DateTime.now();
