@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -227,6 +228,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
           item,
     ];
     setState(() => _projects = nextProjects);
+    await Future<void>.delayed(const Duration(milliseconds: 260));
     await _createProjectTimelineRecord(
       project: project,
       content: '${willComplete ? '完成待办' : '恢复待办'}：${todo.title}',
@@ -602,14 +604,14 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                                 onEdit: () => _openEditProject(project),
                               )
                             else ...[
-                              _TodoSection(
+                              _SmartTodoSection(
                                 project: project,
                                 onToggle: _toggleTodo,
                                 onAddTodo: _openAddTodo,
                                 onEditTodo: _openEditTodo,
                               ),
                               const SizedBox(height: AppSpacing.md),
-                              _UpdatesSection(
+                              _SmartUpdatesSection(
                                 project: project,
                                 onAddUpdate: _openAddUpdate,
                                 onSaveArchive: _saveArchiveSnapshot,
@@ -1111,6 +1113,324 @@ class _ArchivedProjectNotice extends StatelessWidget {
   }
 }
 
+class _SmartTodoSection extends StatefulWidget {
+  const _SmartTodoSection({
+    required this.project,
+    required this.onToggle,
+    required this.onAddTodo,
+    required this.onEditTodo,
+  });
+
+  final _ProjectInfo project;
+  final ValueChanged<String> onToggle;
+  final VoidCallback onAddTodo;
+  final ValueChanged<String> onEditTodo;
+
+  @override
+  State<_SmartTodoSection> createState() => _SmartTodoSectionState();
+}
+
+class _SmartTodoSectionState extends State<_SmartTodoSection> {
+  var _showOlderTodos = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final recentTodos = _sortProjectTodos(
+      widget.project.todos.where(_isRecentProjectTodo).toList(),
+    );
+    final olderTodos = _sortProjectTodos(
+      widget.project.todos
+          .where((todo) => !_isRecentProjectTodo(todo))
+          .toList(),
+    );
+    final doneCount = widget.project.todos.where((todo) => todo.done).length;
+
+    return _SectionCard(
+      title: '待办',
+      trailing: widget.project.todos.isEmpty
+          ? '还没有下一步'
+          : '${recentTodos.length} 个近7天 · $doneCount 已完成',
+      action: TextButton.icon(
+        onPressed: widget.onAddTodo,
+        icon: const Icon(Icons.add_rounded, size: 16),
+        label: const Text('添加'),
+      ),
+      child: widget.project.todos.isEmpty
+          ? _EmptyTodoPrompt(onAddTodo: widget.onAddTodo)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (recentTodos.isEmpty)
+                  const _SoftEmptyText('近7天没有待办，早一点的事项已经收进下面。')
+                else
+                  for (final todo in recentTodos)
+                    _ExpandableTodoRow(
+                      key: ValueKey(todo.id),
+                      todo: todo,
+                      onTap: () => widget.onToggle(todo.id),
+                      onEdit: () => widget.onEditTodo(todo.id),
+                    ),
+                if (olderTodos.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  _ArchiveBox(
+                    title: '7天以外',
+                    subtitle: '${olderTodos.length} 个待办已收纳',
+                    expanded: _showOlderTodos,
+                    onToggle: () =>
+                        setState(() => _showOlderTodos = !_showOlderTodos),
+                  ),
+                ],
+                if (_showOlderTodos)
+                  for (final todo in olderTodos)
+                    Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.xs),
+                      child: _ExpandableTodoRow(
+                        key: ValueKey(todo.id),
+                        todo: todo,
+                        onTap: () => widget.onToggle(todo.id),
+                        onEdit: () => widget.onEditTodo(todo.id),
+                      ),
+                    ),
+              ],
+            ),
+    );
+  }
+}
+
+class _ArchiveBox extends StatelessWidget {
+  const _ArchiveBox({
+    required this.title,
+    required this.subtitle,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Material(
+      color: AppColors.surfaceLow,
+      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        onTap: onToggle,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.inventory_2_outlined,
+                size: 18,
+                color: AppColors.muted,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: AppColors.ink,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                expanded
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 20,
+                color: AppColors.muted,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExpandableTodoRow extends StatefulWidget {
+  const _ExpandableTodoRow({
+    super.key,
+    required this.todo,
+    required this.onTap,
+    required this.onEdit,
+  });
+
+  final _ProjectTodo todo;
+  final VoidCallback onTap;
+  final VoidCallback onEdit;
+
+  @override
+  State<_ExpandableTodoRow> createState() => _ExpandableTodoRowState();
+}
+
+class _ExpandableTodoRowState extends State<_ExpandableTodoRow> {
+  static const _collapsedTextLines = 2;
+  static const _longTextThreshold = 34;
+
+  var _expanded = false;
+  bool? _optimisticDone;
+  var _tapQueued = false;
+
+  bool get _displayDone => _optimisticDone ?? widget.todo.done;
+
+  @override
+  void didUpdateWidget(covariant _ExpandableTodoRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.todo.id != widget.todo.id) {
+      _optimisticDone = null;
+      _tapQueued = false;
+      return;
+    }
+    if (_optimisticDone == widget.todo.done) {
+      _optimisticDone = null;
+    }
+  }
+
+  void _handleTap() {
+    if (_tapQueued) return;
+    final nextDone = !_displayDone;
+    final onTap = widget.onTap;
+    setState(() {
+      _optimisticDone = nextDone;
+      _tapQueued = true;
+    });
+    unawaited(
+      Future<void>.delayed(const Duration(milliseconds: 180)).then((_) {
+        onTap();
+        if (mounted) {
+          setState(() => _tapQueued = false);
+        }
+      }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final canToggleText = widget.todo.title.runes.length > _longTextThreshold;
+    final done = _displayDone;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          onTap: _handleTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  width: 22,
+                  height: 22,
+                  margin: const EdgeInsets.only(top: 1),
+                  decoration: BoxDecoration(
+                    color: done
+                        ? AppColors.primary.withAlpha(24)
+                        : Colors.transparent,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: done
+                          ? AppColors.primary
+                          : AppColors.outlineVariant,
+                    ),
+                  ),
+                  child: done
+                      ? const Icon(
+                          Icons.check_rounded,
+                          size: 15,
+                          color: AppColors.primary,
+                        )
+                      : null,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.todo.title,
+                        maxLines: _expanded ? null : _collapsedTextLines,
+                        overflow: _expanded
+                            ? TextOverflow.visible
+                            : TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          color: done ? AppColors.muted : AppColors.ink,
+                          height: 1.45,
+                          decoration: done ? TextDecoration.lineThrough : null,
+                          decorationColor: AppColors.muted,
+                        ),
+                      ),
+                      if (canToggleText) ...[
+                        const SizedBox(height: AppSpacing.xxs),
+                        TextButton.icon(
+                          onPressed: () =>
+                              setState(() => _expanded = !_expanded),
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            minimumSize: const Size(0, 28),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          icon: Icon(
+                            _expanded
+                                ? Icons.keyboard_arrow_up_rounded
+                                : Icons.keyboard_arrow_down_rounded,
+                            size: 16,
+                          ),
+                          label: Text(_expanded ? '收起' : '展开'),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: '修改待办',
+                  onPressed: widget.onEdit,
+                  icon: const Icon(Icons.edit_rounded),
+                  iconSize: 18,
+                  visualDensity: VisualDensity.compact,
+                  color: AppColors.muted,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ignore: unused_element
 class _TodoSection extends StatelessWidget {
   const _TodoSection({
     required this.project,
@@ -1259,6 +1579,101 @@ class _TodoRow extends StatelessWidget {
   }
 }
 
+class _SmartUpdatesSection extends StatefulWidget {
+  const _SmartUpdatesSection({
+    required this.project,
+    required this.onAddUpdate,
+    required this.onSaveArchive,
+    required this.onOpenUpdate,
+  });
+
+  final _ProjectInfo project;
+  final VoidCallback onAddUpdate;
+  final VoidCallback onSaveArchive;
+  final ValueChanged<_ProjectUpdate> onOpenUpdate;
+
+  @override
+  State<_SmartUpdatesSection> createState() => _SmartUpdatesSectionState();
+}
+
+class _SmartUpdatesSectionState extends State<_SmartUpdatesSection> {
+  static const _visibleUpdateCount = 10;
+
+  var _showOlderUpdates = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final updates = widget.project.updates;
+    final visibleUpdates = updates.take(_visibleUpdateCount).toList();
+    final olderCount = updates.length - visibleUpdates.length;
+    final olderUpdates = _showOlderUpdates
+        ? updates.skip(_visibleUpdateCount).toList()
+        : const <_ProjectUpdate>[];
+
+    return _SectionCard(
+      title: '最近更新',
+      trailing: olderCount <= 0 ? '来自项目和待办' : '保留10条 · $olderCount 条已收纳',
+      action: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextButton.icon(
+            onPressed: widget.onSaveArchive,
+            icon: const Icon(Icons.save_alt_rounded, size: 16),
+            label: const Text('存档'),
+          ),
+          TextButton.icon(
+            onPressed: widget.onAddUpdate,
+            icon: const Icon(Icons.add_rounded, size: 16),
+            label: const Text('添加'),
+          ),
+        ],
+      ),
+      child: updates.isEmpty
+          ? _EmptyUpdatePrompt(onAddUpdate: widget.onAddUpdate)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < visibleUpdates.length; i++)
+                  _UpdateRow(
+                    update: visibleUpdates[i],
+                    isLast: i == visibleUpdates.length - 1 && olderCount == 0,
+                    onTap: visibleUpdates[i].isLongNote
+                        ? () => widget.onOpenUpdate(visibleUpdates[i])
+                        : null,
+                  ),
+                if (olderCount > 0) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  _ArchiveBox(
+                    title: '收纳框',
+                    subtitle: '$olderCount 条较早更新',
+                    expanded: _showOlderUpdates,
+                    onToggle: () =>
+                        setState(() => _showOlderUpdates = !_showOlderUpdates),
+                  ),
+                ],
+                if (_showOlderUpdates)
+                  Padding(
+                    padding: const EdgeInsets.only(top: AppSpacing.sm),
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < olderUpdates.length; i++)
+                          _UpdateRow(
+                            update: olderUpdates[i],
+                            isLast: i == olderUpdates.length - 1,
+                            onTap: olderUpdates[i].isLongNote
+                                ? () => widget.onOpenUpdate(olderUpdates[i])
+                                : null,
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
+}
+
+// ignore: unused_element
 class _UpdatesSection extends StatelessWidget {
   const _UpdatesSection({
     required this.project,
@@ -2525,6 +2940,7 @@ class _ProjectEditDraft {
 }
 
 const _projectStatuses = ['进行中', '暂停', '未开始', '完成'];
+const _projectUpdatesRetainLimit = 60;
 
 class _ProjectInfo {
   const _ProjectInfo({
@@ -2583,7 +2999,7 @@ class _ProjectInfo {
           text: '${changed.done ? '完成' : '恢复'}：${changed.title}',
           colorValue: AppColors.todo.toARGB32(),
         ),
-        ...updates.take(9),
+        ...updates.take(_projectUpdatesRetainLimit - 1),
       ],
     );
   }
@@ -2619,7 +3035,7 @@ class _ProjectInfo {
           text: '修改待办：$title',
           colorValue: AppColors.todo.toARGB32(),
         ),
-        ...updates.take(9),
+        ...updates.take(_projectUpdatesRetainLimit - 1),
       ],
     );
   }
@@ -2637,7 +3053,7 @@ class _ProjectInfo {
           text: text,
           colorValue: AppColors.primary.toARGB32(),
         ),
-        ...updates.take(9),
+        ...updates.take(_projectUpdatesRetainLimit - 1),
       ],
     );
   }
@@ -2662,7 +3078,7 @@ class _ProjectInfo {
           text: '添加待办：$title',
           colorValue: AppColors.todo.toARGB32(),
         ),
-        ...updates.take(9),
+        ...updates.take(_projectUpdatesRetainLimit - 1),
       ],
     );
   }
@@ -2686,7 +3102,7 @@ class _ProjectInfo {
           text: '更新项目：${this.name} → $name，状态：$status',
           colorValue: AppColors.primary.toARGB32(),
         ),
-        ...updates.take(9),
+        ...updates.take(_projectUpdatesRetainLimit - 1),
       ],
     );
   }
@@ -2742,7 +3158,9 @@ class _ProjectInfo {
           if (_ProjectTodo.fromJson(item) != null) _ProjectTodo.fromJson(item)!,
       ],
       updates: [
-        for (final item in (raw['updates'] as List? ?? const []))
+        for (final item in (raw['updates'] as List? ?? const []).take(
+          _projectUpdatesRetainLimit,
+        ))
           if (_ProjectUpdate.fromJson(item) != null)
             _ProjectUpdate.fromJson(item)!,
       ],
@@ -2760,6 +3178,8 @@ class _ProjectTodo {
   final String id;
   final String title;
   final bool done;
+
+  DateTime get createdAt => _dateFromProjectId(id);
 
   _ProjectTodo copyWith({String? title, bool? done}) {
     return _ProjectTodo(
@@ -2802,6 +3222,8 @@ class _ProjectUpdate {
   final String? entryType;
   final String? notePath;
   final int? recordId;
+
+  DateTime get createdDate => DateTime.fromMillisecondsSinceEpoch(createdAt);
 
   bool get isLongNote =>
       entryType == 'long_note' && notePath != null && notePath!.isNotEmpty;
@@ -2855,6 +3277,19 @@ List<_ProjectInfo> _decodeProjects(String? raw) {
 
 DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
 
+List<_ProjectTodo> _sortProjectTodos(List<_ProjectTodo> todos) {
+  return [...todos]..sort((a, b) {
+    if (a.done != b.done) return a.done ? 1 : -1;
+    return b.createdAt.compareTo(a.createdAt);
+  });
+}
+
+bool _isRecentProjectTodo(_ProjectTodo todo) {
+  final createdAt = _dateOnly(todo.createdAt);
+  final today = _dateOnly(DateTime.now());
+  return !createdAt.isBefore(today.subtract(const Duration(days: 6)));
+}
+
 _ProjectInfo? _firstProject(List<_ProjectInfo> projects) {
   return projects.isEmpty ? null : projects.first;
 }
@@ -2905,6 +3340,12 @@ int _createdAtFromProjectUpdateId(String id) {
   return DateTime.fromMicrosecondsSinceEpoch(
     rawMicroseconds,
   ).millisecondsSinceEpoch;
+}
+
+DateTime _dateFromProjectId(String id) {
+  final rawMicroseconds = int.tryParse(id.split('-').first);
+  if (rawMicroseconds == null) return DateTime.now();
+  return DateTime.fromMicrosecondsSinceEpoch(rawMicroseconds);
 }
 
 String _formatUpdateTime(DateTime time) {

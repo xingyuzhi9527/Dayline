@@ -2,7 +2,7 @@ name: liflow_app
 description: "Liflow local-first life record app skeleton."
 publish_to: 'none'
 
-version: 0.5.0+7
+version: 2.0.0+9
 
 environment:
   sdk: ^3.9.0

@@ -7,6 +7,7 @@ import '../../core/theme/app_colors.dart';
 import 'project_markdown_service.dart';
 
 const projectsSettingsKey = 'projects_state_v1';
+const _projectUpdatesRetainLimit = 60;
 
 final projectOptionsProvider = FutureProvider<List<ProjectOption>>((ref) async {
   ref.watch(dataVersionProvider);
@@ -79,7 +80,7 @@ Future<void> addProjectTodo(
             'text': '添加待办：$title',
             'colorValue': AppColors.todo.toARGB32(),
           },
-          ...updates.take(9),
+          ...updates.take(_projectUpdatesRetainLimit - 1),
         ],
       };
     },
@@ -117,7 +118,7 @@ Future<void> addProjectUpdate(
             'text': text,
             'colorValue': AppColors.primary.toARGB32(),
           },
-          ...updates.take(9),
+          ...updates.take(_projectUpdatesRetainLimit - 1),
         ],
       };
     },
@@ -159,7 +160,7 @@ Future<void> addProjectLongNote(
             'recordId': recordId,
             'colorValue': AppColors.primary.toARGB32(),
           },
-          ...updates.take(9),
+          ...updates.take(_projectUpdatesRetainLimit - 1),
         ],
       };
     },
@@ -313,7 +314,9 @@ Map<String, Object?>? _normalizeProject(Object? raw) {
     if (raw['archiveLocation'] is String)
       'archiveLocation': raw['archiveLocation'] as String,
     'todos': _listOfMaps(raw['todos']),
-    'updates': _listOfMaps(raw['updates']),
+    'updates': _listOfMaps(
+      raw['updates'],
+    ).take(_projectUpdatesRetainLimit).toList(),
   };
 }
 
