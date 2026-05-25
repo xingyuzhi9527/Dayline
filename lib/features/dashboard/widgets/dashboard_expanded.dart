@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -1044,15 +1046,42 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
                         color: AppColors.muted,
                       ),
                       const SizedBox(width: 4),
-                      Text(
-                        _statusText(selectedInfo.status),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: AppColors.muted,
+                      Expanded(
+                        child: Text(
+                          _statusText(selectedInfo.status),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: AppColors.muted,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 56),
+                  const SizedBox(height: AppSpacing.md),
+                  SizedBox(
+                    width: double.infinity,
+                    child: AbsorbPointer(
+                      absorbing: _checkingNote || _isGenerating,
+                      child: FilledButton.icon(
+                        onPressed: () => _handleNoteAction(context),
+                        icon: _isGenerating
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Icon(
+                                selectedInfo.exists && !selectedInfo.isDraft
+                                    ? Icons.edit_note_rounded
+                                    : Icons.description_outlined,
+                                size: 18,
+                              ),
+                        label: Text(buttonLabel),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1065,38 +1094,6 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
                   ),
                 ),
               ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 20),
-                const SizedBox(height: AppSpacing.md),
-                SizedBox(
-                  width: double.infinity,
-                  child: AbsorbPointer(
-                    absorbing: _checkingNote || _isGenerating,
-                    child: FilledButton.icon(
-                      onPressed: () => _handleNoteAction(context),
-                      icon: _isGenerating
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : Icon(
-                              selectedInfo.exists && !selectedInfo.isDraft
-                                  ? Icons.edit_note_rounded
-                                  : Icons.description_outlined,
-                              size: 18,
-                            ),
-                      label: Text(buttonLabel),
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ],
         ),
       ),
@@ -1199,16 +1196,37 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
 
   Future<String> _exportDashboardMarkdown(DateTime date) async {
     final day = _dateOnly(date);
-    final summaryAsync = ref.read(dashboardSummaryForDateProvider(day).future);
-    final reviewAsync = ref.read(dashboardReviewForDateProvider(day).future);
-    final results = await Future.wait([summaryAsync, reviewAsync]);
-    final summary = results[0] as DashboardSummary;
-    final review = results[1] as Map<String, Object?>?;
+    final summary = await ref.read(dashboardSummaryForDateProvider(day).future);
+    final review = await ref.read(dashboardReviewForDateProvider(day).future);
+    final records = await ref.read(recordsRepositoryProvider).findByDate(day);
+    final todos = await ref.read(todosRepositoryProvider).findByDate(day);
+    final trackerLogs = await ref
+        .read(trackerLogsRepositoryProvider)
+        .findByDate(day);
+    final focusSessions = await ref
+        .read(focusSessionsRepositoryProvider)
+        .findByDate(day);
+    final expenses = await ref.read(expensesRepositoryProvider).findByDate(day);
+    final bodyLogs = await ref.read(bodyLogsRepositoryProvider).findByDate(day);
+    final trackers = await ref.read(trackersRepositoryProvider).findAll();
+    final trackerNames = {
+      for (final tracker in trackers)
+        tracker['id'] as int: tracker['name'] as String,
+    };
     final now = DateTime.now();
     final isToday = _sameDate(day, DateTime(now.year, now.month, now.day));
     final dayLabel = isToday ? '今天' : '这一天';
     final sectionPrefix = isToday ? '今日' : '当日';
     final nextActionTitle = isToday ? '明天最小行动是' : '下一天最小行动是';
+    final timeline = _buildDailyTimeline(
+      records: records,
+      todos: todos,
+      trackerLogs: trackerLogs,
+      focusSessions: focusSessions,
+      expenses: expenses,
+      bodyLogs: bodyLogs,
+      trackerNames: trackerNames,
+    );
 
     final buf = StringBuffer();
 
@@ -1217,7 +1235,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     buf.writeln('date: ${summary.date}');
     buf.writeln('title: ${summary.date} 日记');
     buf.writeln('source: liflow');
-    buf.writeln('version: 1');
+    buf.writeln('version: 2');
     buf.writeln('status: final');
     buf.writeln('generated_at: ${now.toIso8601String()}');
     buf.writeln('record_count: ${summary.recordCount}');
@@ -1245,6 +1263,12 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     }
     if (summary.focusMinutes > 0) {
       statusBuf.write('，专注 ${summary.focusMinutes} 分钟');
+    }
+    if (summary.trackerCount > 0) {
+      statusBuf.write('，打卡 ${summary.trackerCount} 次');
+    }
+    if (summary.expenseCount > 0) {
+      statusBuf.write('，消费 ${summary.expenseTotal.toStringAsFixed(2)} 元');
     }
     if (summary.longestGapMinutes >= 120) {
       final h = summary.longestGapMinutes ~/ 60;
@@ -1284,6 +1308,15 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
       buf.writeln();
     }
 
+    if (timeline.isNotEmpty) {
+      buf.writeln('## $sectionPrefix时间线');
+      buf.writeln();
+      for (final item in timeline) {
+        buf.writeln('- ${_fmtMs(item.timestamp)} ${item.text}');
+      }
+      buf.writeln();
+    }
+
     if (summary.insights.isNotEmpty) {
       buf.writeln('## $sectionPrefix洞察');
       buf.writeln();
@@ -1308,9 +1341,41 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     buf.writeln(review?['next_action'] as String? ?? '...');
     buf.writeln();
 
-    buf.writeln('## 原始记录索引');
+    if (todos.isNotEmpty) {
+      final completed = todos.where((todo) => _isTodoDone(todo)).toList();
+      final open = todos.where((todo) => !_isTodoDone(todo)).toList();
+      buf.writeln('## 待办流转');
+      buf.writeln();
+      if (completed.isNotEmpty) {
+        buf.writeln('### 已完成');
+        buf.writeln();
+        for (final todo in completed) {
+          buf.writeln('- [x] ${_todoText(todo)}');
+        }
+        buf.writeln();
+      }
+      if (open.isNotEmpty) {
+        buf.writeln('### 未完成');
+        buf.writeln();
+        for (final todo in open) {
+          buf.writeln('- [ ] ${_todoText(todo)}');
+        }
+        buf.writeln();
+      }
+    }
+
+    buf.writeln('## 原始记录');
     buf.writeln();
-    buf.writeln('本节保留给未来 AI 检索与结构化分析。');
+    _writeRawRecordSections(
+      buf,
+      records: records,
+      todos: todos,
+      trackerLogs: trackerLogs,
+      focusSessions: focusSessions,
+      expenses: expenses,
+      bodyLogs: bodyLogs,
+      trackerNames: trackerNames,
+    );
 
     final mdContent = buf.toString();
 
@@ -1319,6 +1384,250 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     final noteService = MarkdownNoteService(dirService);
 
     return noteService.saveDailyNote(day, mdContent);
+  }
+
+  List<_DailyTimelineItem> _buildDailyTimeline({
+    required List<Map<String, Object?>> records,
+    required List<Map<String, Object?>> todos,
+    required List<Map<String, Object?>> trackerLogs,
+    required List<Map<String, Object?>> focusSessions,
+    required List<Map<String, Object?>> expenses,
+    required List<Map<String, Object?>> bodyLogs,
+    required Map<int, String> trackerNames,
+  }) {
+    final items = <_DailyTimelineItem>[];
+
+    for (final record in records) {
+      final tags = _tagsText(record['tags'] as String?);
+      final tagText = tags.isEmpty ? '' : ' $tags';
+      items.add(
+        _DailyTimelineItem(
+          record['created_at'] as int,
+          '记录：${_oneLine(record['content'])}$tagText',
+        ),
+      );
+    }
+
+    for (final todo in todos) {
+      items.add(
+        _DailyTimelineItem(todo['created_at'] as int, '待办：${_todoText(todo)}'),
+      );
+      final completedAt = todo['completed_at'] as int?;
+      if (completedAt != null) {
+        items.add(
+          _DailyTimelineItem(completedAt, '完成待办：${_oneLine(todo['title'])}'),
+        );
+      }
+    }
+
+    for (final log in trackerLogs) {
+      items.add(
+        _DailyTimelineItem(
+          log['created_at'] as int,
+          '打卡：${_trackerLogText(log, trackerNames)}',
+        ),
+      );
+    }
+
+    for (final focus in focusSessions) {
+      items.add(
+        _DailyTimelineItem(
+          focus['started_at'] as int,
+          '专注：${_focusText(focus)}',
+        ),
+      );
+    }
+
+    for (final expense in expenses) {
+      items.add(
+        _DailyTimelineItem(
+          expense['created_at'] as int,
+          '消费：${_expenseText(expense)}',
+        ),
+      );
+    }
+
+    for (final body in bodyLogs) {
+      items.add(
+        _DailyTimelineItem(
+          body['created_at'] as int,
+          '身体：${_bodyLogText(body)}',
+        ),
+      );
+    }
+
+    items.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return items;
+  }
+
+  void _writeRawRecordSections(
+    StringBuffer buf, {
+    required List<Map<String, Object?>> records,
+    required List<Map<String, Object?>> todos,
+    required List<Map<String, Object?>> trackerLogs,
+    required List<Map<String, Object?>> focusSessions,
+    required List<Map<String, Object?>> expenses,
+    required List<Map<String, Object?>> bodyLogs,
+    required Map<int, String> trackerNames,
+  }) {
+    var wroteAny = false;
+
+    void writeSection(String title, List<String> lines) {
+      if (lines.isEmpty) return;
+      wroteAny = true;
+      buf.writeln('### $title');
+      buf.writeln();
+      for (final line in lines) {
+        buf.writeln('- $line');
+      }
+      buf.writeln();
+    }
+
+    writeSection(
+      '记录',
+      records.map((record) {
+        final tags = _tagsText(record['tags'] as String?);
+        final type = _recordTypeLabel(record['type'] as String?);
+        final tagText = tags.isEmpty ? '' : ' $tags';
+        return '${_fmtMs(record['created_at'] as int)} $type：${_oneLine(record['content'])}$tagText';
+      }).toList(),
+    );
+
+    writeSection(
+      '待办',
+      todos.map((todo) {
+        final checkbox = _isTodoDone(todo) ? '[x]' : '[ ]';
+        return '$checkbox ${_todoText(todo)}';
+      }).toList(),
+    );
+
+    writeSection(
+      '打卡',
+      trackerLogs.map((log) {
+        return '${_fmtMs(log['created_at'] as int)} ${_trackerLogText(log, trackerNames)}';
+      }).toList(),
+    );
+
+    writeSection(
+      '专注',
+      focusSessions.map((focus) {
+        return '${_fmtMs(focus['started_at'] as int)} ${_focusText(focus)}';
+      }).toList(),
+    );
+
+    writeSection(
+      '消费',
+      expenses.map((expense) {
+        return '${_fmtMs(expense['created_at'] as int)} ${_expenseText(expense)}';
+      }).toList(),
+    );
+
+    writeSection(
+      '身体',
+      bodyLogs.map((body) {
+        return '${_fmtMs(body['created_at'] as int)} ${_bodyLogText(body)}';
+      }).toList(),
+    );
+
+    if (!wroteAny) {
+      buf.writeln('这一天还没有可展开的原始记录。');
+      buf.writeln();
+    }
+  }
+
+  bool _isTodoDone(Map<String, Object?> todo) {
+    return (todo['is_completed'] as int? ?? 0) == 1;
+  }
+
+  String _todoText(Map<String, Object?> todo) {
+    final parts = <String>[_oneLine(todo['title'])];
+    final dueTime = _optionalText(todo['due_time']);
+    if (dueTime != null) parts.add('时间 $dueTime');
+    final priority = todo['priority'] as int? ?? 0;
+    if (priority > 0) parts.add('优先级 $priority');
+    final note = _optionalText(todo['note']);
+    if (note != null) parts.add(note);
+    return parts.join('，');
+  }
+
+  String _trackerLogText(
+    Map<String, Object?> log,
+    Map<int, String> trackerNames,
+  ) {
+    final trackerId = log['tracker_id'] as int;
+    final name = trackerNames[trackerId] ?? '打卡';
+    final value = (log['value'] as num?)?.toDouble() ?? 1;
+    final note = _optionalText(log['note']);
+    final valueText = value == 1 ? '' : ' ${_trimNumber(value)}';
+    return '$name$valueText${note == null ? '' : '，$note'}';
+  }
+
+  String _focusText(Map<String, Object?> focus) {
+    final minutes = focus['duration_minutes'] as int? ?? 0;
+    final note = _optionalText(focus['note']) ?? '专注';
+    return '$note，$minutes 分钟';
+  }
+
+  String _expenseText(Map<String, Object?> expense) {
+    final category = _oneLine(expense['category']);
+    final amount = (expense['amount'] as num?)?.toDouble() ?? 0;
+    final currency = _optionalText(expense['currency']) ?? 'CNY';
+    final note = _optionalText(expense['note']);
+    final symbol = currency == 'CNY' ? '¥' : '$currency ';
+    return '$category：$symbol${amount.toStringAsFixed(2)}${note == null ? '' : '，$note'}';
+  }
+
+  String _bodyLogText(Map<String, Object?> body) {
+    final metric = _oneLine(body['metric']);
+    final value = (body['value'] as num?)?.toDouble() ?? 0;
+    final unit = _optionalText(body['unit']);
+    final note = _optionalText(body['note']);
+    final unitText = unit == null ? '' : ' $unit';
+    return '$metric：${_trimNumber(value)}$unitText${note == null ? '' : '，$note'}';
+  }
+
+  String _recordTypeLabel(String? type) {
+    return switch (type) {
+      'memo' => '备忘',
+      'todo' => '待办记录',
+      'tracker' => '打卡记录',
+      'focus' => '专注记录',
+      'expense' => '消费记录',
+      'body' => '身体记录',
+      'sleep' => '睡眠记录',
+      _ => '记录',
+    };
+  }
+
+  String _tagsText(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .whereType<String>()
+          .where((tag) => tag.trim().isNotEmpty)
+          .map((tag) => '#${tag.trim()}')
+          .join(' ');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  String? _optionalText(Object? value) {
+    final text = _oneLine(value);
+    return text.isEmpty ? null : text;
+  }
+
+  String _oneLine(Object? value) {
+    return (value?.toString() ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  String _trimNumber(double value) {
+    if (value == value.roundToDouble()) return value.toInt().toString();
+    return value
+        .toStringAsFixed(2)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
   }
 
   DailyNoteInfo _infoFor(DateTime date) {
@@ -1365,6 +1674,13 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     final dt = DateTime.fromMillisecondsSinceEpoch(ms);
     return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
+}
+
+class _DailyTimelineItem {
+  const _DailyTimelineItem(this.timestamp, this.text);
+
+  final int timestamp;
+  final String text;
 }
 
 class _NoteHintBanner extends StatelessWidget {

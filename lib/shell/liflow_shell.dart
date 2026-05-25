@@ -17,6 +17,9 @@ import '../features/dashboard/dashboard_page.dart';
 import '../features/flash_record/flash_record_page.dart';
 import '../features/markdown_setup/markdown_directory_dialog.dart';
 import '../features/projects/projects_page.dart';
+import '../features/projects/project_store.dart';
+import '../features/restore/markdown_restore_dialog.dart';
+import '../features/restore/markdown_restore_service.dart';
 import '../features/timeline/timeline_page.dart';
 import '../features/timeline/timeline_providers.dart';
 
@@ -34,6 +37,7 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
   var _currentIndex = 1;
 
   var _onboardingChecked = false;
+  Timer? _backupSnapshotTimer;
 
   @override
   void initState() {
@@ -71,7 +75,14 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
           needsAndroidVisibleFolder ||
           lostTreeAccess) {
         if (!mounted) return;
-        await showMarkdownDirectoryDialog(context, dirService);
+        final configured = await showMarkdownDirectoryDialog(
+          context,
+          dirService,
+        );
+        if (configured && mounted) {
+          await _maybeOfferMarkdownRestore(dirService);
+          _scheduleBackupSnapshot();
+        }
         unawaited(
           ref
               .read(photoMomentServiceProvider)
@@ -79,6 +90,7 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
         );
       } else {
         await MarkdownStorageService(dirService).ensureCoreDirectories();
+        _scheduleBackupSnapshot();
         unawaited(
           ref
               .read(photoMomentServiceProvider)
@@ -91,8 +103,55 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
     }
   }
 
+  Future<void> _maybeOfferMarkdownRestore(
+    MarkdownDirectoryService dirService,
+  ) async {
+    if (!await _isLocalDataEmpty()) return;
+    if (!mounted) return;
+
+    final settings = ref.read(appSettingsRepositoryProvider);
+    final restoreService = MarkdownRestoreService(
+      source: StorageMarkdownRestoreSource(directoryService: dirService),
+      recordsRepository: ref.read(recordsRepositoryProvider),
+      todosRepository: ref.read(todosRepositoryProvider),
+      settingsRepository: settings,
+    );
+    final restored = await showMarkdownRestoreDialog(
+      context: context,
+      restoreService: restoreService,
+    );
+    if (restored) {
+      ref.read(dataVersionProvider.notifier).increment();
+      await _checkOnboardingAfterRestore();
+    }
+  }
+
+  Future<bool> _isLocalDataEmpty() async {
+    final records = await ref
+        .read(recordsRepositoryProvider)
+        .findRecent(limit: 1);
+    if (records.isNotEmpty) return false;
+
+    final row = await ref
+        .read(appSettingsRepositoryProvider)
+        .findByKey(projectsSettingsKey);
+    final value = row?['value'] as String?;
+    if (value != null && value.trim().isNotEmpty && value.trim() != '[]') {
+      return false;
+    }
+
+    final todos = await ref.read(todosRepositoryProvider).findAll();
+    return todos.isEmpty;
+  }
+
+  Future<void> _checkOnboardingAfterRestore() async {
+    if (!mounted) return;
+    setState(() {});
+  }
+
   @override
   void dispose() {
+    _backupSnapshotTimer?.cancel();
     _pageController.dispose();
     super.dispose();
   }
@@ -141,6 +200,11 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<int>(dataVersionProvider, (previous, next) {
+      if (previous == null || previous == next) return;
+      _scheduleBackupSnapshot();
+    });
+
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
       resizeToAvoidBottomInset: false,
@@ -166,6 +230,29 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
     2 => const ProjectsPage(),
     _ => const DashboardPage(),
   };
+
+  void _scheduleBackupSnapshot() {
+    _backupSnapshotTimer?.cancel();
+    _backupSnapshotTimer = Timer(const Duration(milliseconds: 900), () {
+      unawaited(_writeBackupSnapshot());
+    });
+  }
+
+  Future<void> _writeBackupSnapshot() async {
+    try {
+      final settings = ref.read(appSettingsRepositoryProvider);
+      final dirService = MarkdownDirectoryService(settings);
+      if (!await dirService.isConfigured()) return;
+      await BackupSnapshotService(
+        directoryService: dirService,
+        recordsRepository: ref.read(recordsRepositoryProvider),
+        todosRepository: ref.read(todosRepositoryProvider),
+        settingsRepository: settings,
+      ).writeSnapshot();
+    } catch (_) {
+      // Backup snapshots should never interrupt normal app usage.
+    }
+  }
 }
 
 class _TripleNavBar extends StatelessWidget {
