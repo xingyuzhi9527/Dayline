@@ -25,6 +25,10 @@ logs/
 /timeline_preview_phone.png
 /voice_test_logcat.txt
 
+# Local demo deck artifacts
+/liflow_demo.html
+/演示用的app的图片/
+
 # Generated QA artifacts
 docs/qa/**/*.png
 docs/qa/**/*.xml
