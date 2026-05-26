@@ -14,6 +14,7 @@ coverage/
 .agents/
 .claude/skills/
 .claude/settings.local.json
+.Codex/
 skills-lock.json
 
 # Logs
@@ -21,8 +22,8 @@ skills-lock.json
 logs/
 
 # Local screenshots and device-debug artifacts
-/dayline-*.png
-/timeline_preview_phone.png
+/*.png
+/*.jpg
 /voice_test_logcat.txt
 
 # Local demo deck artifacts
