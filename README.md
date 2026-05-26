@@ -1,27 +1,27 @@
-# Liflow
+# Liflow（来 flow）
 
-> A local-first life record app for quick capture, personal timeline, projects, and daily review.
+> 本地优先的个人生活记录 App。快速记录，轻量整理，温和回顾。
 
-Liflow is an Android-first Flutter app for people who want to record their day without turning private life data into a cloud product. It keeps notes, voice captures, todos, project progress, review drafts, photos, and exported Markdown files on the device, with no account system, no ads, no analytics SDK, and no cloud sync service wired into the app.
+Liflow 是一款 Android Flutter 应用，核心理念是**数据留在本地**：无账号系统、无广告、无埋点、无云端同步。笔记、语音、待办、项目进度、日记草稿、照片和导出的 Markdown 文件全部保存在手机里，你不删就一直在。
 
-[Download release APK](https://github.com/2478643035/Dayline/releases/download/v2.0.0-build9/Liflow-v2.0.0-build9-release.apk) · [Release page](https://github.com/2478643035/Dayline/releases/tag/v2.0.0-build9)
+[下载 release APK](https://github.com/2478643035/Dayline/releases/download/v2.0.0-build9/Liflow-v2.0.0-build9-release.apk) · [Release 页面](https://github.com/2478643035/Dayline/releases/tag/v2.0.0-build9)
 
-Current version: `2.0.0+9`
+当前版本：`2.0.0+9`
 
-## What Liflow Does
+## 四个页面
 
-Liflow is built around four daily surfaces:
+| 页面 | 做什么 |
+|------|--------|
+| **记** | 语音或文字快速记录，支持离线中文语音识别 |
+| **线** | 按时间排列的生活时间线，含笔记、待办、长文、照片、回收站 |
+| **项** | 个人项目管理，卡片、进度、待办、近期更新 |
+| **盘** | 每日回顾面板，查看节奏和未完成项，写日记 |
 
-- `记`: capture a thought immediately with voice or text. Voice recognition is designed to run locally on Android through the bundled offline STT assets.
-- `线`: turn scattered captures into a chronological life timeline, including notes, todos, long notes, photos, and recoverable deleted items.
-- `项`: keep personal projects moving with project cards, progress, todos, and recent updates.
-- `盘`: review the day, inspect rhythm and unfinished work, and draft a daily reflection that can be saved as Markdown.
+核心理念：快速记、轻整理、慢回顾，原始数据即使离开 App 也能阅读。
 
-The product idea is simple: record quickly, organize lightly, review gently, and keep the raw material readable outside the app.
+## 本地优先的数据模型
 
-## Local-First Data Model
-
-Liflow stores structured data in local SQLite and mirrors user-facing knowledge into a visible `Liflow` folder. On Android, the app asks the user to choose or confirm a local document folder, then keeps core directories such as:
+结构化数据存 SQLite，可读副本镜像到手机存储的 `Liflow` 文件夹：
 
 ```text
 Liflow/
@@ -31,121 +31,146 @@ Liflow/
   projects/
 ```
 
-This makes the app easier to trust:
+这意味着：
 
-- data remains on the device by default;
-- Markdown files can be inspected without opening the app;
-- records can be restored from the local folder when the database is empty;
-- photos and audio attachments are kept as local files;
-- release builds can be installed directly from GitHub Releases.
+- 数据默认留在设备上
+- Markdown 文件可以脱离 App 查看
+- 数据库清空后可从本地文件夹恢复
+- 照片和录音附件以本地文件形式保存
+- release 版本可直接从 GitHub Releases 安装
 
-## Privacy Position
+## 隐私
 
-Liflow does not include login, advertising, analytics, tracking SDKs, or cloud synchronization. The microphone permission is used for local recording and offline speech recognition. The app may request Android platform permissions required by Flutter, recording, file access, or Bluetooth/audio behavior, but the current app code is not connected to a remote Liflow service.
+Liflow 不含登录、广告、埋点、追踪 SDK 或云同步。麦克风权限仅用于本地录音和离线语音识别。App 可能请求 Flutter 和录音等功能所需的 Android 平台权限，但应用代码未接入任何远程服务。
 
-Because this is a local-first app, users should still back up their chosen `Liflow` folder if they care about long-term preservation.
+因为数据在本地，如果需要长期保存，建议自己备份 `Liflow` 文件夹。
 
-## Feature Highlights
+## 功能亮点
 
-- Fast voice/text capture from the center `记` screen.
-- Offline Chinese speech recognition assets bundled under `assets/stt/`.
-- Lightweight parsing for todos, time hints, amounts, and memo context.
-- Timeline browsing with SQLite-backed records.
-- Long-note editor and Markdown reader.
-- Project workspace with local Markdown persistence.
-- Daily dashboard and review writer.
-- Local backup snapshot and restore flow.
-- Photo moments and local document library.
-- Android release signing support through local `android/key.properties`.
+- 语音 + 文字快速记录（中心「记」页面）
+- 离线中文语音识别，模型文件打包在 `assets/stt/`
+- 轻量输入解析：待办、时间提示、金额、备注
+- SQLite 时间线浏览
+- 长文编辑器 + Markdown 阅读器
+- 项目工作区，本地 Markdown 持久化
+- 每日回顾面板和日记写作
+- 本地备份快照与恢复
+- 照片时刻与本地文档库
+- Android release 签名（通过本地 `android/key.properties`）
 
-## Tech Stack
+## 技术栈
 
-- Flutter `>=3.35.0`
-- Dart `^3.9.0`
-- Riverpod for app state and dependency injection
-- GoRouter with an indexed shell route for the main tabs
-- SQLite through `sqflite`
-- `sherpa_onnx` for local speech recognition
-- `record` for audio recording
-- Markdown/local file services for readable exports and restore
+- Flutter `>=3.35.0` / Dart `^3.9.0`
+- Riverpod — 状态管理和依赖注入
+- GoRouter — 带 indexed shell route 的 tab 导航
+- sqflite — 本地 SQLite
+- sherpa_onnx — 离线语音识别
+- record — 音频录制
+- 自研 Markdown/文件服务 — 可读导出与恢复
 
-## Repository Layout
+## 目录结构
 
 ```text
 lib/
   core/
-    database/     SQLite schema and repositories
-    markdown/     local Markdown paths, persistence, restore helpers
-    media/        audio, playback, and photo services
-    parser/       lightweight life-input parsing
-    stt/          local speech-to-text integration
-    theme/        color, spacing, typography tokens
+    database/     SQLite schema 和仓库层
+    markdown/     Markdown 路径、持久化、恢复
+    media/        音频、播放、照片服务
+    parser/       轻量生活输入解析
+    stt/          离线语音识别集成
+    theme/        颜色、间距、字体 token
   features/
-    flash_record/ quick record screen
-    timeline/     chronological record view
-    projects/     project workspace
-    dashboard/    daily review dashboard
-    long_note/    long-form notes
-    documents/    local document library
-    restore/      Markdown restore flow
+    flash_record/ 「记」页面
+    timeline/     「线」页面
+    projects/     「项」页面
+    dashboard/    「盘」页面
+    long_note/    长文笔记
+    documents/    本地文档库
+    restore/      Markdown 恢复流程
 android/
-  app/            Android application shell and release signing config
+  app/            Android 壳工程和签名配置
 assets/
-  stt/            offline STT model assets and keywords
-test/             widget, repository, parser, STT, and feature tests
+  stt/            离线 STT 模型和关键词
+test/             单元测试、Widget 测试、仓库层测试
 ```
 
-## Install
+## 安装
 
-For a normal Android install, download the signed release APK:
+Android 手机直接下载签名 release APK 安装：
 
 ```text
 https://github.com/2478643035/Dayline/releases/download/v2.0.0-build9/Liflow-v2.0.0-build9-release.apk
 ```
 
-The current APK is large because it bundles offline speech-recognition assets.
+APK 体积较大是因为打包了离线语音识别模型。
 
-## Development
+## 开发
 
-Install Flutter, then run:
+### 环境要求
+
+- Flutter `>=3.35.0`，需配置 Android SDK 和 platform tools
+- 一台 Android 真机或模拟器（离线 STT 目前仅支持 Android）
+
+### 克隆和安装
 
 ```bash
+git clone https://github.com/2478643035/Dayline.git
+cd dayline_app
 flutter pub get
-flutter analyze
-flutter test
-flutter run
 ```
 
-To build a release APK locally:
+### STT 语音模型
+
+离线语音识别依赖 `assets/stt/` 下的两个模型文件：
+
+| 文件 | 大小 | 模型 |
+|------|------|------|
+| `sense_voice_small_zh.tar.bz2` | ~163 MB | SenseVoice 中文 |
+| `dayline-stt-v2.zip` | ~56 MB | Zipformer 多中文方言 |
+
+这两个是标准的 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 模型。没有它们 App 也能正常编译运行，语音录制不受影响，只是离线识别功能不可用。
+
+### 日常命令
+
+```bash
+flutter run          # 在已连接设备上启动
+flutter test         # 运行全部测试
+flutter analyze      # 静态分析
+```
+
+运行单个测试文件或按名称过滤：
+
+```bash
+flutter test test/core/database/repositories_test.dart
+flutter test --plain-name "restore"
+```
+
+### 打包 Release APK
 
 ```bash
 flutter build apk --release
 ```
 
-Release signing is read from `android/key.properties`, which is intentionally ignored by Git. A local file should provide:
+Release 签名需要本地提供 `android/key.properties`（已加入 .gitignore，不会进入版本库）。如果该文件不存在，构建会自动降级为 debug 签名：
 
 ```properties
-storePassword=...
-keyPassword=...
-keyAlias=...
-storeFile=...
+storePassword=<你的密钥库密码>
+keyPassword=<你的密钥密码>
+keyAlias=<你的密钥别名>
+storeFile=<你的密钥库路径>
 ```
 
-The signed APK is produced at:
+产物路径：`build/app/outputs/flutter-apk/app-release.apk`
 
-```text
-build/app/outputs/flutter-apk/app-release.apk
-```
+## 版本
 
-## Release
+最新 release：
 
-Latest release:
+- Tag：`v2.0.0-build9`
+- Commit：`04749de`
+- APK：`Liflow-v2.0.0-build9-release.apk`
+- SHA-256：`A742544FAD085A1AA50559712162CA78C976975C4A18025ADEA7E44A2508FDFB`
 
-- Tag: `v2.0.0-build9`
-- Commit: `ed4680c`
-- APK: `Liflow-v2.0.0-build9-release.apk`
-- SHA-256: `A742544FAD085A1AA50559712162CA78C976975C4A18025ADEA7E44A2508FDFB`
+## 备注
 
-## Notes
-
-The repository name is still `Dayline`, while the current Android app label and product direction use `Liflow`.
+仓库名仍为 `Dayline`，但 App 名称和产品方向已改为 `Liflow`。
