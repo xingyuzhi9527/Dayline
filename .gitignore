@@ -29,14 +29,8 @@ logs/
 /liflow_demo.html
 /演示用的app的图片/
 
-# Generated QA artifacts
-docs/qa/**/*.png
-docs/qa/**/*.xml
-docs/qa/**/*.txt
-docs/qa/**/*.csv
-docs/qa/**/*.db
-docs/qa/**/*.sql
-!docs/qa/**/*.md
+# Local docs (devlogs, QA artifacts, planning) — keep out of public repo
+docs/
 
 # IDEs
 .idea/
