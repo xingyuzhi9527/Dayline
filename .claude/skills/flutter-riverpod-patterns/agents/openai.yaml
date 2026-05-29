@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flutter Riverpod 实战模式与反模式"
+  short_description: "Riverpod 状态管理实战指南：Provider 选型、DataVersionNotifier、哨兵 copyWith、测试注入、Feature-first 目录结构、常见反模式。"
+  default_prompt: "Use flutter-riverpod-patterns to write or review Riverpod state management code, applying correct provider types, sentinel copyWith pattern, test injection, and avoiding common anti-patterns like ref.read in build()."

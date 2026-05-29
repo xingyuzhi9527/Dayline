@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flutter 本地存储双层架构"
+  short_description: "SQLite + 文件镜像双层存储方案，用于本地优先应用的数据持久化。覆盖 Repository 模式、Schema 演进、Markdown 镜像、备份恢复。"
+  default_prompt: "Use flutter-local-storage-dual-layer to design a dual-layer local storage architecture (SQLite + file mirror) for a local-first Flutter app, with Repository pattern, schema migration, Markdown mirroring, and backup/restore strategies."

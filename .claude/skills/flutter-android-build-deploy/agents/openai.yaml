@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flutter Android 真机构建与部署"
+  short_description: "Flutter Android 从零到真机运行的构建部署指南，覆盖 Windows 中文路径、Gradle 镜像、adb 工作流、APK 签名与体积优化。"
+  default_prompt: "Use flutter-android-build-deploy to build and deploy a Flutter Android app to a real device, handling Windows non-ASCII path issues, Gradle mirrors in China, and Chinese OEM device compatibility."

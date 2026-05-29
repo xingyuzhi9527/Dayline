@@ -12,7 +12,15 @@ coverage/
 
 # Agent skills & Claude Code
 .agents/
-.claude/skills/
+.claude/skills/*
+!.claude/skills/flutter-sherpa-onnx-stt/
+!.claude/skills/flutter-sherpa-onnx-stt/**
+!.claude/skills/flutter-android-build-deploy/
+!.claude/skills/flutter-android-build-deploy/**
+!.claude/skills/flutter-local-storage-dual-layer/
+!.claude/skills/flutter-local-storage-dual-layer/**
+!.claude/skills/flutter-riverpod-patterns/
+!.claude/skills/flutter-riverpod-patterns/**
 .claude/settings.local.json
 .Codex/
 skills-lock.json

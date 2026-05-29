@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flutter sherpa-onnx 离线语音识别"
+  short_description: "在 Flutter 应用中集成 sherpa-onnx 离线 ASR，覆盖 SenseVoice/Zipformer 模型选型、Worker Isolate 架构、VAD 陷阱、音频管线。"
+  default_prompt: "Use flutter-sherpa-onnx-stt to integrate offline speech recognition with sherpa-onnx in a Flutter app, avoiding common pitfalls with initialization order, VAD flush, modelType config, and hotwords compatibility."
