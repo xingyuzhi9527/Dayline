@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
+import '../database/repositories.dart';
 import '../database/repository_providers.dart';
 import '../markdown/markdown_directory_service.dart';
 import '../markdown/markdown_storage_service.dart';
@@ -11,6 +13,7 @@ final documentLibraryServiceProvider = Provider<DocumentLibraryService>((ref) {
   final settings = ref.watch(appSettingsRepositoryProvider);
   final dirService = MarkdownDirectoryService(settings);
   return DocumentLibraryService(
+    settingsRepository: settings,
     directoryService: dirService,
     storageService: MarkdownStorageService(dirService),
   );
@@ -45,30 +48,75 @@ class DocumentLibrarySnapshot {
     required this.rootLabel,
     required this.notes,
     required this.documents,
+    required this.favoriteFolders,
   });
 
   final String rootLabel;
   final List<DocumentLibraryItem> notes;
   final List<DocumentLibraryItem> documents;
+  final List<DocumentFavoriteFolder> favoriteFolders;
+}
+
+class DocumentFavoriteFolder {
+  const DocumentFavoriteFolder({
+    required this.id,
+    required this.treeUri,
+    required this.name,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String treeUri;
+  final String name;
+  final int createdAt;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'treeUri': treeUri,
+    'name': name,
+    'createdAt': createdAt,
+  };
+
+  static DocumentFavoriteFolder? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final treeUri = raw['treeUri'] as String?;
+    if (treeUri == null || treeUri.isEmpty) return null;
+    return DocumentFavoriteFolder(
+      id: (raw['id'] as String?) ?? _folderId(treeUri),
+      treeUri: treeUri,
+      name: (raw['name'] as String?)?.trim().isNotEmpty == true
+          ? (raw['name'] as String).trim()
+          : '收藏文件夹',
+      createdAt: raw['createdAt'] is num
+          ? (raw['createdAt'] as num).toInt()
+          : DateTime.now().millisecondsSinceEpoch,
+    );
+  }
 }
 
 class DocumentLibraryService {
   DocumentLibraryService({
+    required AppSettingsRepository settingsRepository,
     required MarkdownDirectoryService directoryService,
     required MarkdownStorageService storageService,
-  }) : _directoryService = directoryService,
+  }) : _settingsRepository = settingsRepository,
+       _directoryService = directoryService,
        _storageService = storageService;
 
+  static const _favoriteFoldersKey = 'document_favorite_folders';
+
+  final AppSettingsRepository _settingsRepository;
   final MarkdownDirectoryService _directoryService;
   final MarkdownStorageService _storageService;
 
   Future<DocumentLibrarySnapshot> load() async {
     await _storageService.ensureCoreDirectories();
+    final favoriteFolders = await _loadFavoriteFolders();
     final treeUri = await _directoryService.getTreeRootUri();
     if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
-      return _loadTree(treeUri);
+      return _loadTree(treeUri, favoriteFolders);
     }
-    return _loadLocal();
+    return _loadLocal(favoriteFolders);
   }
 
   Future<DocumentLibraryItem?> importDocument() async {
@@ -125,7 +173,77 @@ class DocumentLibraryService {
     }
   }
 
-  Future<DocumentLibrarySnapshot> _loadTree(String treeUri) async {
+  Future<DocumentFavoriteFolder?> addFavoriteFolder() async {
+    final pick = await _storageService.pickDirectory();
+    if (pick == null || pick.treeUri.isEmpty) return null;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final folder = DocumentFavoriteFolder(
+      id: _folderId(pick.treeUri),
+      treeUri: pick.treeUri,
+      name: pick.name?.trim().isNotEmpty == true ? pick.name!.trim() : '收藏文件夹',
+      createdAt: now,
+    );
+    final current = await _loadFavoriteFolders();
+    await _saveFavoriteFolders([
+      folder,
+      ...current.where((item) => item.id != folder.id),
+    ]);
+    return folder;
+  }
+
+  Future<void> removeFavoriteFolder(DocumentFavoriteFolder folder) async {
+    final current = await _loadFavoriteFolders();
+    await _saveFavoriteFolders(
+      current.where((item) => item.id != folder.id).toList(growable: false),
+    );
+  }
+
+  Future<List<DocumentLibraryItem>> loadFavoriteFolderFiles(
+    DocumentFavoriteFolder folder,
+  ) async {
+    final rows = await _storageService.listFilesInTree(treeUri: folder.treeUri);
+    final items = <DocumentLibraryItem>[];
+    for (final row in rows) {
+      final relativePath = row['relativePath'] as String? ?? '';
+      if (relativePath.isEmpty) continue;
+      final name = row['name'] as String? ?? p.posix.basename(relativePath);
+      final size = row['sizeBytes'];
+      final updatedAt = row['updatedAt'];
+      items.add(
+        DocumentLibraryItem(
+          kind: _isMarkdownPath(relativePath)
+              ? LibraryItemKind.markdown
+              : LibraryItemKind.document,
+          name: name,
+          relativePath: relativePath,
+          location: MarkdownStorageLocation.documentTree(
+            treeUri: folder.treeUri,
+            relativePath: relativePath,
+          ).serialize(),
+          mimeType: row['mimeType'] as String? ?? _mimeTypeForPath(name),
+          sizeBytes: size is num ? size.toInt() : null,
+          updatedAt: updatedAt is num ? updatedAt.toInt() : null,
+        ),
+      );
+    }
+    return _sortItems(items);
+  }
+
+  Future<void> openFavoriteFolderDocument({
+    required DocumentFavoriteFolder folder,
+    required DocumentLibraryItem item,
+  }) {
+    return _storageService.openDocumentInTree(
+      treeUri: folder.treeUri,
+      relativePath: item.relativePath,
+      mimeType: item.mimeType,
+    );
+  }
+
+  Future<DocumentLibrarySnapshot> _loadTree(
+    String treeUri,
+    List<DocumentFavoriteFolder> favoriteFolders,
+  ) async {
     final rows = await _storageService.listTreeFiles(
       roots: const ['daily', 'notes', 'projects', 'documents'],
     );
@@ -155,10 +273,13 @@ class DocumentLibraryService {
       rootLabel: 'Liflow',
       notes: _sortItems(notes),
       documents: _sortItems(documents),
+      favoriteFolders: favoriteFolders,
     );
   }
 
-  Future<DocumentLibrarySnapshot> _loadLocal() async {
+  Future<DocumentLibrarySnapshot> _loadLocal(
+    List<DocumentFavoriteFolder> favoriteFolders,
+  ) async {
     final root = await _directoryService.ensureRoot();
     final notes = <DocumentLibraryItem>[];
     final documents = <DocumentLibraryItem>[];
@@ -213,6 +334,7 @@ class DocumentLibraryService {
       rootLabel: root,
       notes: _sortItems(notes),
       documents: _sortItems(documents),
+      favoriteFolders: favoriteFolders,
     );
   }
 
@@ -283,4 +405,37 @@ class DocumentLibraryService {
       _ => null,
     };
   }
+
+  Future<List<DocumentFavoriteFolder>> _loadFavoriteFolders() async {
+    final row = await _settingsRepository.findByKey(_favoriteFoldersKey);
+    final raw = row?['value'] as String?;
+    if (raw == null || raw.trim().isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      final folders = decoded
+          .map(DocumentFavoriteFolder.fromJson)
+          .whereType<DocumentFavoriteFolder>()
+          .toList(growable: false);
+      return [...folders]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _saveFavoriteFolders(
+    List<DocumentFavoriteFolder> folders,
+  ) async {
+    final value = jsonEncode(
+      folders.map((folder) => folder.toJson()).toList(growable: false),
+    );
+    final existing = await _settingsRepository.findByKey(_favoriteFoldersKey);
+    if (existing != null) {
+      await _settingsRepository.update(_favoriteFoldersKey, value);
+    } else {
+      await _settingsRepository.create(key: _favoriteFoldersKey, value: value);
+    }
+  }
 }
+
+String _folderId(String treeUri) => base64Url.encode(utf8.encode(treeUri));

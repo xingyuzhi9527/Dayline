@@ -12,6 +12,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../long_note/long_note_reader_page.dart';
 import 'project_markdown_service.dart';
+import 'project_ordering.dart';
 import 'project_store.dart';
 
 class ProjectsPage extends ConsumerStatefulWidget {
@@ -111,6 +112,18 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         if (_projects[nextIndex].isCompleted) _completedExpanded = true;
       });
     }
+  }
+
+  void _reorderProjects(List<String> orderedProjectIds) {
+    final nextProjects = reorderProjectSubset(
+      projects: _projects,
+      orderedIds: orderedProjectIds,
+      idOf: (project) => project.id,
+    );
+    if (identical(nextProjects, _projects)) return;
+
+    setState(() => _projects = nextProjects);
+    unawaited(_saveProjects(nextProjects));
   }
 
   Future<void> _openAddProject() async {
@@ -584,6 +597,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                             setState(() => _selectedProjectId = project.id),
                         onEdit: _openEditProject,
                         onToggleCompleted: _toggleCompletedStack,
+                        onReorderProjects: _reorderProjects,
                       ),
                     ),
                     SliverPadding(
@@ -754,6 +768,7 @@ class _ProjectCardCarousel extends StatelessWidget {
     required this.onSelected,
     required this.onEdit,
     required this.onToggleCompleted,
+    required this.onReorderProjects,
   });
 
   final List<_ProjectInfo> activeProjects;
@@ -763,6 +778,7 @@ class _ProjectCardCarousel extends StatelessWidget {
   final ValueChanged<_ProjectInfo> onSelected;
   final ValueChanged<_ProjectInfo> onEdit;
   final VoidCallback onToggleCompleted;
+  final ValueChanged<List<String>> onReorderProjects;
 
   @override
   Widget build(BuildContext context) {
@@ -776,30 +792,83 @@ class _ProjectCardCarousel extends StatelessWidget {
           _ProjectShelfStack(completedProjects),
     ];
 
+    void handleReorder(int oldIndex, int newIndex) {
+      if (oldIndex < 0 || oldIndex >= cards.length) return;
+      if (cards[oldIndex] is! _ProjectShelfCard) return;
+
+      final nextCards = [...cards];
+      final moved = nextCards.removeAt(oldIndex);
+      var insertionIndex = newIndex;
+      if (insertionIndex > oldIndex) insertionIndex -= 1;
+      final stackOffset =
+          nextCards.isNotEmpty && nextCards.last is _ProjectShelfStack ? 1 : 0;
+      final maxInsertionIndex = nextCards.length - stackOffset;
+      insertionIndex = insertionIndex.clamp(0, maxInsertionIndex).toInt();
+      nextCards.insert(insertionIndex, moved);
+
+      onReorderProjects([
+        for (final item in nextCards)
+          if (item is _ProjectShelfCard) item.project.id,
+      ]);
+    }
+
     return SizedBox(
       height: 150,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.containerMargin,
-        ),
+      child: ReorderableListView.builder(
+        buildDefaultDragHandles: false,
+        padding: const EdgeInsets.only(left: AppSpacing.containerMargin),
+        proxyDecorator: (child, _, animation) {
+          return AnimatedBuilder(
+            animation: animation,
+            builder: (context, child) {
+              final t = Curves.easeOutCubic.transform(animation.value);
+              return Transform.scale(
+                scale: 1 + t * 0.03,
+                child: Material(
+                  color: Colors.transparent,
+                  elevation: 8 * t,
+                  borderRadius: BorderRadius.circular(12),
+                  child: child,
+                ),
+              );
+            },
+            child: child,
+          );
+        },
         scrollDirection: Axis.horizontal,
         itemCount: cards.length,
-        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
+        onReorder: handleReorder,
         itemBuilder: (context, index) {
           final item = cards[index];
           if (item is _ProjectShelfStack) {
-            return _CompletedProjectsStack(
-              projects: item.projects,
-              expanded: completedExpanded,
-              onTap: onToggleCompleted,
+            return Padding(
+              key: const ValueKey('completed-project-stack'),
+              padding: const EdgeInsets.only(right: AppSpacing.containerMargin),
+              child: _CompletedProjectsStack(
+                projects: item.projects,
+                expanded: completedExpanded,
+                onTap: onToggleCompleted,
+              ),
             );
           }
           final project = (item as _ProjectShelfCard).project;
-          return _ProjectCard(
-            project: project,
-            selected: project.id == selectedProjectId,
-            onTap: () => onSelected(project),
-            onEdit: () => onEdit(project),
+          return Padding(
+            key: ValueKey('project-card-${project.id}'),
+            padding: EdgeInsets.only(
+              right: index == cards.length - 1
+                  ? AppSpacing.containerMargin
+                  : AppSpacing.sm,
+            ),
+            child: _ProjectCard(
+              project: project,
+              selected: project.id == selectedProjectId,
+              onTap: () => onSelected(project),
+              onEdit: () => onEdit(project),
+              reorderHandle: ReorderableDragStartListener(
+                index: index,
+                child: const _ProjectReorderHandle(),
+              ),
+            ),
           );
         },
       ),
@@ -823,18 +892,41 @@ class _ProjectShelfStack extends _ProjectShelfItem {
   final List<_ProjectInfo> projects;
 }
 
+class _ProjectReorderHandle extends StatelessWidget {
+  const _ProjectReorderHandle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: '拖动排序',
+      child: SizedBox.square(
+        dimension: 24,
+        child: Center(
+          child: Icon(
+            Icons.drag_indicator_rounded,
+            size: 18,
+            color: AppColors.muted.withAlpha(150),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ProjectCard extends StatelessWidget {
   const _ProjectCard({
     required this.project,
     required this.selected,
     required this.onTap,
     required this.onEdit,
+    this.reorderHandle,
   });
 
   final _ProjectInfo project;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onEdit;
+  final Widget? reorderHandle;
 
   @override
   Widget build(BuildContext context) {
@@ -851,7 +943,7 @@ class _ProjectCard extends StatelessWidget {
           onTap: onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            width: selected ? 204 : 178,
+            width: selected ? 216 : 190,
             padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
               color: selected ? AppColors.surface : AppColors.surfaceLow,
@@ -886,7 +978,10 @@ class _ProjectCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    _StatusEditPill(status: project.status, onEdit: onEdit),
+                    if (reorderHandle != null) ...[
+                      const SizedBox(width: AppSpacing.xxs),
+                      reorderHandle!,
+                    ],
                   ],
                 ),
                 const SizedBox(height: AppSpacing.sm),
@@ -908,13 +1003,19 @@ class _ProjectCard extends StatelessWidget {
                       color: AppColors.primary.withAlpha(150),
                     ),
                     const SizedBox(width: AppSpacing.xxs),
-                    Text(
-                      project.lastUpdate,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w600,
+                    Expanded(
+                      child: Text(
+                        project.lastUpdate,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
+                    const SizedBox(width: AppSpacing.xs),
+                    _StatusEditPill(status: project.status, onEdit: onEdit),
                   ],
                 ),
               ],

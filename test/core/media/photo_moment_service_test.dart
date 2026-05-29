@@ -115,4 +115,32 @@ void main() {
       expect(await File(storedPath).exists(), isFalse);
     },
   );
+
+  test('creates an expense receipt with a named photo file', () async {
+    final source = File(
+      '${captureDir.path}${Platform.pathSeparator}receipt.jpg',
+    );
+    await source.writeAsBytes(const [3, 2, 1]);
+    final createdAt = DateTime(2026, 5, 17, 18, 9, 8);
+
+    final recordId = await service.createExpenseReceipt(
+      sourceImagePath: source.path,
+      expenseName: '午饭/咖啡',
+      expenseAmount: 53,
+      expenseIds: const [7, 8],
+      createdAt: createdAt,
+    );
+
+    final records = await recordsRepository.findByDate(createdAt);
+    final attachments = await mediaAttachmentsRepository.findByRecordId(
+      recordId,
+    );
+    final storedPath = attachments.single['local_path'] as String;
+
+    expect(records.single['content'], '消费凭证：午饭/咖啡');
+    expect(records.single['tags'], '["消费","报销"]');
+    expect(storedPath, contains('午饭咖啡_53_20260517_180908.jpg'));
+    expect(storedPath, contains('photos'));
+    expect(await File(storedPath).exists(), isTrue);
+  });
 }

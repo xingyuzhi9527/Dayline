@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repository_providers.dart';
 import '../../core/media/audio_recording_service.dart';
+import '../../core/media/photo_moment_service.dart';
+import '../../core/parser/expense_line_item.dart';
 import '../../core/parser/expense_note_cleaner.dart';
 import '../../core/parser/lui_lite_parser.dart';
 import '../../core/parser/parsed_input_time.dart';
@@ -91,6 +93,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       transcriptFinal: false,
       recordingDraft: null,
       selectedProjectId: null,
+      expenseReceiptImagePath: null,
     );
 
     final shouldTranscribe =
@@ -281,6 +284,19 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   void switchParsedType(ParsedInputType newType) {
     final parsed = state.parsedInput;
     if (parsed == null || parsed.type == newType) return;
+    if (newType == ParsedInputType.expense) {
+      final reparsed = LuiLiteParser.parse(state.rawText.trim());
+      if (reparsed.type == ParsedInputType.expense) {
+        state = state.copyWith(
+          parsedInput: reparsed.copyWith(
+            type: newType,
+            confidence: 1,
+            tags: parsed.tags.isEmpty ? reparsed.tags : parsed.tags,
+          ),
+        );
+        return;
+      }
+    }
     state = state.copyWith(
       parsedInput: parsed.copyWith(type: newType, confidence: 1),
     );
@@ -310,6 +326,22 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     );
   }
 
+  void updateExpenseItems(List<ExpenseLineItem> items) {
+    final parsed = state.parsedInput;
+    if (parsed == null) return;
+
+    state = state.copyWith(
+      parsedInput: parsed.copyWith(
+        metadata: expenseMetadataForItems(items, base: parsed.metadata),
+      ),
+      errorMessage: null,
+    );
+  }
+
+  void setExpenseReceiptImagePath(String? path) {
+    state = state.copyWith(expenseReceiptImagePath: path, errorMessage: null);
+  }
+
   void selectProject(String? projectId) {
     state = state.copyWith(selectedProjectId: projectId, errorMessage: null);
   }
@@ -334,6 +366,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         parsed,
         recordingDraft: draft,
         selectedProjectId: state.selectedProjectId,
+        receiptImagePath: state.expenseReceiptImagePath,
       ).timeout(_saveTimeout);
       await ensureDailyDraftAfterActivity(ref, DateTime.now());
       if (!draftConsumed) {
@@ -345,6 +378,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         phase: FlashPhase.saved,
         recordingDraft: null,
         selectedProjectId: null,
+        expenseReceiptImagePath: null,
       );
     } on TimeoutException {
       state = state.copyWith(
@@ -452,6 +486,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     ParsedInput parsed, {
     SttRecordingDraft? recordingDraft,
     String? selectedProjectId,
+    String? receiptImagePath,
   }) async {
     final now = DateTime.now();
     final createdAt = parsedInputTimeToDateTime(now, parsed.time) ?? now;
@@ -506,17 +541,43 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         return false;
 
       case ParsedInputType.expense:
-        final a = (parsed.metadata['amount'] as num?)?.toDouble() ?? 0.0;
-        final c = parsed.tags.isNotEmpty ? parsed.tags.first : 'other';
-        await ref
-            .read(expensesRepositoryProvider)
-            .create(
-              date: now,
-              amount: a,
-              category: c,
-              note: cleanExpenseNote(parsed.content),
-              createdAt: createdAt,
-            );
+        final items = validExpenseLineItemsFromMetadata(parsed.metadata);
+        if (items.isEmpty) {
+          throw StateError('消费金额需要至少一笔有效数字。');
+        }
+        final fallbackCategory = parsed.tags.isNotEmpty
+            ? parsed.tags.first
+            : 'other';
+        final note = cleanExpenseNote(parsed.content);
+        final expenseIds = <int>[];
+        for (final item in items) {
+          final expenseId = await ref
+              .read(expensesRepositoryProvider)
+              .create(
+                date: now,
+                amount: item.amount,
+                category: item.name.isNotEmpty ? item.name : fallbackCategory,
+                note: items.length == 1 ? note : null,
+                createdAt: createdAt,
+              );
+          expenseIds.add(expenseId);
+        }
+        final receiptPath = receiptImagePath?.trim();
+        if (receiptPath != null && receiptPath.isNotEmpty) {
+          try {
+            await ref
+                .read(photoMomentServiceProvider)
+                .createExpenseReceipt(
+                  sourceImagePath: receiptPath,
+                  expenseName: _expenseReceiptName(items, note),
+                  expenseAmount: expenseLineItemsTotal(items),
+                  expenseIds: expenseIds,
+                  createdAt: createdAt,
+                );
+          } catch (_) {
+            // Keep the expense rows even if the optional reimbursement image fails.
+          }
+        }
         return false;
 
       case ParsedInputType.body:
@@ -701,6 +762,17 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
           note: parsed.content,
           createdAt: createdAt,
         );
+  }
+
+  static String _expenseReceiptName(List<ExpenseLineItem> items, String note) {
+    final itemNames = items
+        .map((item) => item.name.trim())
+        .where((name) => name.isNotEmpty)
+        .toList(growable: false);
+    if (itemNames.length == 1) return itemNames.single;
+    if (itemNames.length > 1) return itemNames.take(3).join('_');
+    if (note.trim().isNotEmpty) return note.trim();
+    return '消费';
   }
 
   static List<String> _normalizeTags(Iterable<String> tags) {

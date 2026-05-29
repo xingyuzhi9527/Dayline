@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:liflow_app/app.dart';
 import 'package:liflow_app/core/database/local_database.dart';
 import 'package:liflow_app/core/database/repository_providers.dart';
-import 'package:liflow_app/core/database/repositories.dart';
 import 'package:liflow_app/core/stt/stt_engine.dart';
 import 'package:liflow_app/core/stt/stt_providers.dart';
 import 'package:liflow_app/features/dashboard/dashboard_providers.dart';

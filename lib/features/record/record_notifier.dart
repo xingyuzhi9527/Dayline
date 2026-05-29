@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repository_providers.dart';
+import '../../core/parser/expense_line_item.dart';
 import '../../core/parser/lui_lite_parser.dart';
 import '../../core/parser/parsed_input_time.dart';
 import '../dashboard/daily_note_draft.dart';
@@ -170,17 +171,25 @@ class RecordNotifier extends Notifier<RecordState> {
             );
 
       case ParsedInputType.expense:
-        final amount = (parsed.metadata['amount'] as num?)?.toDouble() ?? 0.0;
-        final category = parsed.tags.isNotEmpty ? parsed.tags.first : 'other';
-        await ref
-            .read(expensesRepositoryProvider)
-            .create(
-              date: now,
-              amount: amount,
-              category: category,
-              note: parsed.content,
-              createdAt: createdAt,
-            );
+        final items = validExpenseLineItemsFromMetadata(parsed.metadata);
+        if (items.isEmpty) {
+          throw StateError('消费金额需要至少一笔有效数字。');
+        }
+        final fallbackCategory = parsed.tags.isNotEmpty
+            ? parsed.tags.first
+            : 'other';
+        final note = parsed.content.trim();
+        for (final item in items) {
+          await ref
+              .read(expensesRepositoryProvider)
+              .create(
+                date: now,
+                amount: item.amount,
+                category: item.name.isNotEmpty ? item.name : fallbackCategory,
+                note: items.length == 1 ? note : null,
+                createdAt: createdAt,
+              );
+        }
 
       case ParsedInputType.body:
         final value = (parsed.metadata['value'] as num?)?.toDouble() ?? 0.0;

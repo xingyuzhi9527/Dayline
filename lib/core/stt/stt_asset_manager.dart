@@ -61,13 +61,11 @@ class SttAssetManager {
     }
     await outputDir.create(recursive: true);
 
-    final installSource = await _installBundledArchive(outputDir) ??
+    final installSource =
+        await _installBundledArchive(outputDir) ??
         await _downloadArchive(outputDir);
 
-    await _writeInstallMetadata(
-      outputDir,
-      installSource: installSource,
-    );
+    await _writeInstallMetadata(outputDir, installSource: installSource);
 
     if (!await SttAssetExtractor.isValid(outputDir)) {
       throw StateError('SenseVoice 模型文件校验失败。');
@@ -206,7 +204,6 @@ class _SttAssetExtractionJob {
   final String outputPath;
 }
 
-@immutable
 Future<void> _extractSenseVoiceArchiveInBackground(_SttAssetExtractionJob job) {
   return SttAssetExtractor.extractTarBz2File(
     File(job.archivePath),

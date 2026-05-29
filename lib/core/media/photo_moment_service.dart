@@ -74,6 +74,54 @@ class PhotoMomentService {
     return recordId;
   }
 
+  Future<int> createExpenseReceipt({
+    required String sourceImagePath,
+    required String expenseName,
+    double? expenseAmount,
+    List<int> expenseIds = const [],
+    DateTime? createdAt,
+  }) async {
+    final writtenAt = createdAt ?? DateTime.now();
+    final cleanedName = expenseName.trim().isEmpty ? '消费' : expenseName.trim();
+    final filenameLabel = expenseAmount == null
+        ? cleanedName
+        : '${cleanedName}_${_formatExpenseAmount(expenseAmount)}';
+    final storedPath = await _copyPhotoToLibrary(
+      sourceImagePath,
+      writtenAt,
+      filenameLabel: filenameLabel,
+    );
+
+    final recordId = await _recordsRepository.create(
+      date: writtenAt,
+      type: 'moment_photo',
+      content: '消费凭证：$cleanedName',
+      tags: const ['消费', '报销'],
+      metadata: {
+        'source': 'expense_receipt',
+        if (expenseIds.isNotEmpty) 'linkedExpenseIds': expenseIds,
+      },
+      createdAt: writtenAt,
+    );
+
+    try {
+      await _mediaAttachmentsRepository.create(
+        recordId: recordId,
+        mediaType: 'image',
+        sourceType: 'expense_receipt',
+        localPath: storedPath,
+        sortOrder: 0,
+        createdAt: writtenAt,
+      );
+    } catch (_) {
+      await _recordsRepository.permanentDelete(recordId);
+      rethrow;
+    }
+
+    await _cleanupTempCapture(sourceImagePath, storedPath);
+    return recordId;
+  }
+
   Future<int> syncPrivatePhotoCopiesToVisibleDocuments() async {
     if (!Platform.isAndroid) return 0;
     final treeUri = await _directoryService.getTreeRootUri();
@@ -147,8 +195,9 @@ class PhotoMomentService {
 
   Future<String> _copyPhotoToLibrary(
     String sourceImagePath,
-    DateTime writtenAt,
-  ) async {
+    DateTime writtenAt, {
+    String? filenameLabel,
+  }) async {
     final sourceFile = File(sourceImagePath);
     if (!await sourceFile.exists()) {
       throw StateError('Captured photo not found: $sourceImagePath');
@@ -159,7 +208,9 @@ class PhotoMomentService {
     );
     final extension = p.extension(sourceImagePath).toLowerCase();
     final safeExtension = extension.isEmpty ? '.jpg' : extension;
-    final filename = _buildPhotoFilename(writtenAt, safeExtension);
+    final filename = filenameLabel == null || filenameLabel.trim().isEmpty
+        ? _buildPhotoFilename(writtenAt, safeExtension)
+        : _buildNamedPhotoFilename(filenameLabel, writtenAt, safeExtension);
     final targetPath = p.join(photoDir, filename);
 
     await sourceFile.copy(targetPath);
@@ -219,6 +270,36 @@ class PhotoMomentService {
     ].join('');
     final millis = writtenAt.millisecond.toString().padLeft(3, '0');
     return 'photo_${date}_$time$millis$extension';
+  }
+
+  String _buildNamedPhotoFilename(
+    String label,
+    DateTime writtenAt,
+    String extension,
+  ) {
+    final safeName = MarkdownFilename.sanitize(
+      label,
+    ).replaceAll(RegExp(r'\s+'), '_').trim();
+    final date = [
+      writtenAt.year.toString().padLeft(4, '0'),
+      writtenAt.month.toString().padLeft(2, '0'),
+      writtenAt.day.toString().padLeft(2, '0'),
+    ].join('');
+    final time = [
+      writtenAt.hour.toString().padLeft(2, '0'),
+      writtenAt.minute.toString().padLeft(2, '0'),
+      writtenAt.second.toString().padLeft(2, '0'),
+    ].join('');
+    final name = safeName.isEmpty ? '消费' : safeName;
+    return '${name}_${date}_$time$extension';
+  }
+
+  String _formatExpenseAmount(double amount) {
+    final rounded = (amount * 100).round() / 100;
+    if (rounded == rounded.truncateToDouble()) {
+      return rounded.toStringAsFixed(0);
+    }
+    return rounded.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
   }
 
   Future<void> _cleanupTempCapture(

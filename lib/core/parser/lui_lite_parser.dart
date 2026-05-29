@@ -1,4 +1,5 @@
 import 'expense_note_cleaner.dart';
+import 'expense_line_item.dart';
 
 enum ParsedInputType { memo, todo, tracker, focus, expense, body, sleep, mood }
 
@@ -58,7 +59,7 @@ abstract final class _Re {
     r'(?:¥|￥|RMB)\s*(\d+(?:\.\d+)?)',
     caseSensitive: false,
   );
-  static final amountSuffix = RegExp(r'(\d+(?:\.\d+)?)\s*(?:元|块|块钱)');
+  static final amountSuffix = RegExp(r'(\d+(?:\.\d+)?)\s*(?:元|块钱|块)');
   static final chineseAmountSuffix = RegExp(
     '([\\u96f6\\u3007\\u4e00\\u4e8c\\u4e24\\u4e09\\u56db\\u4e94'
     '\\u516d\\u4e03\\u516b\\u4e5d\\u5341\\u767e\\u5343\\u4e07'
@@ -199,13 +200,13 @@ class LuiLiteParser {
       if (_isLikelyMemo(input)) return ParsedInputType.memo;
     }
 
-    final amount = _extractAmount(input);
-    if (_KW.expense.hasMatch(input) && amount != null) {
-      meta['amount'] = amount;
+    final expenseItems = _extractExpenseItems(input);
+    if (_KW.expense.hasMatch(input) && expenseItems.isNotEmpty) {
+      meta.addAll(expenseMetadataForItems(expenseItems));
       return ParsedInputType.expense;
     }
-    if (amount != null && _looksLikeExpense(input)) {
-      meta['amount'] = amount;
+    if (expenseItems.isNotEmpty && _looksLikeExpense(input)) {
+      meta.addAll(expenseMetadataForItems(expenseItems));
       return ParsedInputType.expense;
     }
 
@@ -283,17 +284,122 @@ class LuiLiteParser {
     return _trimLoosePunctuation(_compactWhitespace(content));
   }
 
-  static double? _extractAmount(String input) {
-    final prefix = _Re.amountPrefix.firstMatch(input);
-    if (prefix != null) return double.parse(prefix.group(1)!);
+  static List<ExpenseLineItem> _extractExpenseItems(String input) {
+    final matches = _amountMatches(input);
+    if (matches.isEmpty) return const [];
 
-    final suffix = _Re.amountSuffix.firstMatch(input);
-    if (suffix != null) return double.parse(suffix.group(1)!);
+    final items = <ExpenseLineItem>[];
+    for (var i = 0; i < matches.length; i += 1) {
+      final match = matches[i];
+      final previousEnd = i == 0 ? 0 : matches[i - 1].end;
+      final nextStart = i + 1 >= matches.length
+          ? input.length
+          : matches[i + 1].start;
+      final name = match.isPrefix
+          ? _expenseItemNameAfter(input, match, nextStart)
+          : _expenseItemNameBefore(input, match, previousEnd, nextStart);
+      items.add(ExpenseLineItem(name: name, amount: match.amount));
+    }
 
-    final chinese = _Re.chineseAmountSuffix.firstMatch(input);
-    if (chinese != null) return _parseChineseNumber(chinese.group(1)!);
+    return items;
+  }
 
-    return null;
+  static List<_AmountMatch> _amountMatches(String input) {
+    final rawMatches = <_AmountMatch>[];
+
+    for (final match in _Re.amountPrefix.allMatches(input)) {
+      rawMatches.add(
+        _AmountMatch(
+          amount: double.parse(match.group(1)!),
+          start: match.start,
+          end: match.end,
+          isPrefix: true,
+        ),
+      );
+    }
+
+    for (final match in _Re.amountSuffix.allMatches(input)) {
+      rawMatches.add(
+        _AmountMatch(
+          amount: double.parse(match.group(1)!),
+          start: match.start,
+          end: match.end,
+          isPrefix: false,
+        ),
+      );
+    }
+
+    for (final match in _Re.chineseAmountSuffix.allMatches(input)) {
+      final amount = _parseChineseNumber(match.group(1)!);
+      if (amount == null) continue;
+      rawMatches.add(
+        _AmountMatch(
+          amount: amount,
+          start: match.start,
+          end: match.end,
+          isPrefix: false,
+        ),
+      );
+    }
+
+    rawMatches.sort((a, b) => a.start.compareTo(b.start));
+
+    final matches = <_AmountMatch>[];
+    var lastEnd = -1;
+    for (final match in rawMatches) {
+      if (match.start < lastEnd) continue;
+      matches.add(match);
+      lastEnd = match.end;
+    }
+    return matches;
+  }
+
+  static String _expenseItemNameBefore(
+    String input,
+    _AmountMatch match,
+    int previousEnd,
+    int nextStart,
+  ) {
+    final separatorEnd = _lastItemSeparatorEndBefore(input, match.start);
+    final start = [previousEnd, separatorEnd].reduce((a, b) => a > b ? a : b);
+    final before = _cleanExpenseItemName(input.substring(start, match.start));
+    if (before.isNotEmpty) return before;
+    return _expenseItemNameAfter(input, match, nextStart);
+  }
+
+  static String _expenseItemNameAfter(
+    String input,
+    _AmountMatch match,
+    int nextStart,
+  ) {
+    final separatorStart = _firstItemSeparatorStartAfter(input, match.end);
+    final end = [nextStart, separatorStart].reduce((a, b) => a < b ? a : b);
+    return _cleanExpenseItemName(input.substring(match.end, end));
+  }
+
+  static String _cleanExpenseItemName(String raw) {
+    final withoutTags = raw.replaceAll(_Re.tag, '');
+    var text = cleanExpenseNote(withoutTags);
+    text = text
+        .replaceFirst(RegExp(r'^(其中|一共|总共|合计|买了|花了|消费|支出|用了|花费)\s*'), '')
+        .replaceFirst(RegExp(r'\s*(花了|消费|支出|用了|花费)$'), '');
+    return _trimLoosePunctuation(_compactWhitespace(text));
+  }
+
+  static int _lastItemSeparatorEndBefore(String input, int offset) {
+    var end = 0;
+    for (final match in RegExp(r'[,，、;；。.!！?？\n]+').allMatches(input)) {
+      if (match.end > offset) break;
+      end = match.end;
+    }
+    return end;
+  }
+
+  static int _firstItemSeparatorStartAfter(String input, int offset) {
+    for (final match in RegExp(r'[,，、;；。.!！?？\n]+').allMatches(input)) {
+      if (match.start >= offset) return match.start;
+    }
+    return input.length;
   }
 
   static double? _parseChineseNumber(String input) {
@@ -507,4 +613,18 @@ class LuiLiteParser {
 
   static String _trimLoosePunctuation(String input) =>
       input.replaceAll(RegExp(r'^[,，。！？!?:：；;\s]+|[,，。！？!?:：；;\s]+$'), '');
+}
+
+class _AmountMatch {
+  const _AmountMatch({
+    required this.amount,
+    required this.start,
+    required this.end,
+    required this.isPrefix,
+  });
+
+  final double amount;
+  final int start;
+  final int end;
+  final bool isPrefix;
 }

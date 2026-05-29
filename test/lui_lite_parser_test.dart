@@ -159,6 +159,27 @@ void main() {
       final p = LuiLiteParser.parse('打车费 45元');
       expect(p.tags, contains('交通'));
     });
+
+    test('extracts multiple expense line items and total', () {
+      final p = LuiLiteParser.parse('午饭35元 咖啡18元 打车45元');
+      final items = p.metadata['expenseItems'] as List;
+
+      expect(p.type, ParsedInputType.expense);
+      expect(p.metadata['amount'], 98.0);
+      expect(items, hasLength(3));
+      expect(items[0], containsPair('name', '午饭'));
+      expect(items[0], containsPair('amount', 35.0));
+      expect(items[1], containsPair('name', '咖啡'));
+      expect(items[2], containsPair('name', '打车'));
+    });
+
+    test('uses trailing note as item name when amount comes first', () {
+      final p = LuiLiteParser.parse('消费 268 元 聚餐');
+      final items = p.metadata['expenseItems'] as List;
+
+      expect(items.single, containsPair('name', '聚餐'));
+      expect(items.single, containsPair('amount', 268.0));
+    });
   });
 
   group('LuiLiteParser — body', () {

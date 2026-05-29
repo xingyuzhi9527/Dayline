@@ -162,7 +162,8 @@ class _MarkdownDirectoryDialogState extends State<_MarkdownDirectoryDialog> {
         rootSubdir: rootSubdir,
       );
       await storageService.ensureCoreDirectories();
-      if (context.mounted) Navigator.of(context).pop(true);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
     } finally {
       if (mounted) setState(() => _picking = false);
     }

@@ -91,6 +91,20 @@ class MarkdownStorageService {
     );
   }
 
+  Future<MarkdownDirectoryPick?> describeDirectory(String treeUri) async {
+    if (!Platform.isAndroid) return null;
+    final row = await _channel.invokeMapMethod<String, Object?>(
+      'describeTree',
+      {'treeUri': treeUri},
+    );
+    final resolvedUri = row?['treeUri'] as String? ?? treeUri;
+    if (resolvedUri.isEmpty) return null;
+    return MarkdownDirectoryPick(
+      treeUri: resolvedUri,
+      name: row?['name'] as String?,
+    );
+  }
+
   Future<bool> hasTreeAccess(String treeUri) async {
     if (!Platform.isAndroid) return true;
     return await _channel.invokeMethod<bool>('hasTreeAccess', {
@@ -154,6 +168,21 @@ class MarkdownStorageService {
         .toList();
   }
 
+  Future<List<Map<String, Object?>>> listFilesInTree({
+    required String treeUri,
+    List<String> roots = const [''],
+  }) async {
+    if (treeUri.isEmpty || !Platform.isAndroid) return const [];
+
+    final rows = await _channel.invokeListMethod<Map<Object?, Object?>>(
+      'listFiles',
+      {'treeUri': treeUri, 'roots': roots},
+    );
+    return (rows ?? const [])
+        .map((row) => row.cast<String, Object?>())
+        .toList();
+  }
+
   Future<Map<String, Object?>?> importDocumentToTree() async {
     final treeUri = await _directoryService.getTreeRootUri();
     if (treeUri == null || treeUri.isEmpty || !Platform.isAndroid) {
@@ -181,6 +210,22 @@ class MarkdownStorageService {
     await _channel.invokeMethod<void>('openDocument', {
       'treeUri': treeUri,
       'relativePath': await _treePath(relativePath),
+      'mimeType': mimeType,
+    });
+  }
+
+  Future<void> openDocumentInTree({
+    required String treeUri,
+    required String relativePath,
+    String? mimeType,
+  }) async {
+    if (treeUri.isEmpty || !Platform.isAndroid) {
+      throw StateError('Document tree storage is not available.');
+    }
+
+    await _channel.invokeMethod<void>('openDocument', {
+      'treeUri': treeUri,
+      'relativePath': relativePath,
       'mimeType': mimeType,
     });
   }

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:liflow_app/core/database/local_database.dart';
 import 'package:liflow_app/core/database/repositories.dart';
 import 'package:liflow_app/core/database/repository_providers.dart';
+import 'package:liflow_app/core/parser/expense_line_item.dart';
 import 'package:liflow_app/core/stt/stt_engine.dart';
 import 'package:liflow_app/core/stt/stt_providers.dart';
 import 'package:liflow_app/features/flash_record/flash_record_notifier.dart';
@@ -209,6 +210,68 @@ void main() {
       expect(recordMetadata['projectEntryType'], 'todo');
       expect(projectTodos.single['title'], '修复 bug');
       expect(projectUpdates.single['text'], '添加待办：修复 bug');
+    },
+  );
+
+  test(
+    'given multiple expense items, when saving, then stores each item separately',
+    () async {
+      final database = LocalDatabase(
+        databaseFactory: databaseFactoryFfi,
+        databasePath: inMemoryDatabasePath,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          sttEngineProvider.overrideWithValue(_FakeSttEngine()),
+        ],
+      );
+      addTearDown(container.dispose);
+      addTearDown(database.close);
+
+      final notifier = container.read(flashRecordProvider.notifier);
+      notifier.updateParsedText('午饭35元 咖啡18元');
+      await notifier.save();
+
+      final expenses = await container
+          .read(expensesRepositoryProvider)
+          .findByDate(DateTime.now());
+
+      expect(expenses, hasLength(2));
+      expect(expenses.map((row) => row['category']), ['午饭', '咖啡']);
+      expect(expenses.map((row) => row['amount']), [35.0, 18.0]);
+    },
+  );
+
+  test(
+    'given a corrected expense item, when saving, then uses the edited amount',
+    () async {
+      final database = LocalDatabase(
+        databaseFactory: databaseFactoryFfi,
+        databasePath: inMemoryDatabasePath,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          sttEngineProvider.overrideWithValue(_FakeSttEngine()),
+        ],
+      );
+      addTearDown(container.dispose);
+      addTearDown(database.close);
+
+      final notifier = container.read(flashRecordProvider.notifier);
+      notifier.updateParsedText('午饭35元');
+      notifier.updateExpenseItems(const [
+        ExpenseLineItem(name: '午饭', amount: 45),
+      ]);
+      await notifier.save();
+
+      final expenses = await container
+          .read(expensesRepositoryProvider)
+          .findByDate(DateTime.now());
+
+      expect(expenses.single['category'], '午饭');
+      expect(expenses.single['amount'], 45.0);
     },
   );
 }

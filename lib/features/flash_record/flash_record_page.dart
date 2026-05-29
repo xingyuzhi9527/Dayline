@@ -459,6 +459,29 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     }
   }
 
+  Future<void> _pickExpenseReceiptImage() async {
+    try {
+      final image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 92,
+      );
+      if (!mounted || image == null) return;
+      ref
+          .read(flashRecordProvider.notifier)
+          .setExpenseReceiptImagePath(image.path);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('选择凭证失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
+
   Future<void> _recoverLostPhoto() async {
     if (_recoveringLostPhoto) return;
     _recoveringLostPhoto = true;
@@ -1710,10 +1733,22 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             onTagsChanged: (tags) {
               ref.read(flashRecordProvider.notifier).updateParsedTags(tags);
             },
+            onExpenseItemsChanged: (items) {
+              ref.read(flashRecordProvider.notifier).updateExpenseItems(items);
+            },
             projects: projects,
             selectedProjectId: state.selectedProjectId,
             onProjectChanged: (projectId) {
               ref.read(flashRecordProvider.notifier).selectProject(projectId);
+            },
+            expenseReceiptImagePath: state.expenseReceiptImagePath,
+            onAddReceiptImage: () {
+              unawaited(_pickExpenseReceiptImage());
+            },
+            onRemoveReceiptImage: () {
+              ref
+                  .read(flashRecordProvider.notifier)
+                  .setExpenseReceiptImagePath(null);
             },
             onSave: () {
               ref.read(flashRecordProvider.notifier).save();

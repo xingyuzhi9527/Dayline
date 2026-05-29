@@ -28,6 +28,7 @@ class FlashRecordState {
     this.textSaving = false,
     this.savedSequence = 0,
     this.selectedProjectId,
+    this.expenseReceiptImagePath,
   });
 
   final FlashPhase phase;
@@ -46,6 +47,7 @@ class FlashRecordState {
   final bool textSaving;
   final int savedSequence;
   final String? selectedProjectId;
+  final String? expenseReceiptImagePath;
 
   bool get hasResult => parsedInput != null;
   bool get isInputActive =>
@@ -70,6 +72,7 @@ class FlashRecordState {
     bool? textSaving,
     int? savedSequence,
     Object? selectedProjectId = _unchanged,
+    Object? expenseReceiptImagePath = _unchanged,
   }) {
     return FlashRecordState(
       phase: phase ?? this.phase,
@@ -98,6 +101,9 @@ class FlashRecordState {
       selectedProjectId: identical(selectedProjectId, _unchanged)
           ? this.selectedProjectId
           : selectedProjectId as String?,
+      expenseReceiptImagePath: identical(expenseReceiptImagePath, _unchanged)
+          ? this.expenseReceiptImagePath
+          : expenseReceiptImagePath as String?,
     );
   }
 }

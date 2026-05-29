@@ -30,6 +30,7 @@ void main() {
 
     final dirService = MarkdownDirectoryService(settingsRepository);
     service = DocumentLibraryService(
+      settingsRepository: settingsRepository,
       directoryService: dirService,
       storageService: MarkdownStorageService(dirService),
     );
@@ -86,6 +87,7 @@ void main() {
       containsAll(['2026-05-17.md', 'note.md']),
     );
     expect(snapshot.documents.map((item) => item.name), contains('paper.pdf'));
+    expect(snapshot.favoriteFolders, isEmpty);
   });
 
   test('deleteDocument removes imported copy from documents folder', () async {
@@ -109,5 +111,19 @@ void main() {
       afterDelete.documents.map((item) => item.name),
       isNot(contains('paper.pdf')),
     );
+  });
+
+  test('load returns stored favorite folders', () async {
+    await settingsRepository.create(
+      key: 'document_favorite_folders',
+      value:
+          '[{"id":"folder-1","treeUri":"content://folder","name":"报销资料","createdAt":1}]',
+    );
+
+    final snapshot = await service.load();
+
+    expect(snapshot.favoriteFolders, hasLength(1));
+    expect(snapshot.favoriteFolders.single.name, '报销资料');
+    expect(snapshot.favoriteFolders.single.treeUri, 'content://folder');
   });
 }
