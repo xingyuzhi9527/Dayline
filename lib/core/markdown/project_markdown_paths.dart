@@ -44,6 +44,18 @@ class ProjectMarkdownPaths {
     );
   }
 
+  static String projectImageMaterial({
+    required String projectId,
+    required String projectName,
+    required String filename,
+  }) {
+    return p.posix.join(
+      projectFolder(projectId: projectId, projectName: projectName),
+      'materials',
+      filename,
+    );
+  }
+
   static String normalLongNote({
     required DateTime dateTime,
     required String filename,

@@ -145,9 +145,21 @@ class ProjectMarkdownService {
           final time = _string(update['time'], fallback: '刚刚');
           final source = _string(update['source'], fallback: '项目');
           final text = _oneLine(_string(update['text'], fallback: ''));
-          return '- $time · $source：$text';
+          final materialLink = _projectMaterialLink(update);
+          return '- $time · $source：$text$materialLink';
         })
         .join('\n');
+  }
+
+  String _projectMaterialLink(Map<String, Object?> update) {
+    if (update['entryType'] != 'image') return '';
+    final relativePath = update['imageRelativePath'] as String?;
+    if (relativePath == null || relativePath.trim().isEmpty) return '';
+    final parts = relativePath.trim().split('/');
+    final materialsIndex = parts.indexOf('materials');
+    if (materialsIndex < 0) return '';
+    final localRelative = parts.skip(materialsIndex).join('/');
+    return ' ([文件]($localRelative))';
   }
 
   String _relativePath(Map<String, Object?> project) {

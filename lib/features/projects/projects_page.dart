@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
 
 import '../../core/database/repository_providers.dart';
 import '../../core/markdown/markdown_directory_service.dart';
@@ -23,12 +26,14 @@ class ProjectsPage extends ConsumerStatefulWidget {
 }
 
 class _ProjectsPageState extends ConsumerState<ProjectsPage> {
+  final _imagePicker = ImagePicker();
   var _projects = <_ProjectInfo>[];
   var _projectRecordHeatEntries = <_ProjectHeatEntry>[];
   String? _selectedProjectId;
   var _completedExpanded = false;
   var _loading = true;
   var _saving = false;
+  var _addingProjectImage = false;
 
   _ProjectInfo? get _selectedProject {
     final selectedId = _selectedProjectId;
@@ -392,6 +397,67 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     );
   }
 
+  Future<void> _openAddProjectImageMaterial() async {
+    final project = _selectedProject;
+    if (project == null || _addingProjectImage) return;
+
+    setState(() => _addingProjectImage = true);
+    try {
+      final image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 94,
+      );
+      if (!mounted || image == null) return;
+
+      final createdAt = DateTime.now();
+      final imageTitle = await showDialog<String>(
+        context: context,
+        builder: (_) => _ProjectImageNameDialog(
+          title: '保存图片资料',
+          projectName: project.name,
+          extension: p.extension(image.path).isEmpty
+              ? '.jpg'
+              : p.extension(image.path).toLowerCase(),
+          createdAt: createdAt,
+        ),
+      );
+      if (!mounted || imageTitle == null || imageTitle.trim().isEmpty) return;
+
+      await addProjectImageMaterial(
+        ref,
+        projectId: project.id,
+        projectName: project.name,
+        sourceImagePath: image.path,
+        title: imageTitle,
+        createdAt: createdAt,
+      );
+      if (!mounted) return;
+      await _loadProjects();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('图片资料已归到项目'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 1),
+          ),
+        );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('添加图片资料失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _addingProjectImage = false);
+    }
+  }
+
   Future<void> _saveArchiveSnapshot() async {
     final project = _selectedProject;
     if (project == null) return;
@@ -434,6 +500,102 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
           ),
         );
     }
+  }
+
+  Future<void> _openProjectUpdate(_ProjectUpdate update) async {
+    if (update.isLongNote) {
+      await _openProjectLongNote(update);
+      return;
+    }
+    if (update.isImageMaterial) {
+      await _openProjectImage(update);
+    }
+  }
+
+  Future<void> _openProjectImage(_ProjectUpdate update) async {
+    final localPath = update.imagePath;
+    if (localPath != null && localPath.isNotEmpty) {
+      final file = File(localPath);
+      if (await file.exists()) {
+        await _showProjectImageViewer(update, localPath);
+        return;
+      }
+    }
+
+    final relativePath = update.imageRelativePath;
+    if (relativePath == null || relativePath.isEmpty) {
+      _showProjectSnack('这张图片资料缺少文件路径');
+      return;
+    }
+
+    try {
+      final settings = ref.read(appSettingsRepositoryProvider);
+      final directoryService = MarkdownDirectoryService(settings);
+      final treeUri = await directoryService.getTreeRootUri();
+      if (Platform.isAndroid && treeUri != null && treeUri.isNotEmpty) {
+        final storage = MarkdownStorageService(directoryService);
+        await storage.openTreeDocument(
+          relativePath: relativePath,
+          mimeType: update.mimeType ?? 'image/jpeg',
+        );
+        return;
+      }
+
+      final root = await directoryService.ensureRoot();
+      final file = File(p.joinAll([root, ...p.posix.split(relativePath)]));
+      if (!await file.exists()) {
+        throw StateError('图片文件不存在：$relativePath');
+      }
+      await _showProjectImageViewer(update, file.path);
+    } catch (e) {
+      _showProjectSnack('打开图片资料失败：$e');
+    }
+  }
+
+  Future<void> _showProjectImageViewer(
+    _ProjectUpdate update,
+    String imagePath,
+  ) async {
+    if (!mounted) return;
+    final renamed = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) =>
+            _ProjectImageViewerPage(title: update.text, path: imagePath),
+      ),
+    );
+    if (renamed == null || renamed.trim().isEmpty || !mounted) return;
+
+    final relativePath = update.imageRelativePath;
+    final project = _selectedProject;
+    if (project == null || relativePath == null || relativePath.isEmpty) {
+      _showProjectSnack('这张图片资料缺少项目路径');
+      return;
+    }
+
+    try {
+      await updateProjectImageMaterialName(
+        ref,
+        projectId: project.id,
+        projectName: project.name,
+        imageRelativePath: relativePath,
+        title: renamed,
+        updatedAt: DateTime.now(),
+      );
+      if (!mounted) return;
+      await _loadProjects();
+      _showProjectSnack('图片名称已更新');
+    } catch (e) {
+      _showProjectSnack('修改图片名称失败：$e');
+    }
+  }
+
+  void _showProjectSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
   }
 
   Future<void> _syncProjectArchive(
@@ -628,8 +790,10 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                               _SmartUpdatesSection(
                                 project: project,
                                 onAddUpdate: _openAddUpdate,
+                                onAddImage: _openAddProjectImageMaterial,
                                 onSaveArchive: _saveArchiveSnapshot,
-                                onOpenUpdate: _openProjectLongNote,
+                                onOpenUpdate: _openProjectUpdate,
+                                addingImage: _addingProjectImage,
                               ),
                             ],
                             const SizedBox(height: AppSpacing.md),
@@ -1684,14 +1848,18 @@ class _SmartUpdatesSection extends StatefulWidget {
   const _SmartUpdatesSection({
     required this.project,
     required this.onAddUpdate,
+    required this.onAddImage,
     required this.onSaveArchive,
     required this.onOpenUpdate,
+    required this.addingImage,
   });
 
   final _ProjectInfo project;
   final VoidCallback onAddUpdate;
+  final VoidCallback onAddImage;
   final VoidCallback onSaveArchive;
   final ValueChanged<_ProjectUpdate> onOpenUpdate;
+  final bool addingImage;
 
   @override
   State<_SmartUpdatesSection> createState() => _SmartUpdatesSectionState();
@@ -1723,6 +1891,17 @@ class _SmartUpdatesSectionState extends State<_SmartUpdatesSection> {
             label: const Text('存档'),
           ),
           TextButton.icon(
+            onPressed: widget.addingImage ? null : widget.onAddImage,
+            icon: widget.addingImage
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.add_photo_alternate_rounded, size: 16),
+            label: const Text('图片'),
+          ),
+          TextButton.icon(
             onPressed: widget.onAddUpdate,
             icon: const Icon(Icons.add_rounded, size: 16),
             label: const Text('添加'),
@@ -1738,7 +1917,9 @@ class _SmartUpdatesSectionState extends State<_SmartUpdatesSection> {
                   _UpdateRow(
                     update: visibleUpdates[i],
                     isLast: i == visibleUpdates.length - 1 && olderCount == 0,
-                    onTap: visibleUpdates[i].isLongNote
+                    onTap:
+                        visibleUpdates[i].isLongNote ||
+                            visibleUpdates[i].isImageMaterial
                         ? () => widget.onOpenUpdate(visibleUpdates[i])
                         : null,
                   ),
@@ -1761,7 +1942,9 @@ class _SmartUpdatesSectionState extends State<_SmartUpdatesSection> {
                           _UpdateRow(
                             update: olderUpdates[i],
                             isLast: i == olderUpdates.length - 1,
-                            onTap: olderUpdates[i].isLongNote
+                            onTap:
+                                olderUpdates[i].isLongNote ||
+                                    olderUpdates[i].isImageMaterial
                                 ? () => widget.onOpenUpdate(olderUpdates[i])
                                 : null,
                           ),
@@ -1937,6 +2120,10 @@ class _UpdateRow extends StatelessWidget {
                         ),
                       ),
                     ),
+                  if (update.isImageMaterial && update.imagePath != null) ...[
+                    const SizedBox(height: AppSpacing.xs),
+                    _ProjectImagePreview(path: update.imagePath!),
+                  ],
                 ],
               ),
             ),
@@ -1945,6 +2132,177 @@ class _UpdateRow extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ProjectImagePreview extends StatelessWidget {
+  const _ProjectImagePreview({required this.path});
+
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      child: Container(
+        width: 104,
+        height: 76,
+        color: AppColors.canvas,
+        child: Image.file(
+          File(path),
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => Icon(
+            Icons.image_not_supported_rounded,
+            color: AppColors.muted.withAlpha(170),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProjectImageViewerPage extends StatelessWidget {
+  const _ProjectImageViewerPage({required this.title, required this.path});
+
+  final String title;
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        actions: [
+          IconButton(
+            tooltip: '修改名称',
+            onPressed: () async {
+              final nextTitle = await showDialog<String>(
+                context: context,
+                builder: (_) => _ProjectImageNameDialog(
+                  title: '修改图片名称',
+                  initialTitle: _customTitleFromProjectImageName(title),
+                ),
+              );
+              if (nextTitle == null || nextTitle.trim().isEmpty) return;
+              if (!context.mounted) return;
+              Navigator.of(context).pop(nextTitle.trim());
+            },
+            icon: const Icon(Icons.edit_rounded),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Center(
+          child: InteractiveViewer(
+            minScale: 0.8,
+            maxScale: 5,
+            child: Image.file(
+              File(path),
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) => const Icon(
+                Icons.image_not_supported_rounded,
+                color: Colors.white70,
+                size: 48,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProjectImageNameDialog extends StatefulWidget {
+  const _ProjectImageNameDialog({
+    required this.title,
+    this.initialTitle = '',
+    this.projectName,
+    this.extension,
+    this.createdAt,
+  });
+
+  final String title;
+  final String initialTitle;
+  final String? projectName;
+  final String? extension;
+  final DateTime? createdAt;
+
+  @override
+  State<_ProjectImageNameDialog> createState() =>
+      _ProjectImageNameDialogState();
+}
+
+class _ProjectImageNameDialogState extends State<_ProjectImageNameDialog> {
+  late final TextEditingController _controller;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialTitle);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final title = _controller.text.trim();
+    if (title.isEmpty) {
+      setState(() => _errorText = '自定义说明不能为空。');
+      return;
+    }
+    Navigator.of(context).pop(title);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final projectName = widget.projectName;
+    final createdAt = widget.createdAt;
+    final extension = widget.extension;
+    final preview =
+        projectName == null || createdAt == null || extension == null
+        ? null
+        : '$projectName-${createdAt.month}.${createdAt.day}-自定义$extension';
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _submit(),
+        decoration: InputDecoration(
+          labelText: '自定义说明',
+          hintText: '例如：竞品截图-首页',
+          helperText: preview == null ? null : '格式：$preview',
+          errorText: _errorText,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('保存')),
+      ],
+    );
+  }
+}
+
+String _customTitleFromProjectImageName(String fileName) {
+  final withoutExtension = fileName.replaceFirst(
+    RegExp(r'\.[A-Za-z0-9]{2,5}$'),
+    '',
+  );
+  final parts = withoutExtension.split('-');
+  if (parts.length >= 3 && RegExp(r'^\d{1,2}\.\d{1,2}$').hasMatch(parts[1])) {
+    return parts.skip(2).join('-');
+  }
+  return withoutExtension;
 }
 
 class _HeatmapSection extends StatefulWidget {
@@ -3311,6 +3669,9 @@ class _ProjectUpdate {
     required this.colorValue,
     this.entryType,
     this.notePath,
+    this.imagePath,
+    this.imageRelativePath,
+    this.mimeType,
     this.recordId,
   });
 
@@ -3322,12 +3683,20 @@ class _ProjectUpdate {
   final int colorValue;
   final String? entryType;
   final String? notePath;
+  final String? imagePath;
+  final String? imageRelativePath;
+  final String? mimeType;
   final int? recordId;
 
   DateTime get createdDate => DateTime.fromMillisecondsSinceEpoch(createdAt);
 
   bool get isLongNote =>
       entryType == 'long_note' && notePath != null && notePath!.isNotEmpty;
+
+  bool get isImageMaterial =>
+      entryType == 'image' &&
+      ((imagePath != null && imagePath!.isNotEmpty) ||
+          (imageRelativePath != null && imageRelativePath!.isNotEmpty));
 
   Map<String, Object?> toJson() {
     return {
@@ -3339,6 +3708,9 @@ class _ProjectUpdate {
       'colorValue': colorValue,
       if (entryType != null) 'entryType': entryType,
       if (notePath != null) 'notePath': notePath,
+      if (imagePath != null) 'imagePath': imagePath,
+      if (imageRelativePath != null) 'imageRelativePath': imageRelativePath,
+      if (mimeType != null) 'mimeType': mimeType,
       if (recordId != null) 'recordId': recordId,
     };
   }
@@ -3357,6 +3729,9 @@ class _ProjectUpdate {
       colorValue: raw['colorValue'] as int? ?? AppColors.primary.toARGB32(),
       entryType: raw['entryType'] as String?,
       notePath: raw['notePath'] as String?,
+      imagePath: raw['imagePath'] as String?,
+      imageRelativePath: raw['imageRelativePath'] as String?,
+      mimeType: raw['mimeType'] as String?,
       recordId: raw['recordId'] as int?,
     );
   }
