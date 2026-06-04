@@ -142,5 +142,6 @@ void main() {
     expect(storedPath, contains('午饭咖啡_53_20260517_180908.jpg'));
     expect(storedPath, contains('photos'));
     expect(await File(storedPath).exists(), isTrue);
+    expect(await source.exists(), isTrue);
   });
 }

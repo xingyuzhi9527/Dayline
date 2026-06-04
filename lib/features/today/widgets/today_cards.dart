@@ -376,47 +376,31 @@ class TodayTrackersCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final trackers = ref.watch(todayActiveTrackersProvider);
-    final loggedIds = ref.watch(todayLoggedTrackerIdsProvider);
     final trackerList = trackers.valueOrNull ?? [];
 
     return _SectionCard(
       title: '今日打卡',
       icon: Icons.mood_rounded,
       child: trackerList.isEmpty
-          ? const _EmptyText('还没有打卡项，写一句“喝水”或“运动”开始记录。')
+          ? const _EmptyText('今天还没有打卡记录。')
           : Wrap(
               spacing: AppSpacing.xs,
               runSpacing: AppSpacing.xs,
               children: trackerList.map((t) {
-                final id = t['id'] as int;
                 final name = t['name'] as String;
-                final isDone = loggedIds.valueOrNull?.contains(id) ?? false;
 
-                return ActionChip(
-                  avatar: Icon(
-                    isDone ? Icons.check_circle : Icons.circle_outlined,
+                return Chip(
+                  avatar: const Icon(
+                    Icons.check_circle,
                     size: 18,
-                    color: isDone ? const Color(0xFF7CB342) : AppColors.muted,
+                    color: Color(0xFF7CB342),
                   ),
                   label: Text(name),
-                  backgroundColor: isDone
-                      ? const Color(0xFF7CB342).withAlpha(22)
-                      : null,
-                  onPressed: () => _logTracker(ref, id),
+                  backgroundColor: const Color(0xFF7CB342).withAlpha(22),
                 );
               }).toList(),
             ),
     );
-  }
-
-  Future<void> _logTracker(WidgetRef ref, int trackerId) async {
-    final today = DateTime.now();
-    await ref
-        .read(trackerLogsRepositoryProvider)
-        .create(trackerId: trackerId, date: today);
-    ref.invalidate(todayLoggedTrackerIdsProvider);
-    ref.invalidate(todayTrackerLogCountProvider);
-    ref.read(dataVersionProvider.notifier).increment();
   }
 }
 

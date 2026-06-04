@@ -49,7 +49,15 @@ final todayActiveTrackersProvider = FutureProvider<List<Map<String, Object?>>>((
   ref,
 ) async {
   ref.watch(dataVersionProvider);
-  return ref.read(trackersRepositoryProvider).findActive();
+  final today = DateTime.now();
+  final logs = await ref.read(trackerLogsRepositoryProvider).findByDate(today);
+  if (logs.isEmpty) return const [];
+
+  final loggedIds = logs.map((l) => l['tracker_id'] as int).toSet();
+  final trackers = await ref.read(trackersRepositoryProvider).findAll();
+  return trackers
+      .where((tracker) => loggedIds.contains(tracker['id'] as int))
+      .toList(growable: false);
 });
 
 final todayLoggedTrackerIdsProvider = FutureProvider<Set<int>>((ref) async {

@@ -135,7 +135,15 @@ abstract final class _KW {
   );
 
   static final memoContext = RegExp(
-    r'(备忘|忘记|忘了|忘掉|计划|方案|想法|灵感|思路|考虑|打算|想要|需要做|设计|开发|实现|功能|优化|修复|改进|增加|添加|修改|调整|需求|问题|bug)',
+    r'(备忘|忘记|忘了|忘掉|计划|方案|想法|灵感|思路|考虑|打算|想要|需要做|设计|开发|实现|功能|优化|修复|改进|增加|添加|修改|调整|需求|问题|bug|文件|测试|规则|git|刷新|检测|发现|代码|项目)',
+    caseSensitive: false,
+  );
+  static final nonExpenseAmountContext = RegExp(
+    r'(工资|薪资|收入|房贷|申报|报销|预算|以上|以内|不超过|至少|额度|规则|可申报|可报销)',
+  );
+  static final expenseIntent = RegExp(
+    r'(买|买了|花了|花费|消费|支出|付款|付了|午饭|午餐|晚饭|晚餐|早饭|早餐|外卖|打车|车费|水电费|房租|聚餐|咖啡|奶茶|小吃|餐|饭|书|手机壳|衣服|卫衣)',
+    caseSensitive: false,
   );
 }
 
@@ -201,7 +209,9 @@ class LuiLiteParser {
     }
 
     final expenseItems = _extractExpenseItems(input);
-    if (_KW.expense.hasMatch(input) && expenseItems.isNotEmpty) {
+    if (_KW.expense.hasMatch(input) &&
+        expenseItems.isNotEmpty &&
+        !_shouldKeepAmountAsMemo(input)) {
       meta.addAll(expenseMetadataForItems(expenseItems));
       return ParsedInputType.expense;
     }
@@ -221,7 +231,9 @@ class LuiLiteParser {
     if (_looksLikeMood(input)) return ParsedInputType.mood;
 
     if (_KW.tracker.hasMatch(input)) {
-      if (_isLikelyMemo(input)) return ParsedInputType.memo;
+      if (_isLikelyMemo(input) && !_hasExplicitTrackerIntent(input)) {
+        return ParsedInputType.memo;
+      }
       final duration = _extractDuration(input);
       if (duration != null) meta['durationMinutes'] = duration;
       return ParsedInputType.tracker;
@@ -231,13 +243,24 @@ class LuiLiteParser {
   }
 
   static bool _looksLikeExpense(String input) {
-    return _Re.amountPrefix.hasMatch(input) ||
+    final hasAmount =
+        _Re.amountPrefix.hasMatch(input) ||
         _Re.amountSuffix.hasMatch(input) ||
         _Re.chineseAmountSuffix.hasMatch(input);
+    return hasAmount && !_shouldKeepAmountAsMemo(input);
+  }
+
+  static bool _shouldKeepAmountAsMemo(String input) {
+    if (!_KW.nonExpenseAmountContext.hasMatch(input)) return false;
+    return !_KW.expenseIntent.hasMatch(input);
   }
 
   static bool _looksLikeMood(String input) {
     if (!_KW.mood.hasMatch(input)) return false;
+    if (_KW.memoContext.hasMatch(input) &&
+        !RegExp(r'^(心情|情绪|感觉|状态|今天|现在)').hasMatch(input)) {
+      return false;
+    }
     if (_KW.tracker.hasMatch(input) && !_KW.memoContext.hasMatch(input)) {
       return RegExp(r'^(心情|情绪|感觉|状态|今天|现在)').hasMatch(input);
     }
@@ -247,6 +270,12 @@ class LuiLiteParser {
   static bool _isLikelyMemo(String input) {
     if (_KW.memoContext.hasMatch(input)) return true;
     return false;
+  }
+
+  static bool _hasExplicitTrackerIntent(String input) {
+    return RegExp(
+      r'^(打卡|完成|今天)?\s*(跑步|慢跑|运动|健身|训练|瑜伽|游泳|骑行|散步|学习|看书|读书|阅读|开会|上班|下班|加班|起床|喝水|吃药|冥想|写日记|复盘|打扫|洗衣服|聚会|约会|体检|看病|画画|练琴)',
+    ).hasMatch(input);
   }
 
   static String? _resolveBodyMetric(String input) {

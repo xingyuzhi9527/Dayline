@@ -16,5 +16,20 @@ void main() {
       expect(parsed.type, ParsedInputType.memo);
       expect(parsed.content, '忘记记录昨天跑步这件事');
     });
+
+    test('keeps technical debugging note as memo', () {
+      final parsed = LuiLiteParser.parse('电脑风扇狂转，检测发现文件大量测试文件，没加入规则，git一直刷新状态');
+
+      expect(parsed.type, ParsedInputType.memo);
+      expect(parsed.content, '电脑风扇狂转，检测发现文件大量测试文件，没加入规则，git一直刷新状态');
+    });
+
+    test('keeps salary reimbursement policy with amounts as memo', () {
+      final parsed = LuiLiteParser.parse('10000元以上工资可申报1000的房贷报销');
+
+      expect(parsed.type, ParsedInputType.memo);
+      expect(parsed.metadata['amount'], isNull);
+      expect(parsed.metadata['expenseItems'], isNull);
+    });
   });
 }

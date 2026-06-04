@@ -23,6 +23,17 @@ final flashRecordProvider =
 
 class FlashRecordNotifier extends Notifier<FlashRecordState> {
   static const _saveTimeout = Duration(seconds: 8);
+  static final _riskyAmountMemoContext = RegExp(
+    r'(工资|薪资|收入|房贷|申报|报销|预算|以上|以内|不超过|至少|额度|规则)',
+  );
+  static final _technicalMemoContext = RegExp(
+    r'(文件|测试|规则|git|刷新|检测|发现|代码|项目|需求|bug|修复|优化|功能)',
+    caseSensitive: false,
+  );
+  static final _amountToken = RegExp(
+    r'(?:¥|￥|RMB)\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:元|块|块钱)',
+    caseSensitive: false,
+  );
 
   late final SttEngine _sttEngine;
   SttListenSession? _sttSession;
@@ -445,6 +456,18 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     if (trimmed.isEmpty) return;
 
     final parsed = LuiLiteParser.parse(trimmed);
+    if (_requiresTextConfirmation(trimmed, parsed)) {
+      state = state.copyWith(
+        phase: FlashPhase.confirming,
+        rawText: trimmed,
+        source: 'text',
+        parsedInput: parsed,
+        textSaving: false,
+        errorMessage: null,
+      );
+      return;
+    }
+
     state = state.copyWith(
       phase: FlashPhase.idle,
       rawText: trimmed,
@@ -478,6 +501,19 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         errorMessage: e.toString(),
       );
     }
+  }
+
+  static bool _requiresTextConfirmation(String rawText, ParsedInput parsed) {
+    if (parsed.type == ParsedInputType.expense) {
+      final amountCount = _amountToken.allMatches(rawText).length;
+      return amountCount > 1 || _riskyAmountMemoContext.hasMatch(rawText);
+    }
+
+    if (parsed.type == ParsedInputType.tracker) {
+      return rawText.length > 32 || _technicalMemoContext.hasMatch(rawText);
+    }
+
+    return false;
   }
 
   // ---- persistence ----

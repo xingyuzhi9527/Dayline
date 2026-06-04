@@ -15,6 +15,7 @@ import '../../../core/parser/expense_note_cleaner.dart';
 import '../../../core/parser/lui_lite_parser.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../dashboard/daily_note_draft.dart';
 import '../../long_note/long_note_editor_page.dart';
 import '../../long_note/long_note_reader_page.dart';
 import '../../photo_moment/photo_moment_editor_page.dart';
@@ -459,6 +460,7 @@ class _TimelineTile extends ConsumerWidget {
         );
 
     ref.read(dataVersionProvider.notifier).increment();
+    await ensureDailyDraftAfterActivity(ref, _dateFromKey(event.date));
     if (!context.mounted) return false;
     ref.invalidate(timelineEventsProvider);
     _showTimelineSnack(context, '已转成消费，盘页面会计入统计。');
@@ -491,6 +493,7 @@ class _TimelineTile extends ConsumerWidget {
         );
 
     ref.read(dataVersionProvider.notifier).increment();
+    await ensureDailyDraftAfterActivity(ref, _dateFromKey(event.date));
     if (!context.mounted) return false;
     ref.invalidate(timelineEventsProvider);
     _showTimelineSnack(context, '已转成待办。');
@@ -1182,11 +1185,11 @@ class _TimelineEventEditSheetState
                         child: const Text('取消'),
                       ),
                     ),
-                    if (widget.event.source == TimelineEventSource.record) ...[
+                    if (_canDeleteEvent(widget.event.source)) ...[
                       const SizedBox(width: AppSpacing.sm),
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: _saving ? null : _deleteRecord,
+                          onPressed: _saving ? null : _deleteEvent,
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.accent,
                             side: const BorderSide(color: AppColors.accent),
@@ -1357,16 +1360,34 @@ class _TimelineEventEditSheetState
     );
   }
 
-  Future<void> _deleteRecord() async {
+  bool _canDeleteEvent(TimelineEventSource source) {
+    return source == TimelineEventSource.record ||
+        source == TimelineEventSource.expense;
+  }
+
+  Future<void> _deleteEvent() async {
     setState(() {
       _saving = true;
       _errorText = null;
     });
     try {
-      await ref
-          .read(recordsRepositoryProvider)
-          .softDelete(widget.event.sourceId);
+      switch (widget.event.source) {
+        case TimelineEventSource.record:
+          await ref
+              .read(recordsRepositoryProvider)
+              .softDelete(widget.event.sourceId);
+        case TimelineEventSource.expense:
+          await ref
+              .read(expensesRepositoryProvider)
+              .delete(widget.event.sourceId);
+        case TimelineEventSource.todo:
+        case TimelineEventSource.trackerLog:
+        case TimelineEventSource.focusSession:
+        case TimelineEventSource.bodyLog:
+          throw StateError('This event type cannot be deleted here.');
+      }
       ref.read(dataVersionProvider.notifier).increment();
+      await ensureDailyDraftAfterActivity(ref, _dateFromKey(widget.event.date));
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       setState(() {
@@ -1508,6 +1529,7 @@ class _TimelineEventEditSheetState
       }
 
       ref.read(dataVersionProvider.notifier).increment();
+      await ensureDailyDraftAfterActivity(ref, _dateFromKey(widget.event.date));
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {

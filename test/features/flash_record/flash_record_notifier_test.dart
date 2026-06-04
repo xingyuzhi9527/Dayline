@@ -6,6 +6,7 @@ import 'package:liflow_app/core/database/local_database.dart';
 import 'package:liflow_app/core/database/repositories.dart';
 import 'package:liflow_app/core/database/repository_providers.dart';
 import 'package:liflow_app/core/parser/expense_line_item.dart';
+import 'package:liflow_app/core/parser/lui_lite_parser.dart';
 import 'package:liflow_app/core/stt/stt_engine.dart';
 import 'package:liflow_app/core/stt/stt_providers.dart';
 import 'package:liflow_app/features/flash_record/flash_record_notifier.dart';
@@ -74,6 +75,80 @@ void main() {
       );
       expect(createdAt.hour, 8);
       expect(createdAt.minute, 5);
+    },
+  );
+
+  test(
+    'given a salary reimbursement note with amounts, when saving text, then stores memo only',
+    () async {
+      final database = LocalDatabase(
+        databaseFactory: databaseFactoryFfi,
+        databasePath: inMemoryDatabasePath,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          sttEngineProvider.overrideWithValue(_FakeSttEngine()),
+        ],
+      );
+      addTearDown(container.dispose);
+      addTearDown(database.close);
+
+      await container
+          .read(flashRecordProvider.notifier)
+          .saveAsText('10000元以上工资可申报1000的房贷报销');
+
+      final records = await container
+          .read(recordsRepositoryProvider)
+          .findByDate(DateTime.now());
+      final expenses = await container
+          .read(expensesRepositoryProvider)
+          .findByDate(DateTime.now());
+
+      expect(records, hasLength(1));
+      expect(records.single['type'], 'memo');
+      expect(records.single['content'], '10000元以上工资可申报1000的房贷报销');
+      expect(expenses, isEmpty);
+    },
+  );
+
+  test(
+    'given multiple expense amounts, when saving text, then asks for confirmation before persistence',
+    () async {
+      final database = LocalDatabase(
+        databaseFactory: databaseFactoryFfi,
+        databasePath: inMemoryDatabasePath,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          sttEngineProvider.overrideWithValue(_FakeSttEngine()),
+        ],
+      );
+      addTearDown(container.dispose);
+      addTearDown(database.close);
+
+      final notifier = container.read(flashRecordProvider.notifier);
+      await notifier.saveAsText('午饭35元 咖啡18元');
+
+      var state = container.read(flashRecordProvider);
+      expect(state.phase, FlashPhase.confirming);
+      expect(state.parsedInput?.type, ParsedInputType.expense);
+      expect(
+        await container
+            .read(expensesRepositoryProvider)
+            .findByDate(DateTime.now()),
+        isEmpty,
+      );
+
+      await notifier.save();
+
+      state = container.read(flashRecordProvider);
+      final expenses = await container
+          .read(expensesRepositoryProvider)
+          .findByDate(DateTime.now());
+      expect(state.phase, FlashPhase.saved);
+      expect(expenses, hasLength(2));
     },
   );
 

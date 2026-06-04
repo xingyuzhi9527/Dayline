@@ -54,11 +54,24 @@ Future<void> ensureDailyDraftAfterActivity(Object ref, DateTime date) async {
     if (!await dirService.isConfigured()) return;
 
     final noteService = MarkdownNoteService(dirService);
-    if (await noteService.findDailyNote(day) != null) return;
-
     final activityCount = await _activityCount(ref, day);
-    if (activityCount == 0) return;
+    final location = await noteService.findDailyNote(day);
+    if (location != null) {
+      final storage = MarkdownStorageService(dirService);
+      final raw = await storage.readTextFileLocation(location);
+      if (!isDailyNoteDraftContent(raw)) return;
 
+      final updated = refreshDailyDraftActivityCount(
+        raw,
+        activityCount: activityCount,
+      );
+      if (updated != raw) {
+        await storage.writeTextFileLocation(location, updated);
+      }
+      return;
+    }
+
+    if (activityCount == 0) return;
     await noteService.saveDailyNote(
       day,
       buildDailyDraftMarkdown(date: day, activityCount: activityCount),
@@ -70,6 +83,32 @@ Future<void> ensureDailyDraftAfterActivity(Object ref, DateTime date) async {
 
 bool isDailyNoteDraftContent(String raw) {
   return RegExp(r'^status:\s*draft\s*$', multiLine: true).hasMatch(raw);
+}
+
+String refreshDailyDraftActivityCount(
+  String raw, {
+  required int activityCount,
+  DateTime? generatedAt,
+}) {
+  if (!isDailyNoteDraftContent(raw)) return raw;
+
+  var updated = raw;
+  final now = (generatedAt ?? DateTime.now()).toIso8601String();
+  updated = _upsertFrontMatterLine(updated, 'generated_at', now);
+  updated = _upsertFrontMatterLine(updated, 'record_count', '$activityCount');
+  return updated;
+}
+
+String _upsertFrontMatterLine(String raw, String key, String value) {
+  final frontMatterEnd = raw.indexOf('\n---\n', 4);
+  if (!raw.startsWith('---\n') || frontMatterEnd == -1) return raw;
+
+  final linePattern = RegExp('^$key:.*\$', multiLine: true);
+  if (linePattern.hasMatch(raw.substring(0, frontMatterEnd))) {
+    return raw.replaceFirst(linePattern, '$key: $value');
+  }
+
+  return '${raw.substring(0, frontMatterEnd)}\n$key: $value${raw.substring(frontMatterEnd)}';
 }
 
 String buildDailyDraftMarkdown({

@@ -90,6 +90,7 @@ class PhotoMomentService {
       sourceImagePath,
       writtenAt,
       filenameLabel: filenameLabel,
+      copyToVisibleDocuments: false,
     );
 
     final recordId = await _recordsRepository.create(
@@ -117,8 +118,6 @@ class PhotoMomentService {
       await _recordsRepository.permanentDelete(recordId);
       rethrow;
     }
-
-    await _cleanupTempCapture(sourceImagePath, storedPath);
     return recordId;
   }
 
@@ -131,6 +130,7 @@ class PhotoMomentService {
     final attachments = await _mediaAttachmentsRepository.findAll();
     for (final attachment in attachments) {
       if (attachment['media_type'] != 'image') continue;
+      if (attachment['source_type'] == 'expense_receipt') continue;
 
       final storedPath = attachment['local_path'] as String?;
       if (storedPath == null || storedPath.isEmpty) continue;
@@ -197,6 +197,7 @@ class PhotoMomentService {
     String sourceImagePath,
     DateTime writtenAt, {
     String? filenameLabel,
+    bool copyToVisibleDocuments = true,
   }) async {
     final sourceFile = File(sourceImagePath);
     if (!await sourceFile.exists()) {
@@ -214,7 +215,9 @@ class PhotoMomentService {
     final targetPath = p.join(photoDir, filename);
 
     await sourceFile.copy(targetPath);
-    await _copyPhotoToVisibleDocuments(targetPath, writtenAt);
+    if (copyToVisibleDocuments) {
+      await _copyPhotoToVisibleDocuments(targetPath, writtenAt);
+    }
     return targetPath;
   }
 
