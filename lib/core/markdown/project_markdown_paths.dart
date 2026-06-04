@@ -48,12 +48,17 @@ class ProjectMarkdownPaths {
     required String projectId,
     required String projectName,
     required String filename,
+    String? folderName,
   }) {
-    return p.posix.join(
+    final folder = folderName == null || folderName.trim().isEmpty
+        ? null
+        : _safeFilePart(folderName, fallback: 'materials');
+    return p.posix.joinAll([
       projectFolder(projectId: projectId, projectName: projectName),
       'materials',
+      ?folder,
       filename,
-    );
+    ]);
   }
 
   static String normalLongNote({

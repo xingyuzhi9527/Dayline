@@ -403,31 +403,29 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
 
     setState(() => _addingProjectImage = true);
     try {
-      final image = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 94,
-      );
-      if (!mounted || image == null) return;
+      final images = await _imagePicker.pickMultiImage(imageQuality: 94);
+      if (!mounted || images.isEmpty) return;
 
       final createdAt = DateTime.now();
+      final firstImagePath = images.first.path;
       final imageTitle = await showDialog<String>(
         context: context,
         builder: (_) => _ProjectImageNameDialog(
           title: '保存图片资料',
           projectName: project.name,
-          extension: p.extension(image.path).isEmpty
+          extension: p.extension(firstImagePath).isEmpty
               ? '.jpg'
-              : p.extension(image.path).toLowerCase(),
+              : p.extension(firstImagePath).toLowerCase(),
           createdAt: createdAt,
         ),
       );
       if (!mounted || imageTitle == null || imageTitle.trim().isEmpty) return;
 
-      await addProjectImageMaterial(
+      await addProjectImageMaterials(
         ref,
         projectId: project.id,
         projectName: project.name,
-        sourceImagePath: image.path,
+        sourceImagePaths: images.map((image) => image.path).toList(),
         title: imageTitle,
         createdAt: createdAt,
       );
@@ -513,7 +511,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   }
 
   Future<void> _openProjectImage(_ProjectUpdate update) async {
-    final localPath = update.imagePath;
+    final localPath = update.primaryImagePath;
     if (localPath != null && localPath.isNotEmpty) {
       final file = File(localPath);
       if (await file.exists()) {
@@ -522,7 +520,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       }
     }
 
-    final relativePath = update.imageRelativePath;
+    final relativePath = update.primaryImageRelativePath;
     if (relativePath == null || relativePath.isEmpty) {
       _showProjectSnack('这张图片资料缺少文件路径');
       return;
@@ -557,15 +555,15 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     String imagePath,
   ) async {
     if (!mounted) return;
-    final renamed = await Navigator.of(context).push<String>(
+    final result = await Navigator.of(context).push<_ProjectImageViewerResult>(
       MaterialPageRoute(
         builder: (_) =>
             _ProjectImageViewerPage(title: update.text, path: imagePath),
       ),
     );
-    if (renamed == null || renamed.trim().isEmpty || !mounted) return;
+    if (result == null || !mounted) return;
 
-    final relativePath = update.imageRelativePath;
+    final relativePath = update.primaryImageRelativePath;
     final project = _selectedProject;
     if (project == null || relativePath == null || relativePath.isEmpty) {
       _showProjectSnack('这张图片资料缺少项目路径');
@@ -573,19 +571,35 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     }
 
     try {
-      await updateProjectImageMaterialName(
-        ref,
-        projectId: project.id,
-        projectName: project.name,
-        imageRelativePath: relativePath,
-        title: renamed,
-        updatedAt: DateTime.now(),
-      );
+      switch (result.action) {
+        case _ProjectImageViewerAction.rename:
+          final title = result.title?.trim();
+          if (title == null || title.isEmpty) return;
+          await updateProjectImageMaterialName(
+            ref,
+            projectId: project.id,
+            projectName: project.name,
+            imageRelativePath: relativePath,
+            title: title,
+            updatedAt: DateTime.now(),
+          );
+        case _ProjectImageViewerAction.delete:
+          await deleteProjectImageMaterial(
+            ref,
+            projectId: project.id,
+            imageRelativePath: relativePath,
+            updatedAt: DateTime.now(),
+          );
+      }
       if (!mounted) return;
       await _loadProjects();
-      _showProjectSnack('图片名称已更新');
+      _showProjectSnack(
+        result.action == _ProjectImageViewerAction.delete
+            ? '图片资料已删除'
+            : '图片名称已更新',
+      );
     } catch (e) {
-      _showProjectSnack('修改图片名称失败：$e');
+      _showProjectSnack('处理图片资料失败：$e');
     }
   }
 
@@ -2120,9 +2134,10 @@ class _UpdateRow extends StatelessWidget {
                         ),
                       ),
                     ),
-                  if (update.isImageMaterial && update.imagePath != null) ...[
+                  if (update.isImageMaterial &&
+                      update.primaryImagePath != null) ...[
                     const SizedBox(height: AppSpacing.xs),
-                    _ProjectImagePreview(path: update.imagePath!),
+                    _ProjectImagePreview(path: update.primaryImagePath!),
                   ],
                 ],
               ),
@@ -2187,9 +2202,36 @@ class _ProjectImageViewerPage extends StatelessWidget {
               );
               if (nextTitle == null || nextTitle.trim().isEmpty) return;
               if (!context.mounted) return;
-              Navigator.of(context).pop(nextTitle.trim());
+              Navigator.of(
+                context,
+              ).pop(_ProjectImageViewerResult.rename(nextTitle.trim()));
             },
             icon: const Icon(Icons.edit_rounded),
+          ),
+          IconButton(
+            tooltip: '删除资料',
+            onPressed: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: const Text('删除这份图片资料？'),
+                  content: const Text('会从项目最近更新移除，并删除对应图片文件。'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('取消'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('删除'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed != true || !context.mounted) return;
+              Navigator.of(context).pop(_ProjectImageViewerResult.delete());
+            },
+            icon: const Icon(Icons.delete_outline_rounded),
           ),
         ],
       ),
@@ -2212,6 +2254,26 @@ class _ProjectImageViewerPage extends StatelessWidget {
       ),
     );
   }
+}
+
+enum _ProjectImageViewerAction { rename, delete }
+
+class _ProjectImageViewerResult {
+  const _ProjectImageViewerResult._(this.action, this.title);
+
+  factory _ProjectImageViewerResult.rename(String title) {
+    return _ProjectImageViewerResult._(_ProjectImageViewerAction.rename, title);
+  }
+
+  factory _ProjectImageViewerResult.delete() {
+    return const _ProjectImageViewerResult._(
+      _ProjectImageViewerAction.delete,
+      null,
+    );
+  }
+
+  final _ProjectImageViewerAction action;
+  final String? title;
 }
 
 class _ProjectImageNameDialog extends StatefulWidget {
@@ -3671,6 +3733,9 @@ class _ProjectUpdate {
     this.notePath,
     this.imagePath,
     this.imageRelativePath,
+    this.imagePaths = const [],
+    this.imageRelativePaths = const [],
+    this.mimeTypes = const [],
     this.mimeType,
     this.recordId,
   });
@@ -3685,6 +3750,9 @@ class _ProjectUpdate {
   final String? notePath;
   final String? imagePath;
   final String? imageRelativePath;
+  final List<String> imagePaths;
+  final List<String> imageRelativePaths;
+  final List<String> mimeTypes;
   final String? mimeType;
   final int? recordId;
 
@@ -3696,7 +3764,19 @@ class _ProjectUpdate {
   bool get isImageMaterial =>
       entryType == 'image' &&
       ((imagePath != null && imagePath!.isNotEmpty) ||
-          (imageRelativePath != null && imageRelativePath!.isNotEmpty));
+          (imageRelativePath != null && imageRelativePath!.isNotEmpty) ||
+          imagePaths.isNotEmpty ||
+          imageRelativePaths.isNotEmpty);
+
+  String? get primaryImagePath {
+    if (imagePaths.isNotEmpty) return imagePaths.first;
+    return imagePath;
+  }
+
+  String? get primaryImageRelativePath {
+    if (imageRelativePaths.isNotEmpty) return imageRelativePaths.first;
+    return imageRelativePath;
+  }
 
   Map<String, Object?> toJson() {
     return {
@@ -3710,6 +3790,10 @@ class _ProjectUpdate {
       if (notePath != null) 'notePath': notePath,
       if (imagePath != null) 'imagePath': imagePath,
       if (imageRelativePath != null) 'imageRelativePath': imageRelativePath,
+      if (imagePaths.isNotEmpty) 'imagePaths': imagePaths,
+      if (imageRelativePaths.isNotEmpty)
+        'imageRelativePaths': imageRelativePaths,
+      if (mimeTypes.isNotEmpty) 'mimeTypes': mimeTypes,
       if (mimeType != null) 'mimeType': mimeType,
       if (recordId != null) 'recordId': recordId,
     };
@@ -3731,6 +3815,9 @@ class _ProjectUpdate {
       notePath: raw['notePath'] as String?,
       imagePath: raw['imagePath'] as String?,
       imageRelativePath: raw['imageRelativePath'] as String?,
+      imagePaths: _stringList(raw['imagePaths']),
+      imageRelativePaths: _stringList(raw['imageRelativePaths']),
+      mimeTypes: _stringList(raw['mimeTypes']),
       mimeType: raw['mimeType'] as String?,
       recordId: raw['recordId'] as int?,
     );
@@ -3749,6 +3836,14 @@ List<_ProjectInfo> _decodeProjects(String? raw) {
   } catch (_) {
     return const [];
   }
+}
+
+List<String> _stringList(Object? raw) {
+  if (raw is! List) return const [];
+  return [
+    for (final item in raw)
+      if (item is String && item.isNotEmpty) item,
+  ];
 }
 
 DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);

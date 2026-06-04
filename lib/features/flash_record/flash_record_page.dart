@@ -1468,11 +1468,6 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                   label: '图片',
                   onTap: _capturingPhoto ? null : _handlePickImages,
                 ),
-                const _ToolDrawerAction(
-                  icon: Icons.mic_none_rounded,
-                  label: '录音',
-                  enabled: false,
-                ),
               ],
             ),
           ],
@@ -2024,17 +2019,15 @@ class _ToolDrawerAction extends StatelessWidget {
     required this.icon,
     required this.label,
     this.onTap,
-    this.enabled = true,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
-  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
-    final active = enabled && onTap != null;
+    final active = onTap != null;
     final tint = active ? AppColors.primary : AppColors.muted.withAlpha(160);
 
     return Material(

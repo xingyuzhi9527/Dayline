@@ -33,12 +33,27 @@ class ProjectImageMaterial {
     required this.localPath,
     required this.mimeType,
     required this.fileName,
+    this.relativePaths = const [],
+    this.localPaths = const [],
+    this.mimeTypes = const [],
+    this.fileNames = const [],
   });
 
   final String relativePath;
   final String localPath;
   final String mimeType;
   final String fileName;
+  final List<String> relativePaths;
+  final List<String> localPaths;
+  final List<String> mimeTypes;
+  final List<String> fileNames;
+
+  List<String> get allRelativePaths =>
+      relativePaths.isEmpty ? [relativePath] : relativePaths;
+  List<String> get allLocalPaths =>
+      localPaths.isEmpty ? [localPath] : localPaths;
+  List<String> get allMimeTypes => mimeTypes.isEmpty ? [mimeType] : mimeTypes;
+  List<String> get allFileNames => fileNames.isEmpty ? [fileName] : fileNames;
 }
 
 Future<List<ProjectOption>> loadProjectOptions(Ref ref) async {
@@ -204,6 +219,12 @@ Future<ProjectImageMaterial> addProjectImageMaterial(
   final settings = ref.read(appSettingsRepositoryProvider);
   final directoryService = MarkdownDirectoryService(settings);
   final storage = MarkdownStorageService(directoryService);
+  await _ensureProjectMaterialsNoMedia(
+    directoryService,
+    storage,
+    projectId: projectId,
+    projectName: projectName,
+  );
   final extension = p.extension(sourceImagePath).toLowerCase();
   final safeExtension = extension.isEmpty ? '.jpg' : extension;
   final fileName = _buildProjectImageFilename(
@@ -272,6 +293,187 @@ Future<ProjectImageMaterial> addProjectImageMaterial(
     mimeType: mimeType,
     fileName: fileName,
   );
+}
+
+Future<ProjectImageMaterial> addProjectImageMaterials(
+  dynamic ref, {
+  required String projectId,
+  required String projectName,
+  required List<String> sourceImagePaths,
+  String? title,
+  DateTime? createdAt,
+}) async {
+  if (sourceImagePaths.isEmpty) {
+    throw StateError('No project images selected.');
+  }
+  if (sourceImagePaths.length == 1) {
+    return addProjectImageMaterial(
+      ref,
+      projectId: projectId,
+      projectName: projectName,
+      sourceImagePath: sourceImagePaths.single,
+      title: title,
+      createdAt: createdAt,
+    );
+  }
+
+  final writtenAt = createdAt ?? DateTime.now();
+  for (final sourceImagePath in sourceImagePaths) {
+    final sourceFile = File(sourceImagePath);
+    if (!await sourceFile.exists()) {
+      throw StateError('Project image file not found: $sourceImagePath');
+    }
+  }
+
+  final settings = ref.read(appSettingsRepositoryProvider);
+  final directoryService = MarkdownDirectoryService(settings);
+  final storage = MarkdownStorageService(directoryService);
+  final folderName = await _uniqueProjectImageFolderName(
+    directoryService,
+    projectId: projectId,
+    projectName: projectName,
+    folderName: _buildProjectImageFolderName(
+      projectName: projectName,
+      writtenAt: writtenAt,
+      customTitle: title,
+    ),
+  );
+  await _ensureProjectMaterialsNoMedia(
+    directoryService,
+    storage,
+    projectId: projectId,
+    projectName: projectName,
+    folderName: folderName,
+  );
+
+  final usedNames = <String>{};
+  final relativePaths = <String>[];
+  final localPaths = <String>[];
+  final mimeTypes = <String>[];
+  final fileNames = <String>[];
+
+  for (final sourceImagePath in sourceImagePaths) {
+    final fileName = _uniqueBasename(p.basename(sourceImagePath), usedNames);
+    final relativePath = ProjectMarkdownPaths.projectImageMaterial(
+      projectId: projectId,
+      projectName: projectName,
+      folderName: folderName,
+      filename: fileName,
+    );
+    final mimeType = _mimeTypeForPath(fileName);
+
+    await storage.writeRelativeBinaryFile(
+      relativePath: relativePath,
+      sourcePath: sourceImagePath,
+      mimeType: mimeType,
+    );
+
+    final localPath = await _ensureLocalProjectImageCopy(
+      directoryService,
+      relativePath: relativePath,
+      sourceImagePath: sourceImagePath,
+    );
+    relativePaths.add(relativePath);
+    localPaths.add(localPath);
+    mimeTypes.add(mimeType);
+    fileNames.add(fileName);
+  }
+
+  final displayName = '$folderName（${fileNames.length}张）';
+  await _updateProject(
+    ref,
+    projectId: projectId,
+    updatedAt: writtenAt,
+    archiveEntry: ProjectArchiveEntry(
+      text: '图片资料：$displayName',
+      source: '图片资料',
+      createdAt: writtenAt,
+    ),
+    update: (project) {
+      final updates = _listOfMaps(project['updates']);
+      final writtenTime = _formatProjectTime(writtenAt);
+      return {
+        ...project,
+        'lastUpdate': writtenTime,
+        'updates': [
+          {
+            'id': '${writtenAt.microsecondsSinceEpoch}-image-material',
+            'time': writtenTime,
+            'createdAt': writtenAt.millisecondsSinceEpoch,
+            'source': '图片资料',
+            'text': displayName,
+            'entryType': 'image',
+            'imagePath': localPaths.first,
+            'imageRelativePath': relativePaths.first,
+            'mimeType': mimeTypes.first,
+            'imagePaths': localPaths,
+            'imageRelativePaths': relativePaths,
+            'mimeTypes': mimeTypes,
+            'colorValue': AppColors.secondary.toARGB32(),
+          },
+          ...updates.take(_projectUpdatesRetainLimit - 1),
+        ],
+      };
+    },
+  );
+
+  return ProjectImageMaterial(
+    relativePath: relativePaths.first,
+    localPath: localPaths.first,
+    mimeType: mimeTypes.first,
+    fileName: fileNames.first,
+    relativePaths: relativePaths,
+    localPaths: localPaths,
+    mimeTypes: mimeTypes,
+    fileNames: fileNames,
+  );
+}
+
+Future<void> deleteProjectImageMaterial(
+  dynamic ref, {
+  required String projectId,
+  required String imageRelativePath,
+  required DateTime updatedAt,
+}) async {
+  final settings = ref.read(appSettingsRepositoryProvider);
+  final directoryService = MarkdownDirectoryService(settings);
+  final storage = MarkdownStorageService(directoryService);
+  final root = await directoryService.ensureRoot();
+
+  Map<String, Object?>? removedUpdate;
+  await _updateProject(
+    ref,
+    projectId: projectId,
+    updatedAt: updatedAt,
+    update: (project) {
+      final updates = _listOfMaps(project['updates']);
+      final nextUpdates = <Map<String, Object?>>[];
+      for (final update in updates) {
+        if (_matchesImageMaterialUpdate(
+          update,
+          imageRelativePath: imageRelativePath,
+        )) {
+          removedUpdate = update;
+        } else {
+          nextUpdates.add(update);
+        }
+      }
+      if (removedUpdate == null) return project;
+      return {
+        ...project,
+        'lastUpdate': _formatProjectTime(updatedAt),
+        'updates': nextUpdates,
+      };
+    },
+  );
+
+  final update = removedUpdate;
+  if (update == null) return;
+
+  for (final relativePath in _imageRelativePathsForUpdate(update)) {
+    await _deleteLocalProjectFile(root, relativePath);
+    await _deleteTreeProjectFile(storage, relativePath);
+  }
 }
 
 Future<void> updateProjectLongNoteTitle(
@@ -409,6 +611,22 @@ Future<void> updateProjectImageMaterialName(
                 'imagePath': newLocalPath,
                 'imageRelativePath': newRelativePath,
                 'mimeType': _mimeTypeForPath(newRelativePath),
+                'imagePaths': _replaceStringList(
+                  update['imagePaths'],
+                  oldLocalPath ?? sourceLocalFile.path,
+                  newLocalPath,
+                ),
+                'imageRelativePaths': _replaceStringList(
+                  update['imageRelativePaths'],
+                  oldRelativePath,
+                  newRelativePath,
+                ),
+                'mimeTypes': _replaceStringList(
+                  update['mimeTypes'],
+                  _mimeTypeForPath(oldRelativePath),
+                  _mimeTypeForPath(newRelativePath),
+                  replaceFirstOnly: true,
+                ),
               }
             else
               update,
@@ -485,7 +703,60 @@ bool _matchesImageMaterialUpdate(
   required String imageRelativePath,
 }) {
   if (update['entryType'] != 'image') return false;
+  final relativePaths = update['imageRelativePaths'];
+  if (relativePaths is List && relativePaths.contains(imageRelativePath)) {
+    return true;
+  }
   return update['imageRelativePath'] == imageRelativePath;
+}
+
+List<String> _imageRelativePathsForUpdate(Map<String, Object?> update) {
+  final relativePaths = update['imageRelativePaths'];
+  if (relativePaths is List) {
+    final paths = [
+      for (final path in relativePaths)
+        if (path is String && path.isNotEmpty) path,
+    ];
+    if (paths.isNotEmpty) return paths;
+  }
+  final single = update['imageRelativePath'];
+  return single is String && single.isNotEmpty ? [single] : const [];
+}
+
+Future<void> _deleteLocalProjectFile(String root, String relativePath) async {
+  try {
+    final file = File(_localPathForRelative(root, relativePath));
+    if (await file.exists()) {
+      await file.delete();
+    }
+    await _deleteEmptyParentDir(file.parent);
+  } catch (_) {}
+}
+
+Future<void> _deleteTreeProjectFile(
+  MarkdownStorageService storage,
+  String relativePath,
+) async {
+  try {
+    await storage.deleteTreeDocument(relativePath: relativePath);
+  } catch (_) {}
+}
+
+Future<void> _deleteEmptyParentDir(Directory dir) async {
+  try {
+    if (!await dir.exists()) return;
+    final entries = await dir.list().toList();
+    final visibleEntries = entries.where(
+      (entry) => p.basename(entry.path) != '.nomedia',
+    );
+    if (visibleEntries.isNotEmpty) return;
+    for (final entry in entries) {
+      if (entry is File) {
+        await entry.delete();
+      }
+    }
+    await dir.delete();
+  } catch (_) {}
 }
 
 Future<List<Map<String, Object?>>> _loadProjects(dynamic ref) async {
@@ -579,6 +850,40 @@ Future<String> _ensureLocalProjectImageCopy(
   return target.path;
 }
 
+Future<void> _ensureProjectMaterialsNoMedia(
+  MarkdownDirectoryService directoryService,
+  MarkdownStorageService storage, {
+  required String projectId,
+  required String projectName,
+  String? folderName,
+}) async {
+  final base = ProjectMarkdownPaths.projectFolder(
+    projectId: projectId,
+    projectName: projectName,
+  );
+  final relativePath = p.posix.joinAll([
+    base,
+    'materials',
+    if (folderName != null && folderName.trim().isNotEmpty) folderName,
+    '.nomedia',
+  ]);
+  try {
+    await storage.writeRelativeTextFile(
+      relativePath: relativePath,
+      content: '',
+    );
+  } catch (_) {}
+
+  try {
+    final root = await directoryService.ensureRoot();
+    final file = File(_localPathForRelative(root, relativePath));
+    await file.parent.create(recursive: true);
+    if (!await file.exists()) {
+      await file.writeAsString('');
+    }
+  } catch (_) {}
+}
+
 Future<String> _uniqueProjectImageRelativePath(
   MarkdownDirectoryService directoryService, {
   required String projectId,
@@ -610,6 +915,28 @@ Future<String> _uniqueProjectImageRelativePath(
     projectName: projectName,
     filename: fallbackFileName,
   );
+}
+
+Future<String> _uniqueProjectImageFolderName(
+  MarkdownDirectoryService directoryService, {
+  required String projectId,
+  required String projectName,
+  required String folderName,
+}) async {
+  final root = await directoryService.ensureRoot();
+  final base = _safeFilenamePart(folderName, fallback: '图片资料');
+  for (var index = 1; index < 100; index++) {
+    final candidate = index == 1 ? base : '$base-$index';
+    final probePath = ProjectMarkdownPaths.projectImageMaterial(
+      projectId: projectId,
+      projectName: projectName,
+      folderName: candidate,
+      filename: '.probe',
+    );
+    final dir = Directory(p.dirname(_localPathForRelative(root, probePath)));
+    if (!await dir.exists()) return candidate;
+  }
+  return '$base-${DateTime.now().millisecondsSinceEpoch}';
 }
 
 Future<void> _renameLocalProjectImage({
@@ -662,6 +989,53 @@ String _buildProjectImageFilename({
   final date = '${writtenAt.month}.${writtenAt.day}';
   final custom = _safeFilenamePart(customTitle ?? '', fallback: '图片资料');
   return '$project-$date-$custom$extension';
+}
+
+String _buildProjectImageFolderName({
+  required String projectName,
+  required DateTime writtenAt,
+  required String? customTitle,
+}) {
+  final project = _safeFilenamePart(projectName, fallback: '项目');
+  final date = '${writtenAt.month}.${writtenAt.day}';
+  final custom = _safeFilenamePart(customTitle ?? '', fallback: '图片资料');
+  return '$project-$date-$custom';
+}
+
+String _uniqueBasename(String basename, Set<String> usedNames) {
+  final fallback = basename.trim().isEmpty ? 'image.jpg' : basename.trim();
+  final extension = p.extension(fallback);
+  final base = extension.isEmpty
+      ? fallback
+      : fallback.substring(0, fallback.length - extension.length);
+  for (var index = 1; index < 100; index++) {
+    final candidate = index == 1 ? fallback : '$base-$index$extension';
+    if (usedNames.add(candidate)) return candidate;
+  }
+  final candidate = '$base-${DateTime.now().millisecondsSinceEpoch}$extension';
+  usedNames.add(candidate);
+  return candidate;
+}
+
+List<String> _replaceStringList(
+  Object? raw,
+  String oldValue,
+  String newValue, {
+  bool replaceFirstOnly = false,
+}) {
+  if (raw is! List) return const [];
+  var replaced = false;
+  return [
+    for (final item in raw)
+      if (item is String)
+        if (item == oldValue && (!replaceFirstOnly || !replaced))
+          () {
+            replaced = true;
+            return newValue;
+          }()
+        else
+          item,
+  ];
 }
 
 String _mimeTypeForPath(String path) {

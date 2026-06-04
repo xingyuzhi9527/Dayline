@@ -172,8 +172,14 @@ void main() {
     expect(records.single['content'], '消费凭证：午饭/咖啡');
     expect(records.single['tags'], '["消费","报销"]');
     expect(storedPath, contains('午饭咖啡_53_20260517_180908.jpg'));
-    expect(storedPath, contains('photos'));
+    expect(storedPath, contains('receipts'));
     expect(await File(storedPath).exists(), isTrue);
+    expect(
+      await File(
+        '${File(storedPath).parent.path}${Platform.pathSeparator}.nomedia',
+      ).exists(),
+      isTrue,
+    );
     expect(await source.exists(), isTrue);
   });
 }

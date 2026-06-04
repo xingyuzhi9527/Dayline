@@ -7,6 +7,7 @@ import 'package:liflow_app/core/database/local_database.dart';
 import 'package:liflow_app/core/database/repositories.dart';
 import 'package:liflow_app/core/database/repository_providers.dart';
 import 'package:liflow_app/features/projects/project_store.dart';
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -157,6 +158,105 @@ void main() {
       ).readAsString();
       expect(archive, contains('毕业论文-5.30-访谈照片.jpg'));
       expect(archive, contains('materials/毕业论文-5.30-访谈照片.jpg'));
+    },
+  );
+
+  test(
+    'adding multiple project images stores them in one materials folder',
+    () async {
+      final first = File('${sourceDir.path}${Platform.pathSeparator}draft.png');
+      final second = File(
+        '${sourceDir.path}${Platform.pathSeparator}draft.jpg',
+      );
+      await first.writeAsBytes(const [1, 1, 1]);
+      await second.writeAsBytes(const [2, 2, 2]);
+      final createdAt = DateTime(2026, 5, 30, 9, 8, 7, 6);
+
+      final material = await addProjectImageMaterials(
+        container,
+        projectId: 'project-12345678',
+        projectName: '姣曚笟璁烘枃',
+        sourceImagePaths: [first.path, second.path],
+        title: '鎵归噺璧勬枡',
+        createdAt: createdAt,
+      );
+
+      expect(material.allRelativePaths, hasLength(2));
+      expect(material.allLocalPaths, hasLength(2));
+      expect(material.allRelativePaths.first, endsWith('/draft.png'));
+      expect(material.allRelativePaths.last, endsWith('/draft.jpg'));
+      expect(
+        p.posix.dirname(material.allRelativePaths.first),
+        p.posix.dirname(material.allRelativePaths.last),
+      );
+      expect(
+        p.posix.dirname(material.allRelativePaths.first),
+        contains('/materials/'),
+      );
+      expect(await File(material.allLocalPaths.first).exists(), isTrue);
+      expect(await File(material.allLocalPaths.last).exists(), isTrue);
+
+      final row = await settings.findByKey(projectsSettingsKey);
+      final projects = jsonDecode(row!['value'] as String) as List;
+      final project = projects.single as Map<String, Object?>;
+      final updates = project['updates'] as List;
+      final update = updates.single as Map<String, Object?>;
+
+      expect(update['entryType'], 'image');
+      expect(update['imagePath'], material.allLocalPaths.first);
+      expect(update['imageRelativePath'], material.allRelativePaths.first);
+      expect(update['imagePaths'], material.allLocalPaths);
+      expect(update['imageRelativePaths'], material.allRelativePaths);
+      expect(update['text'], contains('2张'));
+
+      final records = await container
+          .read(recordsRepositoryProvider)
+          .findByDate(createdAt);
+      expect(records, isEmpty);
+    },
+  );
+
+  test(
+    'deleting project image material removes update and image files',
+    () async {
+      final first = File('${sourceDir.path}${Platform.pathSeparator}draft.png');
+      final second = File(
+        '${sourceDir.path}${Platform.pathSeparator}draft.jpg',
+      );
+      await first.writeAsBytes(const [1, 1, 1]);
+      await second.writeAsBytes(const [2, 2, 2]);
+      final createdAt = DateTime(2026, 5, 30, 9, 8, 7, 6);
+
+      final material = await addProjectImageMaterials(
+        container,
+        projectId: 'project-12345678',
+        projectName: '毕业论文',
+        sourceImagePaths: [first.path, second.path],
+        title: '批量资料',
+        createdAt: createdAt,
+      );
+      final folder = Directory(p.dirname(material.allLocalPaths.first));
+      expect(await folder.exists(), isTrue);
+
+      await deleteProjectImageMaterial(
+        container,
+        projectId: 'project-12345678',
+        imageRelativePath: material.allRelativePaths.first,
+        updatedAt: createdAt.add(const Duration(minutes: 1)),
+      );
+
+      final row = await settings.findByKey(projectsSettingsKey);
+      final projects = jsonDecode(row!['value'] as String) as List;
+      final project = projects.single as Map<String, Object?>;
+      expect(project['updates'] as List, isEmpty);
+      expect(await File(material.allLocalPaths.first).exists(), isFalse);
+      expect(await File(material.allLocalPaths.last).exists(), isFalse);
+      expect(await folder.exists(), isFalse);
+
+      final archive = await File(
+        project['archiveLocation'] as String,
+      ).readAsString();
+      expect(archive, contains('## 最近更新\n_暂无最近更新。_'));
     },
   );
 }

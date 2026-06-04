@@ -148,6 +148,22 @@ class MarkdownDirectoryService {
     return sub;
   }
 
+  Future<String> ensureReceiptAttachmentsDir(DateTime date) async {
+    final root = await ensureRoot();
+    final sub = p.join(
+      root,
+      'documents',
+      'receipts',
+      MarkdownFilename.monthDir(date),
+    );
+    final dir = Directory(sub);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    await _ensureNoMedia(dir);
+    return sub;
+  }
+
   Future<String> ensureAudioAttachmentsDir(DateTime date) async {
     final root = await ensureRoot();
     final sub = p.join(
@@ -174,4 +190,13 @@ class MarkdownDirectoryService {
   }
 
   MarkdownNamingMode get namingMode => MarkdownNamingMode.datetimeTitle;
+
+  Future<void> _ensureNoMedia(Directory dir) async {
+    try {
+      final file = File(p.join(dir.path, '.nomedia'));
+      if (!await file.exists()) {
+        await file.writeAsString('');
+      }
+    } catch (_) {}
+  }
 }

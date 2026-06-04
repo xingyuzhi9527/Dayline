@@ -8,7 +8,6 @@ import '../database/repositories.dart';
 import '../database/repository_providers.dart';
 import '../markdown/markdown_directory_service.dart';
 import '../markdown/markdown_filename.dart';
-import '../markdown/markdown_storage_service.dart';
 
 final photoMomentServiceProvider = Provider<PhotoMomentService>((ref) {
   final settings = ref.watch(appSettingsRepositoryProvider);
@@ -17,7 +16,6 @@ final photoMomentServiceProvider = Provider<PhotoMomentService>((ref) {
     recordsRepository: ref.watch(recordsRepositoryProvider),
     mediaAttachmentsRepository: ref.watch(mediaAttachmentsRepositoryProvider),
     directoryService: directoryService,
-    storageService: MarkdownStorageService(directoryService),
   );
 });
 
@@ -26,17 +24,13 @@ class PhotoMomentService {
     required RecordsRepository recordsRepository,
     required MediaAttachmentsRepository mediaAttachmentsRepository,
     required MarkdownDirectoryService directoryService,
-    MarkdownStorageService? storageService,
   }) : _recordsRepository = recordsRepository,
        _mediaAttachmentsRepository = mediaAttachmentsRepository,
-       _directoryService = directoryService,
-       _storageService =
-           storageService ?? MarkdownStorageService(directoryService);
+       _directoryService = directoryService;
 
   final RecordsRepository _recordsRepository;
   final MediaAttachmentsRepository _mediaAttachmentsRepository;
   final MarkdownDirectoryService _directoryService;
-  final MarkdownStorageService _storageService;
 
   Future<int> createFromCameraCapture({
     required String sourceImagePath,
@@ -130,11 +124,10 @@ class PhotoMomentService {
     final filenameLabel = expenseAmount == null
         ? cleanedName
         : '${cleanedName}_${_formatExpenseAmount(expenseAmount)}';
-    final storedPath = await _copyPhotoToLibrary(
+    final storedPath = await _copyReceiptToLibrary(
       sourceImagePath,
       writtenAt,
       filenameLabel: filenameLabel,
-      copyToVisibleDocuments: false,
     );
 
     final recordId = await _recordsRepository.create(
@@ -165,42 +158,7 @@ class PhotoMomentService {
     return recordId;
   }
 
-  Future<int> syncPrivatePhotoCopiesToVisibleDocuments() async {
-    if (!Platform.isAndroid) return 0;
-    final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri == null || treeUri.isEmpty) return 0;
-
-    var copied = 0;
-    final attachments = await _mediaAttachmentsRepository.findAll();
-    for (final attachment in attachments) {
-      if (attachment['media_type'] != 'image') continue;
-      if (attachment['source_type'] == 'expense_receipt') continue;
-
-      final storedPath = attachment['local_path'] as String?;
-      if (storedPath == null || storedPath.isEmpty) continue;
-
-      final sourceFile = File(storedPath);
-      if (!await sourceFile.exists()) continue;
-
-      final createdAtMillis = attachment['created_at'] as int?;
-      final writtenAt = createdAtMillis == null
-          ? DateTime.now()
-          : DateTime.fromMillisecondsSinceEpoch(createdAtMillis);
-      final relativePath = _visiblePhotoRelativePath(storedPath, writtenAt);
-
-      try {
-        await _storageService.writeRelativeBinaryFile(
-          relativePath: relativePath,
-          sourcePath: storedPath,
-          mimeType: _mimeTypeForPath(storedPath),
-        );
-        copied += 1;
-      } catch (_) {
-        // Keep the private copy usable even if the visible folder grant changed.
-      }
-    }
-    return copied;
-  }
+  Future<int> syncPrivatePhotoCopiesToVisibleDocuments() async => 0;
 
   Future<void> updatePhotoMoment({
     required int recordId,
@@ -241,7 +199,6 @@ class PhotoMomentService {
     String sourceImagePath,
     DateTime writtenAt, {
     String? filenameLabel,
-    bool copyToVisibleDocuments = true,
   }) async {
     final sourceFile = File(sourceImagePath);
     if (!await sourceFile.exists()) {
@@ -259,9 +216,30 @@ class PhotoMomentService {
     final targetPath = p.join(photoDir, filename);
 
     await sourceFile.copy(targetPath);
-    if (copyToVisibleDocuments) {
-      await _copyPhotoToVisibleDocuments(targetPath, writtenAt);
+    return targetPath;
+  }
+
+  Future<String> _copyReceiptToLibrary(
+    String sourceImagePath,
+    DateTime writtenAt, {
+    String? filenameLabel,
+  }) async {
+    final sourceFile = File(sourceImagePath);
+    if (!await sourceFile.exists()) {
+      throw StateError('Receipt photo not found: $sourceImagePath');
     }
+
+    final receiptDir = await _directoryService.ensureReceiptAttachmentsDir(
+      writtenAt,
+    );
+    final extension = p.extension(sourceImagePath).toLowerCase();
+    final safeExtension = extension.isEmpty ? '.jpg' : extension;
+    final filename = filenameLabel == null || filenameLabel.trim().isEmpty
+        ? _buildPhotoFilename(writtenAt, safeExtension)
+        : _buildNamedPhotoFilename(filenameLabel, writtenAt, safeExtension);
+    final targetPath = p.join(receiptDir, filename);
+
+    await sourceFile.copy(targetPath);
     return targetPath;
   }
 
@@ -293,61 +271,9 @@ class PhotoMomentService {
       final basename = _uniqueBasename(p.basename(sourceImagePath), usedNames);
       final targetPath = p.join(targetDir.path, basename);
       await sourceFile.copy(targetPath);
-      await _copyPhotoToVisibleDocuments(targetPath, writtenAt);
       storedPaths.add(targetPath);
     }
     return storedPaths;
-  }
-
-  Future<void> _copyPhotoToVisibleDocuments(
-    String storedPath,
-    DateTime writtenAt,
-  ) async {
-    if (!Platform.isAndroid) return;
-
-    final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri == null || treeUri.isEmpty) return;
-
-    try {
-      await _storageService.writeRelativeBinaryFile(
-        relativePath: _visiblePhotoRelativePath(storedPath, writtenAt),
-        sourcePath: storedPath,
-        mimeType: _mimeTypeForPath(storedPath),
-      );
-    } catch (_) {
-      // The timeline still uses the private copy; visible export is best-effort.
-    }
-  }
-
-  String _visiblePhotoRelativePath(String path, DateTime writtenAt) {
-    final basename = p.basename(path);
-    final parentName = p.basename(p.dirname(path));
-    final nestedName = parentName.startsWith('photo_') ? parentName : null;
-    if (nestedName != null) {
-      return p.posix.join(
-        'documents',
-        'photos',
-        MarkdownFilename.monthDir(writtenAt),
-        nestedName,
-        basename,
-      );
-    }
-    return p.posix.join(
-      'documents',
-      'photos',
-      MarkdownFilename.monthDir(writtenAt),
-      basename,
-    );
-  }
-
-  String _mimeTypeForPath(String path) {
-    final extension = p.extension(path).toLowerCase();
-    return switch (extension) {
-      '.png' => 'image/png',
-      '.webp' => 'image/webp',
-      '.heic' || '.heif' => 'image/heic',
-      _ => 'image/jpeg',
-    };
   }
 
   String _buildPhotoFilename(DateTime writtenAt, String extension) {
