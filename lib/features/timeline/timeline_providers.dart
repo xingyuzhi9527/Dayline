@@ -62,6 +62,18 @@ class TimelineEvent {
     }
     return null;
   }
+
+  List<Map<String, Object?>> get attachments {
+    final raw = data['attachments'];
+    if (raw is List) {
+      return raw
+          .whereType<Map>()
+          .map((item) => item.cast<String, Object?>())
+          .toList();
+    }
+    final primary = primaryAttachment;
+    return primary == null ? const [] : <Map<String, Object?>>[primary];
+  }
 }
 
 class TimelineDateNotifier extends Notifier<DateTime> {

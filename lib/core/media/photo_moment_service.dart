@@ -74,6 +74,50 @@ class PhotoMomentService {
     return recordId;
   }
 
+  Future<int> createFromImageSelection({
+    required List<String> sourceImagePaths,
+    String note = '',
+    List<String> tags = const [],
+    DateTime? createdAt,
+  }) async {
+    if (sourceImagePaths.isEmpty) {
+      throw StateError('No photos selected.');
+    }
+
+    final writtenAt = createdAt ?? DateTime.now();
+    final storedPaths = await _copyPhotosToLibrary(sourceImagePaths, writtenAt);
+
+    final recordId = await _recordsRepository.create(
+      date: writtenAt,
+      type: 'moment_photo',
+      content: note.trim(),
+      tags: _normalizeTags(tags),
+      metadata: {'source': 'gallery', 'photoCount': storedPaths.length},
+      createdAt: writtenAt,
+    );
+
+    try {
+      for (var index = 0; index < storedPaths.length; index += 1) {
+        await _mediaAttachmentsRepository.create(
+          recordId: recordId,
+          mediaType: 'image',
+          sourceType: 'gallery',
+          localPath: storedPaths[index],
+          sortOrder: index,
+          createdAt: writtenAt,
+        );
+      }
+    } catch (_) {
+      await _recordsRepository.permanentDelete(recordId);
+      for (final path in storedPaths) {
+        await _deleteFileIfExists(path);
+      }
+      rethrow;
+    }
+
+    return recordId;
+  }
+
   Future<int> createExpenseReceipt({
     required String sourceImagePath,
     required String expenseName,
@@ -221,6 +265,40 @@ class PhotoMomentService {
     return targetPath;
   }
 
+  Future<List<String>> _copyPhotosToLibrary(
+    List<String> sourceImagePaths,
+    DateTime writtenAt,
+  ) async {
+    if (sourceImagePaths.length == 1) {
+      return [await _copyPhotoToLibrary(sourceImagePaths.single, writtenAt)];
+    }
+
+    final photoDir = await _directoryService.ensurePhotoAttachmentsDir(
+      writtenAt,
+    );
+    final folderName = p.basenameWithoutExtension(
+      _buildPhotoFilename(writtenAt, '.jpg'),
+    );
+    final targetDir = Directory(p.join(photoDir, folderName));
+    await targetDir.create(recursive: true);
+
+    final storedPaths = <String>[];
+    final usedNames = <String>{};
+    for (final sourceImagePath in sourceImagePaths) {
+      final sourceFile = File(sourceImagePath);
+      if (!await sourceFile.exists()) {
+        throw StateError('Selected photo not found: $sourceImagePath');
+      }
+
+      final basename = _uniqueBasename(p.basename(sourceImagePath), usedNames);
+      final targetPath = p.join(targetDir.path, basename);
+      await sourceFile.copy(targetPath);
+      await _copyPhotoToVisibleDocuments(targetPath, writtenAt);
+      storedPaths.add(targetPath);
+    }
+    return storedPaths;
+  }
+
   Future<void> _copyPhotoToVisibleDocuments(
     String storedPath,
     DateTime writtenAt,
@@ -242,11 +320,23 @@ class PhotoMomentService {
   }
 
   String _visiblePhotoRelativePath(String path, DateTime writtenAt) {
+    final basename = p.basename(path);
+    final parentName = p.basename(p.dirname(path));
+    final nestedName = parentName.startsWith('photo_') ? parentName : null;
+    if (nestedName != null) {
+      return p.posix.join(
+        'documents',
+        'photos',
+        MarkdownFilename.monthDir(writtenAt),
+        nestedName,
+        basename,
+      );
+    }
     return p.posix.join(
       'documents',
       'photos',
       MarkdownFilename.monthDir(writtenAt),
-      p.basename(path),
+      basename,
     );
   }
 
@@ -295,6 +385,20 @@ class PhotoMomentService {
     ].join('');
     final name = safeName.isEmpty ? '消费' : safeName;
     return '${name}_${date}_$time$extension';
+  }
+
+  String _uniqueBasename(String basename, Set<String> usedNames) {
+    final fallback = basename.trim().isEmpty ? 'photo.jpg' : basename.trim();
+    if (usedNames.add(fallback)) return fallback;
+
+    final extension = p.extension(fallback);
+    final stem = p.basenameWithoutExtension(fallback);
+    var index = 2;
+    while (true) {
+      final candidate = '$stem-$index$extension';
+      if (usedNames.add(candidate)) return candidate;
+      index += 1;
+    }
   }
 
   String _formatExpenseAmount(double amount) {

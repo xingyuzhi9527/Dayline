@@ -116,6 +116,38 @@ void main() {
     },
   );
 
+  test('creates a multi-photo moment in a named folder', () async {
+    final first = File('${captureDir.path}${Platform.pathSeparator}first.jpg');
+    final second = File(
+      '${captureDir.path}${Platform.pathSeparator}second.png',
+    );
+    await first.writeAsBytes(const [1, 1, 1]);
+    await second.writeAsBytes(const [2, 2, 2]);
+    final createdAt = DateTime(2026, 5, 17, 21, 36, 9, 123);
+
+    final recordId = await service.createFromImageSelection(
+      sourceImagePaths: [first.path, second.path],
+      note: '多图',
+      tags: const ['相册'],
+      createdAt: createdAt,
+    );
+
+    final attachments = await mediaAttachmentsRepository.findByRecordId(
+      recordId,
+    );
+    expect(attachments, hasLength(2));
+
+    final firstStoredPath = attachments.first['local_path'] as String;
+    final secondStoredPath = attachments.last['local_path'] as String;
+    expect(firstStoredPath, contains('photo_20260517_213609123'));
+    expect(firstStoredPath, endsWith('first.jpg'));
+    expect(secondStoredPath, endsWith('second.png'));
+    expect(await File(firstStoredPath).exists(), isTrue);
+    expect(await File(secondStoredPath).exists(), isTrue);
+    expect(await first.exists(), isTrue);
+    expect(await second.exists(), isTrue);
+  });
+
   test('creates an expense receipt with a named photo file', () async {
     final source = File(
       '${captureDir.path}${Platform.pathSeparator}receipt.jpg',

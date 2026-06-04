@@ -507,6 +507,12 @@ class _TimelineTile extends ConsumerWidget {
       _showTimelineSnack(context, '这条图片片刻缺少附件文件');
       return;
     }
+    final imagePaths = event.attachments
+        .where((attachment) => attachment['media_type'] == 'image')
+        .map((attachment) => attachment['local_path'] as String?)
+        .whereType<String>()
+        .where((path) => path.trim().isNotEmpty)
+        .toList();
 
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -514,6 +520,7 @@ class _TimelineTile extends ConsumerWidget {
         builder: (_) => PhotoMomentEditorPage.edit(
           recordId: event.sourceId,
           imagePath: imagePath,
+          imagePaths: imagePaths.isEmpty ? null : imagePaths,
           initialNote: event.title,
           initialTags: event.tags,
           capturedAt: event.timestamp,
@@ -650,6 +657,9 @@ class _TimelineEventCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final attachment = event.primaryAttachment;
+    final imageAttachments = event.attachments
+        .where((attachment) => attachment['media_type'] == 'image')
+        .toList();
     final imagePath = attachment?['local_path'] as String?;
     final attachmentType = attachment?['media_type'] as String?;
     final isAudioAttachment =
@@ -747,22 +757,51 @@ class _TimelineEventCard extends StatelessWidget {
                         ),
                         child: AspectRatio(
                           aspectRatio: 4 / 3,
-                          child: Image.file(
-                            File(imagePath),
-                            fit: BoxFit.cover,
-                            cacheWidth: 720,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                color: AppColors.canvas,
-                                alignment: Alignment.center,
-                                child: Text(
-                                  '图片加载失败',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: AppColors.muted,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.file(
+                                File(imagePath),
+                                fit: BoxFit.cover,
+                                cacheWidth: 720,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    color: AppColors.canvas,
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      '图片加载失败',
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(color: AppColors.muted),
+                                    ),
+                                  );
+                                },
+                              ),
+                              if (imageAttachments.length > 1)
+                                Positioned(
+                                  right: AppSpacing.xs,
+                                  top: AppSpacing.xs,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withAlpha(150),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: AppSpacing.xs,
+                                        vertical: 2,
+                                      ),
+                                      child: Text(
+                                        '${imageAttachments.length}张',
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              );
-                            },
+                            ],
                           ),
                         ),
                       ),

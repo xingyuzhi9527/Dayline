@@ -9,27 +9,47 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 
 class PhotoMomentEditorPage extends ConsumerStatefulWidget {
-  PhotoMomentEditorPage.create({
-    required this.sourceImagePath,
+  PhotoMomentEditorPage.create({required this.sourceImagePath, super.key})
+    : recordId = null,
+      sourceImagePaths = <String>[sourceImagePath],
+      imagePath = sourceImagePath,
+      imagePaths = <String>[sourceImagePath],
+      cleanupSingleSource = true,
+      initialNote = '',
+      initialTags = const [],
+      capturedAt = null;
+
+  PhotoMomentEditorPage.createMultiple({
+    required this.sourceImagePaths,
     super.key,
   }) : recordId = null,
-       imagePath = sourceImagePath!,
+       sourceImagePath = '',
+       imagePath = sourceImagePaths.first,
+       imagePaths = sourceImagePaths,
+       cleanupSingleSource = false,
        initialNote = '',
        initialTags = const [],
        capturedAt = null;
 
-  const PhotoMomentEditorPage.edit({
+  PhotoMomentEditorPage.edit({
     required this.recordId,
     required this.imagePath,
     required this.initialNote,
     required this.initialTags,
+    List<String>? imagePaths,
     this.capturedAt,
     super.key,
-  }) : sourceImagePath = null;
+  }) : sourceImagePath = '',
+       sourceImagePaths = const [],
+       cleanupSingleSource = false,
+       imagePaths = imagePaths ?? <String>[imagePath];
 
   final int? recordId;
-  final String? sourceImagePath;
+  final String sourceImagePath;
+  final List<String> sourceImagePaths;
   final String imagePath;
+  final List<String> imagePaths;
+  final bool cleanupSingleSource;
   final String initialNote;
   final List<String> initialTags;
   final int? capturedAt;
@@ -149,6 +169,67 @@ class _PhotoMomentEditorPageState extends ConsumerState<PhotoMomentEditorPage> {
   }
 
   Widget _buildImagePreview(BuildContext context) {
+    if (widget.imagePaths.length > 1) {
+      return GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: AppSpacing.sm,
+          crossAxisSpacing: AppSpacing.sm,
+          childAspectRatio: 1,
+        ),
+        itemCount: widget.imagePaths.length,
+        itemBuilder: (context, index) {
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.file(
+                  File(widget.imagePaths[index]),
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      color: Colors.black,
+                      alignment: Alignment.center,
+                      child: const Text(
+                        '鍥剧墖鍔犺浇澶辫触',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    );
+                  },
+                ),
+                Positioned(
+                  right: AppSpacing.xs,
+                  top: AppSpacing.xs,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withAlpha(150),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xs,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        '${index + 1}/${widget.imagePaths.length}',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
@@ -172,10 +253,7 @@ class _PhotoMomentEditorPageState extends ConsumerState<PhotoMomentEditorPage> {
             fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) {
               return const Center(
-                child: Text(
-                  '图片加载失败',
-                  style: TextStyle(color: Colors.white70),
-                ),
+                child: Text('图片加载失败', style: TextStyle(color: Colors.white70)),
               );
             },
           ),
@@ -198,7 +276,9 @@ class _PhotoMomentEditorPageState extends ConsumerState<PhotoMomentEditorPage> {
           children: [
             Expanded(
               child: OutlinedButton(
-                onPressed: _saving ? null : () => Navigator.of(context).maybePop(),
+                onPressed: _saving
+                    ? null
+                    : () => Navigator.of(context).maybePop(),
                 child: const Text('取消'),
               ),
             ),
@@ -254,11 +334,22 @@ class _PhotoMomentEditorPageState extends ConsumerState<PhotoMomentEditorPage> {
           tags: tags,
         );
       } else {
-        await service.createFromCameraCapture(
-          sourceImagePath: widget.sourceImagePath!,
-          note: note,
-          tags: tags,
-        );
+        final sourcePaths = widget.sourceImagePaths;
+        if (sourcePaths.length > 1 || !widget.cleanupSingleSource) {
+          await service.createFromImageSelection(
+            sourceImagePaths: sourcePaths,
+            note: note,
+            tags: tags,
+          );
+        } else {
+          await service.createFromCameraCapture(
+            sourceImagePath: widget.sourceImagePath.isNotEmpty
+                ? widget.sourceImagePath
+                : sourcePaths.single,
+            note: note,
+            tags: tags,
+          );
+        }
       }
 
       ref.read(dataVersionProvider.notifier).increment();
@@ -318,11 +409,7 @@ class _PhotoMomentEditorPageState extends ConsumerState<PhotoMomentEditorPage> {
   List<String> _parseTagInput(String raw) {
     return raw
         .split(RegExp(r'[\s,，、]+'))
-        .map(
-          (tag) => tag
-              .replaceFirst(RegExp(r'^[#＃]+'), '')
-              .trim(),
-        )
+        .map((tag) => tag.replaceFirst(RegExp(r'^[#＃]+'), '').trim())
         .where((tag) => tag.isNotEmpty)
         .toList();
   }

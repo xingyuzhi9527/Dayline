@@ -459,6 +459,58 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     }
   }
 
+  Future<void> _handlePickImages() async {
+    if (_capturingPhoto) return;
+
+    _closeToolDrawer();
+    _collapseIntentInput(reason: 'open-gallery');
+    FocusScope.of(context).unfocus();
+
+    setState(() => _capturingPhoto = true);
+
+    try {
+      final images = await _imagePicker.pickMultiImage(imageQuality: 92);
+      if (!mounted || images.isEmpty) return;
+
+      final paths = images.map((image) => image.path).toList();
+      final saved = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) =>
+              PhotoMomentEditorPage.createMultiple(sourceImagePaths: paths),
+        ),
+      );
+
+      if (saved == true && mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                paths.length == 1 ? '已保存图片片刻' : '已保存${paths.length}张图片',
+              ),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 1),
+            ),
+          );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('选择图片失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _capturingPhoto = false);
+      }
+    }
+  }
+
   Future<void> _pickExpenseReceiptImage() async {
     try {
       final image = await _imagePicker.pickImage(
@@ -490,16 +542,20 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       final response = await _imagePicker.retrieveLostData();
       if (!mounted || response.isEmpty) return;
 
-      final file =
-          response.file ??
-          (response.files?.isNotEmpty ?? false ? response.files!.first : null);
-      if (file == null) return;
+      final files = response.files;
+      final paths = files != null && files.isNotEmpty
+          ? files.map((file) => file.path).toList()
+          : response.file == null
+          ? const <String>[]
+          : <String>[response.file!.path];
+      if (paths.isEmpty) return;
 
       final saved = await Navigator.of(context).push<bool>(
         MaterialPageRoute(
           fullscreenDialog: true,
-          builder: (_) =>
-              PhotoMomentEditorPage.create(sourceImagePath: file.path),
+          builder: (_) => paths.length == 1
+              ? PhotoMomentEditorPage.create(sourceImagePath: paths.single)
+              : PhotoMomentEditorPage.createMultiple(sourceImagePaths: paths),
         ),
       );
 
@@ -1407,10 +1463,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                   label: _capturingPhoto ? '拍照中...' : '拍照',
                   onTap: _capturingPhoto ? null : _handleTakePhoto,
                 ),
-                const _ToolDrawerAction(
+                _ToolDrawerAction(
                   icon: Icons.image_outlined,
                   label: '图片',
-                  enabled: false,
+                  onTap: _capturingPhoto ? null : _handlePickImages,
                 ),
                 const _ToolDrawerAction(
                   icon: Icons.mic_none_rounded,
