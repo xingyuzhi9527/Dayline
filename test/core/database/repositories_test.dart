@@ -317,6 +317,46 @@ void main() {
     expect(await expensesRepository.sumAmountByDate(today), 15.75);
   });
 
+  test('queries expense details and summaries by month', () async {
+    final month = DateTime(2026, 6);
+
+    await expensesRepository.create(
+      date: DateTime(2026, 6, 1),
+      amount: 35,
+      category: '餐饮',
+      note: '午饭',
+      createdAt: DateTime(2026, 6, 1, 12, 10),
+    );
+    await expensesRepository.create(
+      date: DateTime(2026, 6, 1),
+      amount: 18,
+      category: '餐饮',
+      note: '咖啡',
+      createdAt: DateTime(2026, 6, 1, 15, 20),
+    );
+    await expensesRepository.create(
+      date: DateTime(2026, 6, 2),
+      amount: 45,
+      category: '交通',
+      createdAt: DateTime(2026, 6, 2, 9),
+    );
+    await expensesRepository.create(
+      date: DateTime(2026, 7, 1),
+      amount: 999,
+      category: '忽略',
+    );
+
+    final rows = await expensesRepository.findByMonth(month);
+    final categoryTotals = await expensesRepository.sumAmountByCategoryForMonth(
+      month,
+    );
+    final dailyTotals = await expensesRepository.sumAmountByDayForMonth(month);
+
+    expect(rows.map((row) => row['note']), ['午饭', '咖啡', null]);
+    expect(categoryTotals, {'餐饮': 53.0, '交通': 45.0});
+    expect(dailyTotals, {'2026-06-01': 53.0, '2026-06-02': 45.0});
+  });
+
   test('updates expense details', () async {
     final today = DateTime(2026, 4, 30);
     final expenseId = await expensesRepository.create(

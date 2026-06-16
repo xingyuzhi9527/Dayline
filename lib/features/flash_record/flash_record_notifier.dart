@@ -13,6 +13,7 @@ import '../../core/parser/parsed_input_time.dart';
 import '../../core/stt/stt_engine.dart';
 import '../../core/stt/stt_providers.dart';
 import '../dashboard/daily_note_draft.dart';
+import '../monthly_expenses/monthly_expense_report_sync.dart';
 import '../projects/project_store.dart';
 import 'flash_record_state.dart';
 
@@ -614,6 +615,12 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
             // Keep the expense rows even if the optional reimbursement image fails.
           }
         }
+        await syncMonthlyExpenseReportForDate(
+          settingsRepository: ref.read(appSettingsRepositoryProvider),
+          expensesRepository: ref.read(expensesRepositoryProvider),
+          date: now,
+          generatedAt: now,
+        );
         return false;
 
       case ParsedInputType.body:

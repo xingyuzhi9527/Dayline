@@ -16,6 +16,7 @@ import '../core/theme/app_spacing.dart';
 import '../features/dashboard/dashboard_page.dart';
 import '../features/flash_record/flash_record_page.dart';
 import '../features/markdown_setup/markdown_directory_dialog.dart';
+import '../features/monthly_expenses/monthly_expense_markdown_service.dart';
 import '../features/projects/projects_page.dart';
 import '../features/projects/project_store.dart';
 import '../features/restore/markdown_restore_dialog.dart';
@@ -82,6 +83,7 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
         if (configured && mounted) {
           await _maybeOfferMarkdownRestore(dirService);
           _scheduleBackupSnapshot();
+          unawaited(_ensurePreviousMonthExpenseReport(dirService));
         }
         unawaited(
           ref
@@ -91,6 +93,7 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
       } else {
         await MarkdownStorageService(dirService).ensureCoreDirectories();
         _scheduleBackupSnapshot();
+        unawaited(_ensurePreviousMonthExpenseReport(dirService));
         unawaited(
           ref
               .read(photoMomentServiceProvider)
@@ -100,6 +103,20 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
     } catch (_) {
       // Keep startup resilient when storage/config providers are unavailable,
       // such as during lightweight widget tests or transient init failures.
+    }
+  }
+
+  Future<void> _ensurePreviousMonthExpenseReport(
+    MarkdownDirectoryService dirService,
+  ) async {
+    try {
+      await MonthlyExpenseAutoExporter(
+        expensesRepository: ref.read(expensesRepositoryProvider),
+        settingsRepository: ref.read(appSettingsRepositoryProvider),
+        directoryService: dirService,
+      ).ensurePreviousMonthReport();
+    } catch (_) {
+      // Monthly reports are a convenience export; startup should stay resilient.
     }
   }
 

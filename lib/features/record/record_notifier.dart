@@ -5,6 +5,7 @@ import '../../core/parser/expense_line_item.dart';
 import '../../core/parser/lui_lite_parser.dart';
 import '../../core/parser/parsed_input_time.dart';
 import '../dashboard/daily_note_draft.dart';
+import '../monthly_expenses/monthly_expense_report_sync.dart';
 import 'record_state.dart';
 
 final recordNotifierProvider = NotifierProvider<RecordNotifier, RecordState>(
@@ -190,6 +191,12 @@ class RecordNotifier extends Notifier<RecordState> {
                 createdAt: createdAt,
               );
         }
+        await syncMonthlyExpenseReportForDate(
+          settingsRepository: ref.read(appSettingsRepositoryProvider),
+          expensesRepository: ref.read(expensesRepositoryProvider),
+          date: now,
+          generatedAt: now,
+        );
 
       case ParsedInputType.body:
         final value = (parsed.metadata['value'] as num?)?.toDouble() ?? 0.0;

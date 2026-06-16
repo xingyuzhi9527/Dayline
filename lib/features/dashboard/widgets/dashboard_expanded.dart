@@ -12,6 +12,7 @@ import '../../../core/markdown/markdown_storage_service.dart';
 import '../../markdown_setup/markdown_directory_dialog.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../monthly_expenses/monthly_expense_section.dart';
 import '../../today/widgets/today_cards.dart';
 import '../daily_note_draft.dart';
 import '../daily_review_writer.dart';
@@ -86,6 +87,8 @@ class _DashboardExpandedViewState extends State<DashboardExpandedView> {
           ),
           const SizedBox(height: AppSpacing.md),
           _TodayStatusCard(summary: widget.summary),
+          const SizedBox(height: AppSpacing.md),
+          const MonthlyExpenseSection(),
           const SizedBox(height: AppSpacing.md),
           _DayRhythmBar(summary: widget.summary),
           const SizedBox(height: AppSpacing.md),

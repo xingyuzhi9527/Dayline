@@ -200,7 +200,9 @@ class MediaAttachmentsRepository extends Repository {
     );
   }
 
-  Future<Map<int, List<DatabaseRow>>> findByRecordIds(List<int> recordIds) async {
+  Future<Map<int, List<DatabaseRow>>> findByRecordIds(
+    List<int> recordIds,
+  ) async {
     if (recordIds.isEmpty) return const {};
 
     final db = await localDatabase.database;
@@ -537,6 +539,58 @@ WHERE date >= ? AND date < ?
       [dateKey(start), dateKey(next)],
     );
     return (rows.single['total'] as num).toDouble();
+  }
+
+  Future<List<DatabaseRow>> findByMonth(DateTime date) async {
+    final db = await localDatabase.database;
+    final start = DateTime(date.year, date.month);
+    final next = DateTime(date.year, date.month + 1);
+    return db.query(
+      tableName,
+      where: 'date >= ? AND date < ?',
+      whereArgs: [dateKey(start), dateKey(next)],
+      orderBy: 'date ASC, created_at ASC, id ASC',
+    );
+  }
+
+  Future<Map<String, double>> sumAmountByCategoryForMonth(DateTime date) async {
+    final db = await localDatabase.database;
+    final start = DateTime(date.year, date.month);
+    final next = DateTime(date.year, date.month + 1);
+    final rows = await db.rawQuery(
+      '''
+SELECT category, COALESCE(SUM(amount), 0) AS total
+FROM expenses
+WHERE date >= ? AND date < ?
+GROUP BY category
+ORDER BY total DESC, category ASC
+''',
+      [dateKey(start), dateKey(next)],
+    );
+    return {
+      for (final row in rows)
+        row['category'] as String: (row['total'] as num).toDouble(),
+    };
+  }
+
+  Future<Map<String, double>> sumAmountByDayForMonth(DateTime date) async {
+    final db = await localDatabase.database;
+    final start = DateTime(date.year, date.month);
+    final next = DateTime(date.year, date.month + 1);
+    final rows = await db.rawQuery(
+      '''
+SELECT date, COALESCE(SUM(amount), 0) AS total
+FROM expenses
+WHERE date >= ? AND date < ?
+GROUP BY date
+ORDER BY date ASC
+''',
+      [dateKey(start), dateKey(next)],
+    );
+    return {
+      for (final row in rows)
+        row['date'] as String: (row['total'] as num).toDouble(),
+    };
   }
 
   Future<List<DatabaseRow>> findByDate(DateTime date) async {

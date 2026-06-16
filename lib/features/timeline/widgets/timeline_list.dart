@@ -18,6 +18,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../dashboard/daily_note_draft.dart';
 import '../../long_note/long_note_editor_page.dart';
 import '../../long_note/long_note_reader_page.dart';
+import '../../monthly_expenses/monthly_expense_report_sync.dart';
 import '../../photo_moment/photo_moment_editor_page.dart';
 import '../timeline_providers.dart';
 
@@ -459,6 +460,12 @@ class _TimelineTile extends ConsumerWidget {
           },
         );
 
+    await syncMonthlyExpenseReportForDate(
+      settingsRepository: ref.read(appSettingsRepositoryProvider),
+      expensesRepository: ref.read(expensesRepositoryProvider),
+      date: _dateFromKey(event.date),
+      generatedAt: DateTime.now(),
+    );
     ref.read(dataVersionProvider.notifier).increment();
     await ensureDailyDraftAfterActivity(ref, _dateFromKey(event.date));
     if (!context.mounted) return false;
@@ -1419,6 +1426,12 @@ class _TimelineEventEditSheetState
           await ref
               .read(expensesRepositoryProvider)
               .delete(widget.event.sourceId);
+          await syncMonthlyExpenseReportForDate(
+            settingsRepository: ref.read(appSettingsRepositoryProvider),
+            expensesRepository: ref.read(expensesRepositoryProvider),
+            date: _dateFromKey(widget.event.date),
+            generatedAt: DateTime.now(),
+          );
         case TimelineEventSource.todo:
         case TimelineEventSource.trackerLog:
         case TimelineEventSource.focusSession:
@@ -1551,6 +1564,12 @@ class _TimelineEventEditSheetState
                 note: cleanExpenseNote(_optionalText(_noteController)),
                 currency: _optionalText(_currencyController) ?? 'CNY',
               );
+          await syncMonthlyExpenseReportForDate(
+            settingsRepository: ref.read(appSettingsRepositoryProvider),
+            expensesRepository: ref.read(expensesRepositoryProvider),
+            date: _dateFromKey(widget.event.date),
+            generatedAt: DateTime.now(),
+          );
 
         case TimelineEventSource.bodyLog:
           final metric = _requiredText(_metricController, '指标');
@@ -1640,6 +1659,12 @@ class _TimelineEventEditSheetState
                 ),
                 currency: (existing['currency'] as String?) ?? 'CNY',
               );
+          await syncMonthlyExpenseReportForDate(
+            settingsRepository: ref.read(appSettingsRepositoryProvider),
+            expensesRepository: ref.read(expensesRepositoryProvider),
+            date: _dateFromKey(existing['date'] as String? ?? ''),
+            generatedAt: DateTime.now(),
+          );
         }
       }
     }
