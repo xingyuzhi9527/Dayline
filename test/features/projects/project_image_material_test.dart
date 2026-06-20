@@ -108,6 +108,96 @@ void main() {
   );
 
   test(
+    'adding a project file stores it under materials and links it from project archive',
+    () async {
+      final source = File(
+        '${sourceDir.path}${Platform.pathSeparator}brief.pdf',
+      );
+      await source.writeAsBytes(const [37, 80, 68, 70]);
+      final createdAt = DateTime(2026, 5, 31, 10, 11, 12, 13);
+
+      final material = await addProjectFileMaterial(
+        container,
+        projectId: 'project-12345678',
+        projectName: '毕业论文',
+        sourceFilePath: source.path,
+        createdAt: createdAt,
+      );
+
+      expect(
+        material.relativePath,
+        'projects/毕业论文-12345678/materials/brief.pdf',
+      );
+      expect(material.fileName, 'brief.pdf');
+      expect(material.mimeType, 'application/pdf');
+      expect(await File(material.localPath!).exists(), isTrue);
+
+      final records = await container
+          .read(recordsRepositoryProvider)
+          .findByDate(createdAt);
+      expect(records, isEmpty);
+
+      final row = await settings.findByKey(projectsSettingsKey);
+      final projects = jsonDecode(row!['value'] as String) as List;
+      final project = projects.single as Map<String, Object?>;
+      final updates = project['updates'] as List;
+      final update = updates.single as Map<String, Object?>;
+
+      expect(update['source'], '文件');
+      expect(update['text'], 'brief.pdf');
+      expect(update['entryType'], 'file');
+      expect(update['fileRelativePath'], material.relativePath);
+      expect(update['filePath'], material.localPath);
+      expect(update['mimeType'], 'application/pdf');
+
+      final archive = await File(
+        project['archiveLocation'] as String,
+      ).readAsString();
+      expect(archive, contains('文件'));
+      expect(archive, contains('[文件](materials/brief.pdf)'));
+    },
+  );
+
+  test(
+    'adding a markdown project file stores it under project notes',
+    () async {
+      final source = File(
+        '${sourceDir.path}${Platform.pathSeparator}meeting.md',
+      );
+      await source.writeAsString('# 会议记录\n\n下一步整理访谈。');
+      final createdAt = DateTime(2026, 5, 31, 10, 12, 13, 14);
+
+      final material = await addProjectFileMaterial(
+        container,
+        projectId: 'project-12345678',
+        projectName: '毕业论文',
+        sourceFilePath: source.path,
+        createdAt: createdAt,
+      );
+
+      expect(material.relativePath, 'projects/毕业论文-12345678/notes/meeting.md');
+      expect(material.fileName, 'meeting.md');
+      expect(material.mimeType, 'text/markdown');
+      expect(await File(material.localPath!).exists(), isTrue);
+
+      final row = await settings.findByKey(projectsSettingsKey);
+      final projects = jsonDecode(row!['value'] as String) as List;
+      final project = projects.single as Map<String, Object?>;
+      final updates = project['updates'] as List;
+      final update = updates.single as Map<String, Object?>;
+
+      expect(update['source'], '文件');
+      expect(update['entryType'], 'file');
+      expect(update['fileRelativePath'], material.relativePath);
+
+      final archive = await File(
+        project['archiveLocation'] as String,
+      ).readAsString();
+      expect(archive, contains('[文件](notes/meeting.md)'));
+    },
+  );
+
+  test(
     'renaming a project image updates the display name without changing file path or timeline',
     () async {
       final source = File(

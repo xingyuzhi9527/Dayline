@@ -56,6 +56,20 @@ class ProjectImageMaterial {
   List<String> get allFileNames => fileNames.isEmpty ? [fileName] : fileNames;
 }
 
+class ProjectFileMaterial {
+  const ProjectFileMaterial({
+    required this.relativePath,
+    required this.fileName,
+    required this.mimeType,
+    this.localPath,
+  });
+
+  final String relativePath;
+  final String fileName;
+  final String mimeType;
+  final String? localPath;
+}
+
 Future<List<ProjectOption>> loadProjectOptions(Ref ref) async {
   final projects = await _loadProjects(ref);
   return [
@@ -165,6 +179,8 @@ Future<void> addProjectLongNote(
   required String projectId,
   required String title,
   required String path,
+  String? relativePath,
+  String? fileName,
   required int recordId,
   required DateTime updatedAt,
 }) async {
@@ -192,8 +208,180 @@ Future<void> addProjectLongNote(
             'text': title,
             'entryType': 'long_note',
             'notePath': path,
+            if (relativePath != null && relativePath.trim().isNotEmpty)
+              'noteRelativePath': relativePath,
+            if (fileName != null && fileName.trim().isNotEmpty)
+              'noteFileName': fileName,
             'recordId': recordId,
             'colorValue': AppColors.primary.toARGB32(),
+          },
+          ...updates.take(_projectUpdatesRetainLimit - 1),
+        ],
+      };
+    },
+  );
+}
+
+Future<ProjectFileMaterial> addProjectFileMaterial(
+  dynamic ref, {
+  required String projectId,
+  required String projectName,
+  required String sourceFilePath,
+  DateTime? createdAt,
+}) async {
+  final writtenAt = createdAt ?? DateTime.now();
+  final sourceFile = File(sourceFilePath);
+  if (!await sourceFile.exists()) {
+    throw StateError('文件不存在：$sourceFilePath');
+  }
+
+  final settings = ref.read(appSettingsRepositoryProvider);
+  final directoryService = MarkdownDirectoryService(settings);
+  final storage = MarkdownStorageService(directoryService);
+  await _ensureProjectMaterialsNoMedia(
+    directoryService,
+    storage,
+    projectId: projectId,
+    projectName: projectName,
+  );
+
+  final fileName = await _uniqueProjectMaterialFileName(
+    directoryService,
+    projectId: projectId,
+    projectName: projectName,
+    fileName: p.basename(sourceFilePath),
+  );
+  final relativePath = _projectFileMaterialRelativePath(
+    projectId: projectId,
+    projectName: projectName,
+    filename: fileName,
+  );
+  final mimeType = _mimeTypeForPath(fileName);
+
+  await storage.writeRelativeBinaryFile(
+    relativePath: relativePath,
+    sourcePath: sourceFilePath,
+    mimeType: mimeType,
+  );
+
+  final root = await directoryService.ensureRoot();
+  final localPath = _localPathForRelative(root, relativePath);
+  if (!await File(localPath).exists()) {
+    await File(localPath).parent.create(recursive: true);
+    await sourceFile.copy(localPath);
+  }
+
+  await _recordProjectFileMaterial(
+    ref,
+    projectId: projectId,
+    relativePath: relativePath,
+    localPath: localPath,
+    fileName: fileName,
+    mimeType: mimeType,
+    writtenAt: writtenAt,
+  );
+
+  return ProjectFileMaterial(
+    relativePath: relativePath,
+    localPath: localPath,
+    fileName: fileName,
+    mimeType: mimeType,
+  );
+}
+
+Future<ProjectFileMaterial?> importProjectFileMaterial(
+  dynamic ref, {
+  required String projectId,
+  required String projectName,
+  DateTime? createdAt,
+}) async {
+  final writtenAt = createdAt ?? DateTime.now();
+  final settings = ref.read(appSettingsRepositoryProvider);
+  final directoryService = MarkdownDirectoryService(settings);
+  final storage = MarkdownStorageService(directoryService);
+  await _ensureProjectMaterialsNoMedia(
+    directoryService,
+    storage,
+    projectId: projectId,
+    projectName: projectName,
+  );
+  final materialDir = ProjectMarkdownPaths.projectMaterialDirectory(
+    projectId: projectId,
+    projectName: projectName,
+  );
+  final notesDir = ProjectMarkdownPaths.projectNotesDirectory(
+    projectId: projectId,
+    projectName: projectName,
+  );
+  final row = await storage.importDocumentToRelativePath(
+    materialDir,
+    markdownDirectory: notesDir,
+  );
+  if (row == null) return null;
+
+  final relativePath = row['relativePath'] as String?;
+  final fileName = row['name'] as String?;
+  if (relativePath == null ||
+      relativePath.trim().isEmpty ||
+      fileName == null ||
+      fileName.trim().isEmpty) {
+    return null;
+  }
+  final mimeType = row['mimeType'] as String? ?? _mimeTypeForPath(relativePath);
+
+  await _recordProjectFileMaterial(
+    ref,
+    projectId: projectId,
+    relativePath: relativePath,
+    fileName: fileName,
+    mimeType: mimeType,
+    writtenAt: writtenAt,
+  );
+
+  return ProjectFileMaterial(
+    relativePath: relativePath,
+    fileName: fileName,
+    mimeType: mimeType,
+  );
+}
+
+Future<void> _recordProjectFileMaterial(
+  dynamic ref, {
+  required String projectId,
+  required String relativePath,
+  String? localPath,
+  required String fileName,
+  required String mimeType,
+  required DateTime writtenAt,
+}) async {
+  await _updateProject(
+    ref,
+    projectId: projectId,
+    updatedAt: writtenAt,
+    archiveEntry: ProjectArchiveEntry(
+      text: '文件：$fileName',
+      source: '文件',
+      createdAt: writtenAt,
+    ),
+    update: (project) {
+      final updates = _listOfMaps(project['updates']);
+      final writtenTime = _formatProjectTime(writtenAt);
+      return {
+        ...project,
+        'lastUpdate': writtenTime,
+        'updates': [
+          {
+            'id': '${writtenAt.microsecondsSinceEpoch}-file-material',
+            'time': writtenTime,
+            'createdAt': writtenAt.millisecondsSinceEpoch,
+            'source': '文件',
+            'text': fileName,
+            'entryType': 'file',
+            'fileRelativePath': relativePath,
+            if (localPath != null && localPath.trim().isNotEmpty)
+              'filePath': localPath,
+            'mimeType': mimeType,
+            'colorValue': AppColors.secondary.toARGB32(),
           },
           ...updates.take(_projectUpdatesRetainLimit - 1),
         ],
@@ -917,6 +1105,53 @@ Future<String> _uniqueProjectImageRelativePath(
   );
 }
 
+Future<String> _uniqueProjectMaterialFileName(
+  MarkdownDirectoryService directoryService, {
+  required String projectId,
+  required String projectName,
+  required String fileName,
+}) async {
+  final root = await directoryService.ensureRoot();
+  final fallback = _safeMaterialFilename(fileName);
+  final extension = p.extension(fallback);
+  final base = extension.isEmpty
+      ? fallback
+      : fallback.substring(0, fallback.length - extension.length);
+  for (var index = 1; index < 100; index++) {
+    final candidate = index == 1 ? fallback : '$base-$index$extension';
+    final relativePath = _projectFileMaterialRelativePath(
+      projectId: projectId,
+      projectName: projectName,
+      filename: candidate,
+    );
+    if (!await File(_localPathForRelative(root, relativePath)).exists()) {
+      return candidate;
+    }
+  }
+  return '$base-${DateTime.now().millisecondsSinceEpoch}$extension';
+}
+
+String _projectFileMaterialRelativePath({
+  required String projectId,
+  required String projectName,
+  required String filename,
+}) {
+  if (_isMarkdownFileName(filename)) {
+    return p.posix.join(
+      ProjectMarkdownPaths.projectNotesDirectory(
+        projectId: projectId,
+        projectName: projectName,
+      ),
+      filename,
+    );
+  }
+  return ProjectMarkdownPaths.projectMaterial(
+    projectId: projectId,
+    projectName: projectName,
+    filename: filename,
+  );
+}
+
 Future<String> _uniqueProjectImageFolderName(
   MarkdownDirectoryService directoryService, {
   required String projectId,
@@ -1044,8 +1279,30 @@ String _mimeTypeForPath(String path) {
     '.png' => 'image/png',
     '.webp' => 'image/webp',
     '.heic' || '.heif' => 'image/heic',
-    _ => 'image/jpeg',
+    '.jpg' || '.jpeg' => 'image/jpeg',
+    '.gif' => 'image/gif',
+    '.pdf' => 'application/pdf',
+    '.md' || '.markdown' => 'text/markdown',
+    '.txt' => 'text/plain',
+    '.csv' => 'text/csv',
+    '.json' => 'application/json',
+    '.doc' => 'application/msword',
+    '.docx' =>
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls' => 'application/vnd.ms-excel',
+    '.xlsx' =>
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.ppt' => 'application/vnd.ms-powerpoint',
+    '.pptx' =>
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.zip' => 'application/zip',
+    _ => 'application/octet-stream',
   };
+}
+
+bool _isMarkdownFileName(String fileName) {
+  final extension = p.extension(fileName).toLowerCase();
+  return extension == '.md' || extension == '.markdown';
 }
 
 String _safeFilenamePart(String value, {required String fallback}) {
@@ -1058,4 +1315,15 @@ String _safeFilenamePart(String value, {required String fallback}) {
       .trim();
   if (cleaned.isEmpty) return fallback;
   return String.fromCharCodes(cleaned.runes.take(36));
+}
+
+String _safeMaterialFilename(String value) {
+  final cleaned = value
+      .trim()
+      .replaceAll(RegExp(r'[\\/:*?"<>|#\r\n]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), '-')
+      .replaceAll(RegExp(r'-+'), '-')
+      .trim();
+  if (cleaned.isEmpty) return 'file';
+  return String.fromCharCodes(cleaned.runes.take(80));
 }

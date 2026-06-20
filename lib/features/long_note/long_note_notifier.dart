@@ -36,13 +36,14 @@ class LongNoteNotifier extends Notifier<LongNoteState> {
       final dirService = MarkdownDirectoryService(settings);
       final noteService = MarkdownNoteService(dirService);
 
-      final path = await noteService.saveLongNote(
+      final savedNote = await noteService.saveLongNoteWithInfo(
         title: trimmedTitle,
         body: trimmedBody,
         dateTime: now,
         projectId: project?.id,
         projectName: project?.name,
       );
+      final path = savedNote.location;
 
       // Write timeline index
       final wordCount = trimmedBody
@@ -63,6 +64,8 @@ class LongNoteNotifier extends Notifier<LongNoteState> {
             metadata: {
               'path': path,
               'title': content,
+              'fileName': savedNote.fileName,
+              'relativePath': savedNote.relativePath,
               'displayPath': MarkdownStorageService.displayPathForLocation(
                 path,
               ),
@@ -81,6 +84,8 @@ class LongNoteNotifier extends Notifier<LongNoteState> {
           projectId: project.id,
           title: content,
           path: path,
+          relativePath: savedNote.relativePath,
+          fileName: savedNote.fileName,
           recordId: recordId,
           updatedAt: now,
         );

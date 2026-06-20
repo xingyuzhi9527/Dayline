@@ -184,16 +184,26 @@ class MarkdownStorageService {
   }
 
   Future<Map<String, Object?>?> importDocumentToTree() async {
+    return importDocumentToRelativePath('documents');
+  }
+
+  Future<Map<String, Object?>?> importDocumentToRelativePath(
+    String relativeDirectory, {
+    String? markdownDirectory,
+  }) async {
     final treeUri = await _directoryService.getTreeRootUri();
     if (treeUri == null || treeUri.isEmpty || !Platform.isAndroid) {
       return null;
     }
 
     await ensureTreeRootSubdir();
-    final row = await _channel.invokeMapMethod<String, Object?>(
-      'importDocument',
-      {'treeUri': treeUri, 'documentsPath': await _treePath('documents')},
-    );
+    final row = await _channel
+        .invokeMapMethod<String, Object?>('importDocument', {
+          'treeUri': treeUri,
+          'documentsPath': await _treePath(relativeDirectory),
+          if (markdownDirectory != null && markdownDirectory.trim().isNotEmpty)
+            'markdownPath': await _treePath(markdownDirectory),
+        });
     return row == null ? null : _stripTreePrefixFromRow(row);
   }
 

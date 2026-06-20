@@ -63,6 +63,23 @@ class MarkdownNoteService {
     String? projectId,
     String? projectName,
   }) async {
+    final saved = await saveLongNoteWithInfo(
+      title: title,
+      body: body,
+      dateTime: dateTime,
+      projectId: projectId,
+      projectName: projectName,
+    );
+    return saved.location;
+  }
+
+  Future<SavedMarkdownNote> saveLongNoteWithInfo({
+    required String? title,
+    required String body,
+    required DateTime dateTime,
+    String? projectId,
+    String? projectName,
+  }) async {
     final filename = MarkdownFilename.generate(
       dateTime,
       title: title,
@@ -97,9 +114,14 @@ class MarkdownNoteService {
             dateTime: dateTime,
             filename: filename,
           );
-    return _storage.writeRelativeTextFile(
+    final location = await _storage.writeRelativeTextFile(
       relativePath: relativePath,
       content: content,
+    );
+    return SavedMarkdownNote(
+      location: location,
+      relativePath: relativePath,
+      fileName: filename,
     );
   }
 
@@ -141,4 +163,16 @@ class MarkdownNoteService {
     );
     return p.posix.join('daily', MarkdownFilename.monthDir(date), filename);
   }
+}
+
+class SavedMarkdownNote {
+  const SavedMarkdownNote({
+    required this.location,
+    required this.relativePath,
+    required this.fileName,
+  });
+
+  final String location;
+  final String relativePath;
+  final String fileName;
 }

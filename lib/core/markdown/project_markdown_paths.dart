@@ -38,9 +38,18 @@ class ProjectMarkdownPaths {
     required String filename,
   }) {
     return p.posix.join(
+      projectNotesDirectory(projectId: projectId, projectName: projectName),
+      filename,
+    );
+  }
+
+  static String projectNotesDirectory({
+    required String projectId,
+    required String projectName,
+  }) {
+    return p.posix.join(
       projectFolder(projectId: projectId, projectName: projectName),
       'notes',
-      filename,
     );
   }
 
@@ -59,6 +68,27 @@ class ProjectMarkdownPaths {
       ?folder,
       filename,
     ]);
+  }
+
+  static String projectMaterialDirectory({
+    required String projectId,
+    required String projectName,
+  }) {
+    return p.posix.join(
+      projectFolder(projectId: projectId, projectName: projectName),
+      'materials',
+    );
+  }
+
+  static String projectMaterial({
+    required String projectId,
+    required String projectName,
+    required String filename,
+  }) {
+    return p.posix.join(
+      projectMaterialDirectory(projectId: projectId, projectName: projectName),
+      filename,
+    );
   }
 
   static String normalLongNote({

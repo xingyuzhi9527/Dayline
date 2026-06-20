@@ -145,21 +145,37 @@ class ProjectMarkdownService {
           final time = _string(update['time'], fallback: '刚刚');
           final source = _string(update['source'], fallback: '项目');
           final text = _oneLine(_string(update['text'], fallback: ''));
-          final materialLink = _projectMaterialLink(update);
-          return '- $time · $source：$text$materialLink';
+          final entryLink = _projectEntryLink(update);
+          return '- $time · $source：$text$entryLink';
         })
         .join('\n');
   }
 
-  String _projectMaterialLink(Map<String, Object?> update) {
-    if (update['entryType'] != 'image') return '';
-    final relativePath = update['imageRelativePath'] as String?;
+  String _projectEntryLink(Map<String, Object?> update) {
+    final entryType = update['entryType'];
+    final relativePath = switch (entryType) {
+      'image' => update['imageRelativePath'] as String?,
+      'file' => update['fileRelativePath'] as String?,
+      'long_note' => update['noteRelativePath'] as String?,
+      _ => null,
+    };
     if (relativePath == null || relativePath.trim().isEmpty) return '';
-    final parts = relativePath.trim().split('/');
-    final materialsIndex = parts.indexOf('materials');
-    if (materialsIndex < 0) return '';
-    final localRelative = parts.skip(materialsIndex).join('/');
+    final localRelative = _projectLocalRelativePath(relativePath);
+    if (localRelative == null || localRelative.isEmpty) return '';
     return ' ([文件]($localRelative))';
+  }
+
+  String? _projectLocalRelativePath(String relativePath) {
+    final parts = relativePath.trim().split('/');
+    final projectRootIndex = parts.indexOf('projects');
+    if (projectRootIndex >= 0 && parts.length > projectRootIndex + 2) {
+      return parts.skip(projectRootIndex + 2).join('/');
+    }
+    final materialsIndex = parts.indexOf('materials');
+    if (materialsIndex >= 0) return parts.skip(materialsIndex).join('/');
+    final notesIndex = parts.indexOf('notes');
+    if (notesIndex >= 0) return parts.skip(notesIndex).join('/');
+    return null;
   }
 
   String _relativePath(Map<String, Object?> project) {

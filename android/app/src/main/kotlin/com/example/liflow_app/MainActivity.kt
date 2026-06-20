@@ -16,6 +16,7 @@ class MainActivity : FlutterActivity() {
     private var pendingDocumentImportResult: MethodChannel.Result? = null
     private var pendingDocumentTreeUri: String? = null
     private var pendingDocumentTargetPath: String? = null
+    private var pendingDocumentMarkdownPath: String? = null
     private var audioChannel: MethodChannel? = null
     private var mediaPlayer: MediaPlayer? = null
     private var playingAudioPath: String? = null
@@ -234,9 +235,12 @@ class MainActivity : FlutterActivity() {
         val documentsPath = call.argument<String>("documentsPath")
             ?.takeIf { it.isNotBlank() }
             ?: "documents"
+        val markdownPath = call.argument<String>("markdownPath")
+            ?.takeIf { it.isNotBlank() }
         pendingDocumentImportResult = result
         pendingDocumentTreeUri = treeUri
         pendingDocumentTargetPath = documentsPath
+        pendingDocumentMarkdownPath = markdownPath
 
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -253,9 +257,11 @@ class MainActivity : FlutterActivity() {
         val callback = pendingDocumentImportResult
         val treeUri = pendingDocumentTreeUri
         val documentsPath = pendingDocumentTargetPath ?: "documents"
+        val markdownPath = pendingDocumentMarkdownPath
         pendingDocumentImportResult = null
         pendingDocumentTreeUri = null
         pendingDocumentTargetPath = null
+        pendingDocumentMarkdownPath = null
         if (callback == null) return
 
         val sourceUri = data?.data
@@ -279,6 +285,7 @@ class MainActivity : FlutterActivity() {
                 Uri.parse(treeUri),
                 sourceUri,
                 documentsPath,
+                markdownPath,
             )
             callback.success(imported)
         } catch (error: Throwable) {
@@ -474,10 +481,16 @@ class MainActivity : FlutterActivity() {
         treeUri: Uri,
         sourceUri: Uri,
         documentsPath: String,
+        markdownPath: String?,
     ): Map<String, Any?> {
-        val documentsDir = resolveDirectory(treeUri, documentsPath, true)
         val sourceName = queryDisplayName(sourceUri) ?: "document"
         val mimeType = contentResolver.getType(sourceUri) ?: "application/octet-stream"
+        val targetPath = if (markdownPath != null && isMarkdownDocument(sourceName, mimeType)) {
+            markdownPath
+        } else {
+            documentsPath
+        }
+        val documentsDir = resolveDirectory(treeUri, targetPath, true)
         val targetName = uniqueFileName(documentsDir, sourceName)
         val targetFile = documentsDir.createFile(mimeType, targetName)
             ?: throw IllegalStateException("Cannot create document: $targetName")
@@ -494,11 +507,20 @@ class MainActivity : FlutterActivity() {
 
         return mapOf(
             "name" to targetFile.name,
-            "relativePath" to "${documentsPath.trim('/')}/${targetFile.name}",
+            "relativePath" to "${targetPath.trim('/')}/${targetFile.name}",
             "mimeType" to targetFile.type,
             "sizeBytes" to targetFile.length(),
             "updatedAt" to targetFile.lastModified(),
         )
+    }
+
+    private fun isMarkdownDocument(fileName: String, mimeType: String): Boolean {
+        val lowerName = fileName.lowercase()
+        val lowerMime = mimeType.lowercase()
+        return lowerName.endsWith(".md") ||
+            lowerName.endsWith(".markdown") ||
+            lowerMime == "text/markdown" ||
+            lowerMime == "text/x-markdown"
     }
 
     private fun queryDisplayName(uri: Uri): String? {

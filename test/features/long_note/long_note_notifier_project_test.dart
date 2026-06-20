@@ -78,6 +78,7 @@ void main() {
         (metadata['path'] as String).replaceAll('\\', '/'),
         contains('/projects/毕业论文-12345678/notes/'),
       );
+      expect(metadata['fileName'], contains('文献综述思路.md'));
 
       final row = await settings.findByKey(projectsSettingsKey);
       final projects = jsonDecode(row!['value'] as String) as List;
@@ -89,7 +90,18 @@ void main() {
       expect(update['text'], '文献综述思路');
       expect(update['entryType'], 'long_note');
       expect(update['notePath'], metadata['path']);
+      expect(update['noteFileName'], contains('文献综述思路.md'));
+      expect(
+        (update['noteRelativePath'] as String).replaceAll('\\', '/'),
+        contains('projects/毕业论文-12345678/notes/'),
+      );
       expect(update['recordId'], record['id']);
+
+      final archive = await File(
+        project['archiveLocation'] as String,
+      ).readAsString();
+      expect(archive, contains('文献综述思路.md'));
+      expect(archive, contains('(notes/${update['noteFileName'] as String})'));
     },
   );
 }

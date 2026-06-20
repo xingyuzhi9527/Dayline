@@ -35,6 +35,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   var _loading = true;
   var _saving = false;
   var _addingProjectImage = false;
+  var _addingProjectFile = false;
 
   _ProjectInfo? get _selectedProject {
     final selectedId = _selectedProjectId;
@@ -457,6 +458,34 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     }
   }
 
+  Future<void> _openAddProjectFileMaterial() async {
+    final project = _selectedProject;
+    if (project == null || _addingProjectFile) return;
+
+    setState(() => _addingProjectFile = true);
+    try {
+      final material = await importProjectFileMaterial(
+        ref,
+        projectId: project.id,
+        projectName: project.name,
+        createdAt: DateTime.now(),
+      );
+      if (!mounted) return;
+      if (material == null) {
+        _showProjectSnack(Platform.isAndroid ? '没有选择文件' : '当前平台暂不支持从这里选择文件');
+        return;
+      }
+      await _loadProjects();
+      if (!mounted) return;
+      _showProjectSnack('文件已归到项目');
+    } catch (e) {
+      if (!mounted) return;
+      _showProjectSnack('添加文件失败：$e');
+    } finally {
+      if (mounted) setState(() => _addingProjectFile = false);
+    }
+  }
+
   Future<void> _saveArchiveSnapshot() async {
     final project = _selectedProject;
     if (project == null) return;
@@ -508,6 +537,47 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     }
     if (update.isImageMaterial) {
       await _openProjectImage(update);
+      return;
+    }
+    if (update.isFileMaterial) {
+      await _openProjectFile(update);
+    }
+  }
+
+  Future<void> _openProjectFile(_ProjectUpdate update) async {
+    final relativePath = update.fileRelativePath;
+    if (relativePath == null || relativePath.isEmpty) {
+      _showProjectSnack('这个文件缺少项目路径');
+      return;
+    }
+
+    try {
+      final settings = ref.read(appSettingsRepositoryProvider);
+      final directoryService = MarkdownDirectoryService(settings);
+      final treeUri = await directoryService.getTreeRootUri();
+      if (Platform.isAndroid && treeUri != null && treeUri.isNotEmpty) {
+        final storage = MarkdownStorageService(directoryService);
+        await storage.openTreeDocument(
+          relativePath: relativePath,
+          mimeType: update.mimeType ?? 'application/octet-stream',
+        );
+        return;
+      }
+
+      final explicitPath = update.filePath;
+      final root = await directoryService.ensureRoot();
+      final fallbackPath = p.joinAll([root, ...p.posix.split(relativePath)]);
+      final file = File(
+        explicitPath != null && explicitPath.isNotEmpty
+            ? explicitPath
+            : fallbackPath,
+      );
+      if (!await file.exists()) {
+        throw StateError('文件不存在：$relativePath');
+      }
+      await _openLocalFile(file.path);
+    } catch (e) {
+      _showProjectSnack('打开文件失败：$e');
     }
   }
 
@@ -843,9 +913,11 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                                 project: project,
                                 onAddUpdate: _openAddUpdate,
                                 onAddImage: _openAddProjectImageMaterial,
+                                onAddFile: _openAddProjectFileMaterial,
                                 onSaveArchive: _saveArchiveSnapshot,
                                 onOpenUpdate: _openProjectUpdate,
                                 addingImage: _addingProjectImage,
+                                addingFile: _addingProjectFile,
                               ),
                             ],
                             const SizedBox(height: AppSpacing.md),
@@ -1901,17 +1973,21 @@ class _SmartUpdatesSection extends StatefulWidget {
     required this.project,
     required this.onAddUpdate,
     required this.onAddImage,
+    required this.onAddFile,
     required this.onSaveArchive,
     required this.onOpenUpdate,
     required this.addingImage,
+    required this.addingFile,
   });
 
   final _ProjectInfo project;
   final VoidCallback onAddUpdate;
   final VoidCallback onAddImage;
+  final VoidCallback onAddFile;
   final VoidCallback onSaveArchive;
   final ValueChanged<_ProjectUpdate> onOpenUpdate;
   final bool addingImage;
+  final bool addingFile;
 
   @override
   State<_SmartUpdatesSection> createState() => _SmartUpdatesSectionState();
@@ -1942,21 +2018,11 @@ class _SmartUpdatesSectionState extends State<_SmartUpdatesSection> {
             icon: const Icon(Icons.save_alt_rounded, size: 16),
             label: const Text('存档'),
           ),
-          TextButton.icon(
-            onPressed: widget.addingImage ? null : widget.onAddImage,
-            icon: widget.addingImage
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.add_photo_alternate_rounded, size: 16),
-            label: const Text('图片'),
-          ),
-          TextButton.icon(
-            onPressed: widget.onAddUpdate,
-            icon: const Icon(Icons.add_rounded, size: 16),
-            label: const Text('添加'),
+          _ProjectUpdateAddMenu(
+            adding: widget.addingImage || widget.addingFile,
+            onAddUpdate: widget.onAddUpdate,
+            onAddImage: widget.onAddImage,
+            onAddFile: widget.onAddFile,
           ),
         ],
       ),
@@ -1971,7 +2037,8 @@ class _SmartUpdatesSectionState extends State<_SmartUpdatesSection> {
                     isLast: i == visibleUpdates.length - 1 && olderCount == 0,
                     onTap:
                         visibleUpdates[i].isLongNote ||
-                            visibleUpdates[i].isImageMaterial
+                            visibleUpdates[i].isImageMaterial ||
+                            visibleUpdates[i].isFileMaterial
                         ? () => widget.onOpenUpdate(visibleUpdates[i])
                         : null,
                   ),
@@ -1996,7 +2063,8 @@ class _SmartUpdatesSectionState extends State<_SmartUpdatesSection> {
                             isLast: i == olderUpdates.length - 1,
                             onTap:
                                 olderUpdates[i].isLongNote ||
-                                    olderUpdates[i].isImageMaterial
+                                    olderUpdates[i].isImageMaterial ||
+                                    olderUpdates[i].isFileMaterial
                                 ? () => widget.onOpenUpdate(olderUpdates[i])
                                 : null,
                           ),
@@ -2005,6 +2073,88 @@ class _SmartUpdatesSectionState extends State<_SmartUpdatesSection> {
                   ),
               ],
             ),
+    );
+  }
+}
+
+enum _ProjectUpdateAddAction { update, image, file }
+
+class _ProjectUpdateAddMenu extends StatelessWidget {
+  const _ProjectUpdateAddMenu({
+    required this.adding,
+    required this.onAddUpdate,
+    required this.onAddImage,
+    required this.onAddFile,
+  });
+
+  final bool adding;
+  final VoidCallback onAddUpdate;
+  final VoidCallback onAddImage;
+  final VoidCallback onAddFile;
+
+  @override
+  Widget build(BuildContext context) {
+    if (adding) {
+      return TextButton.icon(
+        onPressed: null,
+        icon: const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        label: const Text('添加'),
+      );
+    }
+
+    return PopupMenuButton<_ProjectUpdateAddAction>(
+      tooltip: '添加',
+      onSelected: (action) {
+        switch (action) {
+          case _ProjectUpdateAddAction.update:
+            onAddUpdate();
+          case _ProjectUpdateAddAction.image:
+            onAddImage();
+          case _ProjectUpdateAddAction.file:
+            onAddFile();
+        }
+      },
+      itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: _ProjectUpdateAddAction.update,
+          child: ListTile(
+            leading: Icon(Icons.edit_note_rounded),
+            title: Text('写更新'),
+            dense: true,
+          ),
+        ),
+        PopupMenuItem(
+          value: _ProjectUpdateAddAction.image,
+          child: ListTile(
+            leading: Icon(Icons.add_photo_alternate_rounded),
+            title: Text('图片'),
+            dense: true,
+          ),
+        ),
+        PopupMenuItem(
+          value: _ProjectUpdateAddAction.file,
+          child: ListTile(
+            leading: Icon(Icons.attach_file_rounded),
+            title: Text('文件'),
+            dense: true,
+          ),
+        ),
+      ],
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add_rounded, size: 16),
+            SizedBox(width: 6),
+            Text('添加'),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -3721,6 +3871,8 @@ class _ProjectUpdate {
     this.imageRelativePaths = const [],
     this.mimeTypes = const [],
     this.mimeType,
+    this.filePath,
+    this.fileRelativePath,
     this.recordId,
   });
 
@@ -3738,6 +3890,8 @@ class _ProjectUpdate {
   final List<String> imageRelativePaths;
   final List<String> mimeTypes;
   final String? mimeType;
+  final String? filePath;
+  final String? fileRelativePath;
   final int? recordId;
 
   DateTime get createdDate => DateTime.fromMillisecondsSinceEpoch(createdAt);
@@ -3751,6 +3905,11 @@ class _ProjectUpdate {
           (imageRelativePath != null && imageRelativePath!.isNotEmpty) ||
           imagePaths.isNotEmpty ||
           imageRelativePaths.isNotEmpty);
+
+  bool get isFileMaterial =>
+      entryType == 'file' &&
+      ((filePath != null && filePath!.isNotEmpty) ||
+          (fileRelativePath != null && fileRelativePath!.isNotEmpty));
 
   String? get primaryImagePath {
     if (imagePaths.isNotEmpty) return imagePaths.first;
@@ -3793,6 +3952,8 @@ class _ProjectUpdate {
         'imageRelativePaths': imageRelativePaths,
       if (mimeTypes.isNotEmpty) 'mimeTypes': mimeTypes,
       if (mimeType != null) 'mimeType': mimeType,
+      if (filePath != null) 'filePath': filePath,
+      if (fileRelativePath != null) 'fileRelativePath': fileRelativePath,
       if (recordId != null) 'recordId': recordId,
     };
   }
@@ -3817,6 +3978,8 @@ class _ProjectUpdate {
       imageRelativePaths: _stringList(raw['imageRelativePaths']),
       mimeTypes: _stringList(raw['mimeTypes']),
       mimeType: raw['mimeType'] as String?,
+      filePath: raw['filePath'] as String?,
+      fileRelativePath: raw['fileRelativePath'] as String?,
       recordId: raw['recordId'] as int?,
     );
   }
@@ -3871,6 +4034,22 @@ String _projectStatusChangeText(
   if (nextStatus == '归档') return '归档项目：$nextName';
   if (previous.isArchived) return '恢复项目：$nextName，状态：$nextStatus';
   return '更新项目：${previous.name} → $nextName，状态：$nextStatus';
+}
+
+Future<void> _openLocalFile(String path) async {
+  if (Platform.isWindows) {
+    await Process.start('cmd', ['/c', 'start', '', path]);
+    return;
+  }
+  if (Platform.isMacOS) {
+    await Process.start('open', [path]);
+    return;
+  }
+  if (Platform.isLinux) {
+    await Process.start('xdg-open', [path]);
+    return;
+  }
+  throw StateError('当前平台暂不支持打开本地文件');
 }
 
 DateTime _heatmapStartDate(DateTime today) {
