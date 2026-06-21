@@ -581,6 +581,110 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     }
   }
 
+  Future<void> _toggleProjectFavorite(_ProjectUpdate update) async {
+    final project = _selectedProject;
+    if (project == null || !update.canFavorite) return;
+    final existing = project.favoriteForUpdate(update);
+    final now = DateTime.now();
+
+    try {
+      if (existing != null) {
+        await deleteProjectFavorite(
+          ref,
+          projectId: project.id,
+          favoriteId: existing.id,
+          updatedAt: now,
+        );
+        if (!mounted) return;
+        await _loadProjects();
+        _showProjectSnack('已取消收藏');
+        return;
+      }
+
+      final type = update.favoriteRelativePath == null
+          ? ProjectFavoriteType.text
+          : ProjectFavoriteType.markdownFile;
+      await addProjectFavorite(
+        ref,
+        projectId: project.id,
+        title: update.text,
+        type: type,
+        updateId: update.id,
+        relativePath: update.favoriteRelativePath,
+        sourceText: type == ProjectFavoriteType.text ? update.text : null,
+        createdAt: now,
+      );
+      if (!mounted) return;
+      await _loadProjects();
+      _showProjectSnack('已收藏');
+    } catch (e) {
+      if (!mounted) return;
+      _showProjectSnack('收藏失败：$e');
+    }
+  }
+
+  Future<void> _openProjectFavorite(_ProjectFavorite favorite) async {
+    if (favorite.type == _ProjectFavoriteType.text) {
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (_) => _FavoriteTextSheet(favorite: favorite),
+      );
+      return;
+    }
+
+    final relativePath = favorite.relativePath;
+    if (relativePath == null || relativePath.isEmpty) {
+      _showProjectSnack('这个收藏缺少文件路径');
+      return;
+    }
+
+    try {
+      final settings = ref.read(appSettingsRepositoryProvider);
+      final storage = MarkdownStorageService(
+        MarkdownDirectoryService(settings),
+      );
+      final raw = await storage.readTextFileLocation(relativePath);
+      final document = parseMarkdownDocument(
+        raw,
+        fallbackTitle: favorite.title,
+      );
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => LongNoteReaderPage(
+            title: document.title.isEmpty ? favorite.title : document.title,
+            filePath: relativePath,
+            body: document.body.isEmpty ? raw : document.body,
+            projectId: _selectedProject?.id,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showProjectSnack('打开收藏失败：$e');
+    }
+  }
+
+  Future<void> _deleteProjectFavorite(_ProjectFavorite favorite) async {
+    final project = _selectedProject;
+    if (project == null) return;
+    try {
+      await deleteProjectFavorite(
+        ref,
+        projectId: project.id,
+        favoriteId: favorite.id,
+        updatedAt: DateTime.now(),
+      );
+      if (!mounted) return;
+      await _loadProjects();
+      _showProjectSnack('收藏已删除');
+    } catch (e) {
+      if (!mounted) return;
+      _showProjectSnack('删除收藏失败：$e');
+    }
+  }
+
   Future<void> _openProjectImage(_ProjectUpdate update) async {
     final items = <ProjectImageViewerItem>[];
     final localPaths = update.allImagePaths;
@@ -909,6 +1013,12 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                                 onEditTodo: _openEditTodo,
                               ),
                               const SizedBox(height: AppSpacing.md),
+                              _ProjectFavoritesSection(
+                                favorites: project.favorites,
+                                onOpenFavorite: _openProjectFavorite,
+                                onDeleteFavorite: _deleteProjectFavorite,
+                              ),
+                              const SizedBox(height: AppSpacing.md),
                               _SmartUpdatesSection(
                                 project: project,
                                 onAddUpdate: _openAddUpdate,
@@ -916,6 +1026,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                                 onAddFile: _openAddProjectFileMaterial,
                                 onSaveArchive: _saveArchiveSnapshot,
                                 onOpenUpdate: _openProjectUpdate,
+                                onToggleFavorite: _toggleProjectFavorite,
                                 addingImage: _addingProjectImage,
                                 addingFile: _addingProjectFile,
                               ),
@@ -1976,6 +2087,7 @@ class _SmartUpdatesSection extends StatefulWidget {
     required this.onAddFile,
     required this.onSaveArchive,
     required this.onOpenUpdate,
+    required this.onToggleFavorite,
     required this.addingImage,
     required this.addingFile,
   });
@@ -1986,11 +2098,152 @@ class _SmartUpdatesSection extends StatefulWidget {
   final VoidCallback onAddFile;
   final VoidCallback onSaveArchive;
   final ValueChanged<_ProjectUpdate> onOpenUpdate;
+  final ValueChanged<_ProjectUpdate> onToggleFavorite;
   final bool addingImage;
   final bool addingFile;
 
   @override
   State<_SmartUpdatesSection> createState() => _SmartUpdatesSectionState();
+}
+
+class _ProjectFavoritesSection extends StatelessWidget {
+  const _ProjectFavoritesSection({
+    required this.favorites,
+    required this.onOpenFavorite,
+    required this.onDeleteFavorite,
+  });
+
+  static const _visibleFavoriteCount = 5;
+
+  final List<_ProjectFavorite> favorites;
+  final ValueChanged<_ProjectFavorite> onOpenFavorite;
+  final ValueChanged<_ProjectFavorite> onDeleteFavorite;
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleFavorites = favorites.take(_visibleFavoriteCount).toList();
+    final hiddenCount = favorites.length - visibleFavorites.length;
+
+    return _SectionCard(
+      title: '收藏',
+      trailing: hiddenCount > 0 ? '显示5条 · $hiddenCount 条已收纳' : '文字和 MD',
+      child: visibleFavorites.isEmpty
+          ? Text(
+              '还没有收藏。',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+            )
+          : Column(
+              children: [
+                for (var i = 0; i < visibleFavorites.length; i++)
+                  _FavoriteRow(
+                    favorite: visibleFavorites[i],
+                    isLast: i == visibleFavorites.length - 1,
+                    onOpen: () => onOpenFavorite(visibleFavorites[i]),
+                    onDelete: () => onDeleteFavorite(visibleFavorites[i]),
+                  ),
+              ],
+            ),
+    );
+  }
+}
+
+class _FavoriteRow extends StatelessWidget {
+  const _FavoriteRow({
+    required this.favorite,
+    required this.isLast,
+    required this.onOpen,
+    required this.onDelete,
+  });
+
+  final _ProjectFavorite favorite;
+  final bool isLast;
+  final VoidCallback onOpen;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final icon = favorite.type == _ProjectFavoriteType.markdownFile
+        ? Icons.description_outlined
+        : Icons.notes_rounded;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: isLast ? 0 : AppSpacing.xs),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: AppColors.primary),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: InkWell(
+              onTap: onOpen,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(
+                  favorite.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: '删除收藏',
+            onPressed: onDelete,
+            icon: const Icon(Icons.delete_outline_rounded),
+            iconSize: 19,
+            visualDensity: VisualDensity.compact,
+            color: AppColors.muted,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FavoriteTextSheet extends StatelessWidget {
+  const _FavoriteTextSheet({required this.favorite});
+
+  final _ProjectFavorite favorite;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.containerMargin,
+          AppSpacing.sm,
+          AppSpacing.containerMargin,
+          AppSpacing.xl,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              favorite.title,
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: AppColors.ink,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              favorite.sourceText ?? favorite.title,
+              style: theme.textTheme.bodyLarge?.copyWith(height: 1.55),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _SmartUpdatesSectionState extends State<_SmartUpdatesSection> {
@@ -2035,11 +2288,17 @@ class _SmartUpdatesSectionState extends State<_SmartUpdatesSection> {
                   _UpdateRow(
                     update: visibleUpdates[i],
                     isLast: i == visibleUpdates.length - 1 && olderCount == 0,
+                    isFavorite:
+                        widget.project.favoriteForUpdate(visibleUpdates[i]) !=
+                        null,
                     onTap:
                         visibleUpdates[i].isLongNote ||
                             visibleUpdates[i].isImageMaterial ||
                             visibleUpdates[i].isFileMaterial
                         ? () => widget.onOpenUpdate(visibleUpdates[i])
+                        : null,
+                    onToggleFavorite: visibleUpdates[i].canFavorite
+                        ? () => widget.onToggleFavorite(visibleUpdates[i])
                         : null,
                   ),
                 if (olderCount > 0) ...[
@@ -2061,11 +2320,19 @@ class _SmartUpdatesSectionState extends State<_SmartUpdatesSection> {
                           _UpdateRow(
                             update: olderUpdates[i],
                             isLast: i == olderUpdates.length - 1,
+                            isFavorite:
+                                widget.project.favoriteForUpdate(
+                                  olderUpdates[i],
+                                ) !=
+                                null,
                             onTap:
                                 olderUpdates[i].isLongNote ||
                                     olderUpdates[i].isImageMaterial ||
                                     olderUpdates[i].isFileMaterial
                                 ? () => widget.onOpenUpdate(olderUpdates[i])
+                                : null,
+                            onToggleFavorite: olderUpdates[i].canFavorite
+                                ? () => widget.onToggleFavorite(olderUpdates[i])
                                 : null,
                           ),
                       ],
@@ -2239,11 +2506,19 @@ class _EmptyUpdatePrompt extends StatelessWidget {
 }
 
 class _UpdateRow extends StatelessWidget {
-  const _UpdateRow({required this.update, required this.isLast, this.onTap});
+  const _UpdateRow({
+    required this.update,
+    required this.isLast,
+    this.isFavorite = false,
+    this.onTap,
+    this.onToggleFavorite,
+  });
 
   final _ProjectUpdate update;
   final bool isLast;
+  final bool isFavorite;
   final VoidCallback? onTap;
+  final VoidCallback? onToggleFavorite;
 
   @override
   Widget build(BuildContext context) {
@@ -2292,12 +2567,27 @@ class _UpdateRow extends StatelessWidget {
                     children: [
                       _SourceChip(label: update.source, color: color),
                       const SizedBox(width: AppSpacing.xs),
-                      Text(
-                        update.time,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: AppColors.muted,
+                      Expanded(
+                        child: Text(
+                          update.time,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: AppColors.muted,
+                          ),
                         ),
                       ),
+                      if (onToggleFavorite != null)
+                        IconButton(
+                          tooltip: isFavorite ? '取消收藏' : '收藏',
+                          onPressed: onToggleFavorite,
+                          icon: Icon(
+                            isFavorite
+                                ? Icons.star_rounded
+                                : Icons.star_border_rounded,
+                          ),
+                          iconSize: 19,
+                          visualDensity: VisualDensity.compact,
+                          color: isFavorite ? AppColors.focus : AppColors.muted,
+                        ),
                     ],
                   ),
                   const SizedBox(height: AppSpacing.xxs),
@@ -3606,6 +3896,7 @@ class _ProjectInfo {
     required this.lastUpdate,
     required this.todos,
     required this.updates,
+    this.favorites = const [],
     this.archiveLocation,
   });
 
@@ -3616,6 +3907,7 @@ class _ProjectInfo {
   final String lastUpdate;
   final List<_ProjectTodo> todos;
   final List<_ProjectUpdate> updates;
+  final List<_ProjectFavorite> favorites;
   final String? archiveLocation;
 
   bool get isCompleted => status == '完成';
@@ -3625,6 +3917,21 @@ class _ProjectInfo {
   _ProjectTodo? todoById(String todoId) {
     for (final todo in todos) {
       if (todo.id == todoId) return todo;
+    }
+    return null;
+  }
+
+  _ProjectFavorite? favoriteForUpdate(_ProjectUpdate update) {
+    for (final favorite in favorites) {
+      if (favorite.updateId != null && favorite.updateId == update.id) {
+        return favorite;
+      }
+      final relativePath = update.favoriteRelativePath;
+      if (relativePath != null &&
+          favorite.relativePath != null &&
+          favorite.relativePath == relativePath) {
+        return favorite;
+      }
     }
     return null;
   }
@@ -3768,6 +4075,7 @@ class _ProjectInfo {
     String? lastUpdate,
     List<_ProjectTodo>? todos,
     List<_ProjectUpdate>? updates,
+    List<_ProjectFavorite>? favorites,
     String? archiveLocation,
   }) {
     return _ProjectInfo(
@@ -3778,6 +4086,7 @@ class _ProjectInfo {
       lastUpdate: lastUpdate ?? this.lastUpdate,
       todos: todos ?? this.todos,
       updates: updates ?? this.updates,
+      favorites: favorites ?? this.favorites,
       archiveLocation: archiveLocation ?? this.archiveLocation,
     );
   }
@@ -3790,6 +4099,7 @@ class _ProjectInfo {
       'goal': goal,
       'lastUpdate': lastUpdate,
       'todos': todos.map((todo) => todo.toJson()).toList(),
+      'favorites': favorites.map((favorite) => favorite.toJson()).toList(),
       'updates': updates.map((update) => update.toJson()).toList(),
       if (archiveLocation != null) 'archiveLocation': archiveLocation,
     };
@@ -3811,6 +4121,11 @@ class _ProjectInfo {
       todos: [
         for (final item in (raw['todos'] as List? ?? const []))
           if (_ProjectTodo.fromJson(item) != null) _ProjectTodo.fromJson(item)!,
+      ],
+      favorites: [
+        for (final item in (raw['favorites'] as List? ?? const []))
+          if (_ProjectFavorite.fromJson(item) != null)
+            _ProjectFavorite.fromJson(item)!,
       ],
       updates: [
         for (final item in (raw['updates'] as List? ?? const []).take(
@@ -3855,6 +4170,63 @@ class _ProjectTodo {
   }
 }
 
+enum _ProjectFavoriteType { text, markdownFile }
+
+class _ProjectFavorite {
+  const _ProjectFavorite({
+    required this.id,
+    required this.type,
+    required this.title,
+    required this.createdAt,
+    this.updateId,
+    this.relativePath,
+    this.sourceText,
+  });
+
+  final String id;
+  final _ProjectFavoriteType type;
+  final String title;
+  final int createdAt;
+  final String? updateId;
+  final String? relativePath;
+  final String? sourceText;
+
+  Map<String, Object?> toJson() {
+    return {
+      'id': id,
+      'type': switch (type) {
+        _ProjectFavoriteType.text => 'text',
+        _ProjectFavoriteType.markdownFile => 'markdown_file',
+      },
+      'title': title,
+      'createdAt': createdAt,
+      if (updateId != null) 'updateId': updateId,
+      if (relativePath != null) 'relativePath': relativePath,
+      if (sourceText != null) 'sourceText': sourceText,
+    };
+  }
+
+  static _ProjectFavorite? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final id = raw['id'] as String?;
+    final title = raw['title'] as String?;
+    if (id == null || title == null || title.trim().isEmpty) return null;
+    final type = switch (raw['type']) {
+      'markdown_file' => _ProjectFavoriteType.markdownFile,
+      _ => _ProjectFavoriteType.text,
+    };
+    return _ProjectFavorite(
+      id: id,
+      type: type,
+      title: title,
+      createdAt: raw['createdAt'] as int? ?? _createdAtFromProjectUpdateId(id),
+      updateId: raw['updateId'] as String?,
+      relativePath: raw['relativePath'] as String?,
+      sourceText: raw['sourceText'] as String?,
+    );
+  }
+}
+
 class _ProjectUpdate {
   const _ProjectUpdate({
     required this.id,
@@ -3865,6 +4237,8 @@ class _ProjectUpdate {
     required this.colorValue,
     this.entryType,
     this.notePath,
+    this.noteRelativePath,
+    this.noteFileName,
     this.imagePath,
     this.imageRelativePath,
     this.imagePaths = const [],
@@ -3884,6 +4258,8 @@ class _ProjectUpdate {
   final int colorValue;
   final String? entryType;
   final String? notePath;
+  final String? noteRelativePath;
+  final String? noteFileName;
   final String? imagePath;
   final String? imageRelativePath;
   final List<String> imagePaths;
@@ -3910,6 +4286,23 @@ class _ProjectUpdate {
       entryType == 'file' &&
       ((filePath != null && filePath!.isNotEmpty) ||
           (fileRelativePath != null && fileRelativePath!.isNotEmpty));
+
+  bool get canFavorite {
+    if (favoriteRelativePath != null) return true;
+    return !isImageMaterial && !isFileMaterial && text.trim().isNotEmpty;
+  }
+
+  String? get favoriteRelativePath {
+    final noteRelative = noteRelativePath;
+    if (isLongNote && noteRelative != null && noteRelative.isNotEmpty) {
+      return noteRelative;
+    }
+    final fileRelative = fileRelativePath;
+    if (fileRelative != null && _isMarkdownPath(fileRelative)) {
+      return fileRelative;
+    }
+    return null;
+  }
 
   String? get primaryImagePath {
     if (imagePaths.isNotEmpty) return imagePaths.first;
@@ -3945,6 +4338,8 @@ class _ProjectUpdate {
       'colorValue': colorValue,
       if (entryType != null) 'entryType': entryType,
       if (notePath != null) 'notePath': notePath,
+      if (noteRelativePath != null) 'noteRelativePath': noteRelativePath,
+      if (noteFileName != null) 'noteFileName': noteFileName,
       if (imagePath != null) 'imagePath': imagePath,
       if (imageRelativePath != null) 'imageRelativePath': imageRelativePath,
       if (imagePaths.isNotEmpty) 'imagePaths': imagePaths,
@@ -3972,6 +4367,8 @@ class _ProjectUpdate {
       colorValue: raw['colorValue'] as int? ?? AppColors.primary.toARGB32(),
       entryType: raw['entryType'] as String?,
       notePath: raw['notePath'] as String?,
+      noteRelativePath: raw['noteRelativePath'] as String?,
+      noteFileName: raw['noteFileName'] as String?,
       imagePath: raw['imagePath'] as String?,
       imageRelativePath: raw['imageRelativePath'] as String?,
       imagePaths: _stringList(raw['imagePaths']),
@@ -4005,6 +4402,11 @@ List<String> _stringList(Object? raw) {
     for (final item in raw)
       if (item is String && item.isNotEmpty) item,
   ];
+}
+
+bool _isMarkdownPath(String path) {
+  final extension = p.extension(path).toLowerCase();
+  return extension == '.md' || extension == '.markdown';
 }
 
 DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);

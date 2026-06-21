@@ -180,6 +180,21 @@ void main() {
       expect(items.single, containsPair('name', '聚餐'));
       expect(items.single, containsPair('amount', 268.0));
     });
+
+    test('extracts separate names when each amount is spoken first', () {
+      final p = LuiLiteParser.parse('15元早餐 20元咖啡 8元停车');
+      final items = p.metadata['expenseItems'] as List;
+
+      expect(p.type, ParsedInputType.expense);
+      expect(p.metadata['amount'], 43.0);
+      expect(items, hasLength(3));
+      expect(items[0], containsPair('name', '早餐'));
+      expect(items[0], containsPair('amount', 15.0));
+      expect(items[1], containsPair('name', '咖啡'));
+      expect(items[1], containsPair('amount', 20.0));
+      expect(items[2], containsPair('name', '停车'));
+      expect(items[2], containsPair('amount', 8.0));
+    });
   });
 
   group('LuiLiteParser — body', () {

@@ -70,6 +70,49 @@ class ProjectFileMaterial {
   final String? localPath;
 }
 
+enum ProjectFavoriteType {
+  text('text'),
+  markdownFile('markdown_file');
+
+  const ProjectFavoriteType(this.value);
+
+  final String value;
+}
+
+class ProjectFavoriteItem {
+  const ProjectFavoriteItem({
+    required this.id,
+    required this.type,
+    required this.title,
+    required this.createdAt,
+    this.updateId,
+    this.relativePath,
+    this.sourceText,
+  });
+
+  final String id;
+  final ProjectFavoriteType type;
+  final String title;
+  final DateTime createdAt;
+  final String? updateId;
+  final String? relativePath;
+  final String? sourceText;
+
+  Map<String, Object?> toJson() {
+    return {
+      'id': id,
+      'type': type.value,
+      'title': title,
+      'createdAt': createdAt.millisecondsSinceEpoch,
+      if (updateId != null && updateId!.trim().isNotEmpty) 'updateId': updateId,
+      if (relativePath != null && relativePath!.trim().isNotEmpty)
+        'relativePath': relativePath,
+      if (sourceText != null && sourceText!.trim().isNotEmpty)
+        'sourceText': sourceText,
+    };
+  }
+}
+
 Future<List<ProjectOption>> loadProjectOptions(Ref ref) async {
   final projects = await _loadProjects(ref);
   return [
@@ -342,6 +385,70 @@ Future<ProjectFileMaterial?> importProjectFileMaterial(
     relativePath: relativePath,
     fileName: fileName,
     mimeType: mimeType,
+  );
+}
+
+Future<ProjectFavoriteItem> addProjectFavorite(
+  dynamic ref, {
+  required String projectId,
+  required String title,
+  required ProjectFavoriteType type,
+  String? updateId,
+  String? relativePath,
+  String? sourceText,
+  DateTime? createdAt,
+}) async {
+  final writtenAt = createdAt ?? DateTime.now();
+  final favorite = ProjectFavoriteItem(
+    id: '${writtenAt.microsecondsSinceEpoch}-favorite',
+    type: type,
+    title: title.trim().isEmpty ? '收藏' : title.trim(),
+    createdAt: writtenAt,
+    updateId: updateId,
+    relativePath: relativePath,
+    sourceText: sourceText,
+  );
+
+  await _updateProject(
+    ref,
+    projectId: projectId,
+    updatedAt: writtenAt,
+    update: (project) {
+      final favorites = _listOfMaps(project['favorites']);
+      return {
+        ...project,
+        'lastUpdate': _formatProjectTime(writtenAt),
+        'favorites': [favorite.toJson(), ...favorites],
+      };
+    },
+  );
+
+  return favorite;
+}
+
+Future<void> deleteProjectFavorite(
+  dynamic ref, {
+  required String projectId,
+  required String favoriteId,
+  required DateTime updatedAt,
+}) async {
+  await _updateProject(
+    ref,
+    projectId: projectId,
+    updatedAt: updatedAt,
+    update: (project) {
+      final favorites = _listOfMaps(project['favorites']);
+      final nextFavorites = [
+        for (final favorite in favorites)
+          if (favorite['id'] != favoriteId) favorite,
+      ];
+      if (nextFavorites.length == favorites.length) return project;
+      return {
+        ...project,
+        'lastUpdate': _formatProjectTime(updatedAt),
+        'favorites': nextFavorites,
+      };
+    },
   );
 }
 
@@ -998,6 +1105,7 @@ Map<String, Object?>? _normalizeProject(Object? raw) {
     if (raw['archiveLocation'] is String)
       'archiveLocation': raw['archiveLocation'] as String,
     'todos': _listOfMaps(raw['todos']),
+    'favorites': _listOfMaps(raw['favorites']),
     'updates': _listOfMaps(
       raw['updates'],
     ).take(_projectUpdatesRetainLimit).toList(),

@@ -318,15 +318,21 @@ class LuiLiteParser {
     if (matches.isEmpty) return const [];
 
     final items = <ExpenseLineItem>[];
+    var previousNameReadAfter = false;
     for (var i = 0; i < matches.length; i += 1) {
       final match = matches[i];
       final previousEnd = i == 0 ? 0 : matches[i - 1].end;
       final nextStart = i + 1 >= matches.length
           ? input.length
           : matches[i + 1].start;
-      final name = match.isPrefix
+      final before = match.isPrefix || previousNameReadAfter
+          ? ''
+          : _expenseItemNameBefore(input, match, previousEnd);
+      final readAfter = before.isEmpty;
+      final name = readAfter
           ? _expenseItemNameAfter(input, match, nextStart)
-          : _expenseItemNameBefore(input, match, previousEnd, nextStart);
+          : before;
+      previousNameReadAfter = readAfter;
       items.add(ExpenseLineItem(name: name, amount: match.amount));
     }
 
@@ -387,13 +393,10 @@ class LuiLiteParser {
     String input,
     _AmountMatch match,
     int previousEnd,
-    int nextStart,
   ) {
     final separatorEnd = _lastItemSeparatorEndBefore(input, match.start);
     final start = [previousEnd, separatorEnd].reduce((a, b) => a > b ? a : b);
-    final before = _cleanExpenseItemName(input.substring(start, match.start));
-    if (before.isNotEmpty) return before;
-    return _expenseItemNameAfter(input, match, nextStart);
+    return _cleanExpenseItemName(input.substring(start, match.start));
   }
 
   static String _expenseItemNameAfter(

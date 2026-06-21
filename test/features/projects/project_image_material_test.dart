@@ -198,6 +198,81 @@ void main() {
   );
 
   test(
+    'adding and deleting a markdown favorite keeps the original note file',
+    () async {
+      final source = File(
+        '${sourceDir.path}${Platform.pathSeparator}meeting.md',
+      );
+      await source.writeAsString('# 会议记录\n\n下一步整理访谈。');
+      final createdAt = DateTime(2026, 5, 31, 10, 12, 13, 14);
+
+      final material = await addProjectFileMaterial(
+        container,
+        projectId: 'project-12345678',
+        projectName: '毕业论文',
+        sourceFilePath: source.path,
+        createdAt: createdAt,
+      );
+      final favorite = await addProjectFavorite(
+        container,
+        projectId: 'project-12345678',
+        title: '会议记录',
+        type: ProjectFavoriteType.markdownFile,
+        relativePath: material.relativePath,
+        createdAt: createdAt,
+      );
+
+      var row = await settings.findByKey(projectsSettingsKey);
+      var projects = jsonDecode(row!['value'] as String) as List;
+      var project = projects.single as Map<String, Object?>;
+      var favorites = project['favorites'] as List;
+      expect(favorites.single, containsPair('id', favorite.id));
+      expect(
+        favorites.single,
+        containsPair('relativePath', material.relativePath),
+      );
+
+      await deleteProjectFavorite(
+        container,
+        projectId: 'project-12345678',
+        favoriteId: favorite.id,
+        updatedAt: DateTime(2026, 5, 31, 11),
+      );
+
+      row = await settings.findByKey(projectsSettingsKey);
+      projects = jsonDecode(row!['value'] as String) as List;
+      project = projects.single as Map<String, Object?>;
+      favorites = project['favorites'] as List? ?? const [];
+      expect(favorites, isEmpty);
+      expect(await File(material.localPath!).exists(), isTrue);
+    },
+  );
+
+  test('adding a text favorite stores a project-local mapping', () async {
+    final createdAt = DateTime(2026, 5, 31, 12);
+
+    final favorite = await addProjectFavorite(
+      container,
+      projectId: 'project-12345678',
+      title: '关键结论',
+      type: ProjectFavoriteType.text,
+      updateId: 'update-1',
+      sourceText: '访谈对象更关心可执行计划。',
+      createdAt: createdAt,
+    );
+
+    final row = await settings.findByKey(projectsSettingsKey);
+    final projects = jsonDecode(row!['value'] as String) as List;
+    final project = projects.single as Map<String, Object?>;
+    final favorites = project['favorites'] as List;
+
+    expect(favorites.single, containsPair('id', favorite.id));
+    expect(favorites.single, containsPair('type', 'text'));
+    expect(favorites.single, containsPair('updateId', 'update-1'));
+    expect(favorites.single, containsPair('sourceText', '访谈对象更关心可执行计划。'));
+  });
+
+  test(
     'renaming a project image updates the display name without changing file path or timeline',
     () async {
       final source = File(
