@@ -209,20 +209,29 @@ class MainActivity : FlutterActivity() {
         val treeUri = call.argument<String>("treeUri")
             ?: throw IllegalArgumentException("Missing: treeUri")
         val roots = call.argument<List<String>>("roots") ?: emptyList()
-        val rows = mutableListOf<Map<String, Any?>>()
 
-        for (rootPath in roots) {
-            val root = try {
-                resolveDirectory(Uri.parse(treeUri), rootPath, false)
-            } catch (_: Throwable) {
-                null
-            }
-            if (root != null) {
-                collectFiles(root, rootPath.trim('/'), rows)
-            }
-        }
+        Thread {
+            try {
+                val rows = mutableListOf<Map<String, Any?>>()
 
-        result.success(rows)
+                for (rootPath in roots) {
+                    val root = try {
+                        resolveDirectory(Uri.parse(treeUri), rootPath, false)
+                    } catch (_: Throwable) {
+                        null
+                    }
+                    if (root != null) {
+                        collectFiles(root, rootPath.trim('/'), rows)
+                    }
+                }
+
+                runOnUiThread { result.success(rows) }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    result.error("list_files_error", error.message, null)
+                }
+            }
+        }.start()
     }
 
     private fun importDocument(call: MethodCall, result: MethodChannel.Result) {
@@ -270,27 +279,31 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        try {
-            val flags = data.flags and
-                (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            if (flags != 0) {
-                try {
-                    contentResolver.takePersistableUriPermission(sourceUri, flags)
-                } catch (_: Throwable) {
-                    // Some providers grant temporary read access only. Copying still works.
+        Thread {
+            try {
+                val flags = data.flags and
+                    (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                if (flags != 0) {
+                    try {
+                        contentResolver.takePersistableUriPermission(sourceUri, flags)
+                    } catch (_: Throwable) {
+                        // Some providers grant temporary read access only. Copying still works.
+                    }
+                }
+
+                val imported = copyDocumentIntoTree(
+                    Uri.parse(treeUri),
+                    sourceUri,
+                    documentsPath,
+                    markdownPath,
+                )
+                runOnUiThread { callback.success(imported) }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    callback.error("document_import_error", error.message, null)
                 }
             }
-
-            val imported = copyDocumentIntoTree(
-                Uri.parse(treeUri),
-                sourceUri,
-                documentsPath,
-                markdownPath,
-            )
-            callback.success(imported)
-        } catch (error: Throwable) {
-            callback.error("document_import_error", error.message, null)
-        }
+        }.start()
     }
 
     private fun openDocument(call: MethodCall, result: MethodChannel.Result) {

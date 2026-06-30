@@ -305,7 +305,15 @@ class MarkdownStorageService {
     final parsed = MarkdownStorageLocation.parse(location);
     switch (parsed.kind) {
       case MarkdownStorageKind.localPath:
-        final file = File(parsed.localPath!);
+        final localPath = parsed.localPath!;
+        if (_isRelativeLocalPath(localPath)) {
+          await writeRelativeTextFile(
+            relativePath: localPath,
+            content: content,
+          );
+          return;
+        }
+        final file = File(localPath);
         await file.parent.create(recursive: true);
         await file.writeAsString(content);
       case MarkdownStorageKind.documentTree:
@@ -322,7 +330,11 @@ class MarkdownStorageService {
     final parsed = MarkdownStorageLocation.parse(location);
     switch (parsed.kind) {
       case MarkdownStorageKind.localPath:
-        return File(parsed.localPath!).readAsString();
+        final localPath = parsed.localPath!;
+        if (_isRelativeLocalPath(localPath)) {
+          return readRelativeTextFile(localPath);
+        }
+        return File(localPath).readAsString();
       case MarkdownStorageKind.documentTree:
         await ensureTreeRootSubdir();
         return await _channel
@@ -332,6 +344,26 @@ class MarkdownStorageService {
             })
             .then((value) => value ?? '');
     }
+  }
+
+  Future<String> readRelativeTextFile(String relativePath) async {
+    final location = await locationForRelativePath(relativePath);
+    return readTextFileLocation(location);
+  }
+
+  Future<String> locationForRelativePath(String relativePath) async {
+    final treeUri = await _directoryService.getTreeRootUri();
+    if (treeUri != null && treeUri.isNotEmpty) {
+      return MarkdownStorageLocation.documentTree(
+        treeUri: treeUri,
+        relativePath: relativePath,
+      ).serialize();
+    }
+
+    final root = await _directoryService.ensureRoot();
+    return MarkdownStorageLocation.local(
+      _joinLocal(root, relativePath),
+    ).serialize();
   }
 
   static String displayPathForLocation(String location) {
@@ -389,6 +421,15 @@ class MarkdownStorageService {
       return cleanedPath;
     }
     return p.posix.join(cleanedPrefix, cleanedPath);
+  }
+
+  bool _isRelativeLocalPath(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    if (normalized.startsWith('/') || normalized.startsWith('content://')) {
+      return false;
+    }
+    if (RegExp(r'^[A-Za-z]:/').hasMatch(normalized)) return false;
+    return true;
   }
 
   bool _shouldUsePickedFolderAsLiflow(String? name) {

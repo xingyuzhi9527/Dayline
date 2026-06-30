@@ -14,6 +14,7 @@ final documentLibraryServiceProvider = Provider<DocumentLibraryService>((ref) {
   final dirService = MarkdownDirectoryService(settings);
   return DocumentLibraryService(
     settingsRepository: settings,
+    recordsRepository: ref.watch(recordsRepositoryProvider),
     directoryService: dirService,
     storageService: MarkdownStorageService(dirService),
   );
@@ -30,6 +31,7 @@ class DocumentLibraryItem {
     this.mimeType,
     this.sizeBytes,
     this.updatedAt,
+    this.isFavorite = false,
   });
 
   final LibraryItemKind kind;
@@ -39,8 +41,22 @@ class DocumentLibraryItem {
   final String? mimeType;
   final int? sizeBytes;
   final int? updatedAt;
+  final bool isFavorite;
 
   bool get isMarkdown => kind == LibraryItemKind.markdown;
+
+  DocumentLibraryItem copyWith({bool? isFavorite}) {
+    return DocumentLibraryItem(
+      kind: kind,
+      name: name,
+      relativePath: relativePath,
+      location: location,
+      mimeType: mimeType,
+      sizeBytes: sizeBytes,
+      updatedAt: updatedAt,
+      isFavorite: isFavorite ?? this.isFavorite,
+    );
+  }
 }
 
 class DocumentLibrarySnapshot {
@@ -48,13 +64,40 @@ class DocumentLibrarySnapshot {
     required this.rootLabel,
     required this.notes,
     required this.documents,
+    required this.favoriteRecords,
     required this.favoriteFolders,
   });
 
   final String rootLabel;
   final List<DocumentLibraryItem> notes;
   final List<DocumentLibraryItem> documents;
+  final List<DocumentFavoriteRecord> favoriteRecords;
   final List<DocumentFavoriteFolder> favoriteFolders;
+}
+
+class DocumentFavoriteRecord {
+  const DocumentFavoriteRecord({
+    required this.id,
+    required this.title,
+    required this.content,
+    required this.createdAt,
+    this.location,
+    this.relativePath,
+    this.fileName,
+    this.libraryFavoriteKey,
+  });
+
+  final int id;
+  final String title;
+  final String content;
+  final int createdAt;
+  final String? location;
+  final String? relativePath;
+  final String? fileName;
+  final String? libraryFavoriteKey;
+
+  bool get isMarkdown => location != null && location!.isNotEmpty;
+  bool get isLibraryNoteFavorite => libraryFavoriteKey != null;
 }
 
 class DocumentFavoriteFolder {
@@ -97,30 +140,51 @@ class DocumentFavoriteFolder {
 class DocumentLibraryService {
   DocumentLibraryService({
     required AppSettingsRepository settingsRepository,
+    required RecordsRepository recordsRepository,
     required MarkdownDirectoryService directoryService,
     required MarkdownStorageService storageService,
   }) : _settingsRepository = settingsRepository,
+       _recordsRepository = recordsRepository,
        _directoryService = directoryService,
        _storageService = storageService;
 
   static const _favoriteFoldersKey = 'document_favorite_folders';
+  static const _favoriteNotesKey = 'document_favorite_notes';
 
   final AppSettingsRepository _settingsRepository;
+  final RecordsRepository _recordsRepository;
   final MarkdownDirectoryService _directoryService;
   final MarkdownStorageService _storageService;
 
   Future<DocumentLibrarySnapshot> load() async {
     await _storageService.ensureCoreDirectories();
     final favoriteFolders = await _loadFavoriteFolders();
+    final favoriteNotes = await _loadFavoriteNotes();
+    final recordRows = await _recordsRepository.findDocumentLibraryCandidates();
+    final longNoteItems = _longNoteItemsFromRows(recordRows);
+    final favoriteRecords = _mergeFavoriteRecords(
+      _dailyFavoriteRecordsFromRows(recordRows),
+      favoriteNotes,
+    );
     final treeUri = await _directoryService.getTreeRootUri();
     if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
-      return _loadTree(treeUri, favoriteFolders);
+      return _loadTree(
+        treeUri,
+        favoriteFolders,
+        favoriteNotes,
+        longNoteItems,
+        favoriteRecords,
+      );
     }
-    return _loadLocal(favoriteFolders);
+    return _loadLocal(
+      favoriteFolders,
+      favoriteNotes,
+      longNoteItems,
+      favoriteRecords,
+    );
   }
 
   Future<DocumentLibraryItem?> importDocument() async {
-    await _storageService.ensureCoreDirectories();
     final treeUri = await _directoryService.getTreeRootUri();
     if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
       final row = await _storageService.importDocumentToTree();
@@ -171,6 +235,40 @@ class DocumentLibraryService {
     if (await file.exists()) {
       await file.delete();
     }
+  }
+
+  Future<void> setFavoriteNote({
+    required DocumentLibraryItem item,
+    required bool favorite,
+  }) async {
+    if (!item.isMarkdown) {
+      throw StateError('Only Markdown notes can be favorited here.');
+    }
+
+    final current = await _loadFavoriteNotes();
+    final key = _noteItemKey(item);
+    if (!favorite) {
+      await _saveFavoriteNotes(
+        current.where((record) => record.libraryFavoriteKey != key).toList(),
+      );
+      return;
+    }
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final record = DocumentFavoriteRecord(
+      id: 0,
+      title: _favoriteTitleForItem(item),
+      content: '',
+      createdAt: now,
+      location: item.location,
+      relativePath: item.relativePath,
+      fileName: item.name,
+      libraryFavoriteKey: key,
+    );
+    await _saveFavoriteNotes([
+      record,
+      ...current.where((item) => item.libraryFavoriteKey != key),
+    ]);
   }
 
   Future<DocumentFavoriteFolder?> addFavoriteFolder() async {
@@ -243,6 +341,9 @@ class DocumentLibraryService {
   Future<DocumentLibrarySnapshot> _loadTree(
     String treeUri,
     List<DocumentFavoriteFolder> favoriteFolders,
+    List<DocumentFavoriteRecord> favoriteNotes,
+    List<DocumentLibraryItem> longNoteItems,
+    List<DocumentFavoriteRecord> favoriteRecords,
   ) async {
     final rows = await _storageService.listTreeFiles(
       roots: const ['daily', 'notes', 'projects', 'documents'],
@@ -271,14 +372,21 @@ class DocumentLibraryService {
 
     return DocumentLibrarySnapshot(
       rootLabel: 'Liflow',
-      notes: _sortItems(notes),
+      notes: _markFavoriteNotes(_mergeNoteItems(notes, longNoteItems), [
+        ...favoriteRecords,
+        ...favoriteNotes,
+      ]),
       documents: _sortItems(documents),
+      favoriteRecords: favoriteRecords,
       favoriteFolders: favoriteFolders,
     );
   }
 
   Future<DocumentLibrarySnapshot> _loadLocal(
     List<DocumentFavoriteFolder> favoriteFolders,
+    List<DocumentFavoriteRecord> favoriteNotes,
+    List<DocumentLibraryItem> longNoteItems,
+    List<DocumentFavoriteRecord> favoriteRecords,
   ) async {
     final root = await _directoryService.ensureRoot();
     final notes = <DocumentLibraryItem>[];
@@ -332,8 +440,12 @@ class DocumentLibraryService {
 
     return DocumentLibrarySnapshot(
       rootLabel: root,
-      notes: _sortItems(notes),
+      notes: _markFavoriteNotes(_mergeNoteItems(notes, longNoteItems), [
+        ...favoriteRecords,
+        ...favoriteNotes,
+      ]),
       documents: _sortItems(documents),
+      favoriteRecords: favoriteRecords,
       favoriteFolders: favoriteFolders,
     );
   }
@@ -359,6 +471,222 @@ class DocumentLibraryService {
       sizeBytes: size is num ? size.toInt() : null,
       updatedAt: updatedAt is num ? updatedAt.toInt() : null,
     );
+  }
+
+  List<DocumentLibraryItem> _longNoteItemsFromRows(List<DatabaseRow> rows) {
+    final items = <DocumentLibraryItem>[];
+    for (final row in rows) {
+      if (row['type'] != 'long_note' || row['is_deleted'] == 1) continue;
+      final metadata = _decodeMetadata(row['metadata']);
+      final location = _string(metadata['path']);
+      if (location == null || location.isEmpty) continue;
+      final relativePath =
+          _string(metadata['relativePath']) ??
+          _displayPathForLocation(location);
+      final title = _string(metadata['title']) ?? _string(row['content']);
+      final fileName =
+          _string(metadata['fileName']) ??
+          _basename(relativePath) ??
+          title ??
+          '长笔记.md';
+      final updatedAt =
+          _intValue(row['updated_at']) ?? _intValue(row['created_at']);
+      items.add(
+        DocumentLibraryItem(
+          kind: LibraryItemKind.markdown,
+          name: fileName,
+          relativePath: relativePath ?? location,
+          location: location,
+          mimeType: 'text/markdown',
+          updatedAt: updatedAt,
+        ),
+      );
+    }
+    return _sortItems(items);
+  }
+
+  List<DocumentFavoriteRecord> _dailyFavoriteRecordsFromRows(
+    List<DatabaseRow> rows,
+  ) {
+    final favorites = <DocumentFavoriteRecord>[];
+    for (final row in rows) {
+      if (row['is_deleted'] == 1) continue;
+      final metadata = _decodeMetadata(row['metadata']);
+      final tags = _decodeTags(row['tags']);
+      if (!_isDailyFavoriteRecord(metadata, tags)) continue;
+
+      final content = _string(row['content']) ?? '';
+      final title = _string(metadata['title']) ?? content;
+      final location = _string(metadata['path']);
+      final relativePath = location == null
+          ? _string(metadata['relativePath'])
+          : (_string(metadata['relativePath']) ??
+                _displayPathForLocation(location));
+      favorites.add(
+        DocumentFavoriteRecord(
+          id: _intValue(row['id']) ?? 0,
+          title: title.trim().isEmpty ? '收藏记录' : title.trim(),
+          content: content,
+          createdAt: _intValue(row['created_at']) ?? 0,
+          location: location,
+          relativePath: relativePath,
+          fileName: _string(metadata['fileName']),
+        ),
+      );
+    }
+    return favorites..sort((a, b) {
+      final timeCompare = b.createdAt.compareTo(a.createdAt);
+      if (timeCompare != 0) return timeCompare;
+      return b.id.compareTo(a.id);
+    });
+  }
+
+  List<DocumentLibraryItem> _mergeNoteItems(
+    List<DocumentLibraryItem> scanned,
+    List<DocumentLibraryItem> fromRecords,
+  ) {
+    final byKey = <String, DocumentLibraryItem>{};
+    for (final item in [...scanned, ...fromRecords]) {
+      byKey[_noteItemKey(item)] = item;
+    }
+    return _sortItems(byKey.values.toList(growable: false));
+  }
+
+  List<DocumentLibraryItem> _markFavoriteNotes(
+    List<DocumentLibraryItem> notes,
+    List<DocumentFavoriteRecord> favorites,
+  ) {
+    final favoriteKeys = favorites
+        .where((record) => record.isMarkdown)
+        .map(_favoriteRecordKey)
+        .whereType<String>()
+        .toSet();
+    return [
+      for (final item in notes)
+        item.copyWith(isFavorite: favoriteKeys.contains(_noteItemKey(item))),
+    ];
+  }
+
+  List<DocumentFavoriteRecord> _mergeFavoriteRecords(
+    List<DocumentFavoriteRecord> records,
+    List<DocumentFavoriteRecord> favoriteNotes,
+  ) {
+    final byKey = <String, DocumentFavoriteRecord>{};
+    for (final record in [...favoriteNotes, ...records]) {
+      byKey[_favoriteRecordKey(record) ?? 'record:${record.id}'] = record;
+    }
+    return byKey.values.toList(growable: false)..sort((a, b) {
+      final timeCompare = b.createdAt.compareTo(a.createdAt);
+      if (timeCompare != 0) return timeCompare;
+      return b.id.compareTo(a.id);
+    });
+  }
+
+  String _noteItemKey(DocumentLibraryItem item) {
+    final location = item.location.trim();
+    if (location.isNotEmpty) return 'location:$location';
+    return 'relative:${item.relativePath}';
+  }
+
+  String? _favoriteRecordKey(DocumentFavoriteRecord record) {
+    final explicit = record.libraryFavoriteKey;
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    final location = record.location?.trim();
+    if (location != null && location.isNotEmpty) return 'location:$location';
+    final relativePath = record.relativePath?.trim();
+    if (relativePath != null && relativePath.isNotEmpty) {
+      return 'relative:$relativePath';
+    }
+    return null;
+  }
+
+  String _favoriteTitleForItem(DocumentLibraryItem item) {
+    final name = item.name.trim();
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.md')) return name.substring(0, name.length - 3);
+    if (lower.endsWith('.markdown')) {
+      return name.substring(0, name.length - 9);
+    }
+    return name.isEmpty ? '收藏笔记' : name;
+  }
+
+  bool _isDailyFavoriteRecord(
+    Map<String, Object?> metadata,
+    List<String> tags,
+  ) {
+    if (_isProjectRecord(metadata)) return false;
+    if (_truthy(metadata['favorite']) ||
+        _truthy(metadata['isFavorite']) ||
+        _truthy(metadata['is_favorite'])) {
+      return true;
+    }
+    return tags.any((tag) {
+      final normalized = tag.trim().toLowerCase();
+      return normalized == '收藏' || normalized == 'favorite';
+    });
+  }
+
+  bool _isProjectRecord(Map<String, Object?> metadata) {
+    return _string(metadata['projectId']) != null ||
+        _string(metadata['projectEntryType']) != null;
+  }
+
+  bool _truthy(Object? value) {
+    if (value == true) return true;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      return normalized == 'true' || normalized == '1' || normalized == 'yes';
+    }
+    return false;
+  }
+
+  Map<String, Object?> _decodeMetadata(Object? raw) {
+    if (raw is Map<String, Object?>) return raw;
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw) as Map<String, dynamic>;
+        return decoded.cast<String, Object?>();
+      } catch (_) {}
+    }
+    return const {};
+  }
+
+  List<String> _decodeTags(Object? raw) {
+    if (raw is List<String>) return raw;
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw) as List<dynamic>;
+        return decoded.whereType<String>().toList(growable: false);
+      } catch (_) {}
+    }
+    return const [];
+  }
+
+  String? _displayPathForLocation(String location) {
+    try {
+      return MarkdownStorageService.displayPathForLocation(location);
+    } catch (_) {
+      return location;
+    }
+  }
+
+  String? _basename(String? path) {
+    if (path == null || path.trim().isEmpty) return null;
+    return p.posix.basename(path.replaceAll('\\', '/'));
+  }
+
+  String? _string(Object? value) {
+    if (value is! String) return null;
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  int? _intValue(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
   }
 
   List<DocumentLibraryItem> _sortItems(List<DocumentLibraryItem> items) {
@@ -423,6 +751,38 @@ class DocumentLibraryService {
     }
   }
 
+  Future<List<DocumentFavoriteRecord>> _loadFavoriteNotes() async {
+    final row = await _settingsRepository.findByKey(_favoriteNotesKey);
+    final raw = row?['value'] as String?;
+    if (raw == null || raw.trim().isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      final records = <DocumentFavoriteRecord>[];
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final key = _string(item['key']);
+        final location = _string(item['location']);
+        if (key == null || location == null) continue;
+        records.add(
+          DocumentFavoriteRecord(
+            id: 0,
+            title: _string(item['title']) ?? '收藏笔记',
+            content: '',
+            createdAt: _intValue(item['createdAt']) ?? 0,
+            location: location,
+            relativePath: _string(item['relativePath']),
+            fileName: _string(item['fileName']),
+            libraryFavoriteKey: key,
+          ),
+        );
+      }
+      return records..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    } catch (_) {
+      return const [];
+    }
+  }
+
   Future<void> _saveFavoriteFolders(
     List<DocumentFavoriteFolder> folders,
   ) async {
@@ -434,6 +794,26 @@ class DocumentLibraryService {
       await _settingsRepository.update(_favoriteFoldersKey, value);
     } else {
       await _settingsRepository.create(key: _favoriteFoldersKey, value: value);
+    }
+  }
+
+  Future<void> _saveFavoriteNotes(List<DocumentFavoriteRecord> records) async {
+    final value = jsonEncode([
+      for (final record in records)
+        {
+          'key': record.libraryFavoriteKey,
+          'title': record.title,
+          'location': record.location,
+          'relativePath': record.relativePath,
+          'fileName': record.fileName,
+          'createdAt': record.createdAt,
+        },
+    ]);
+    final existing = await _settingsRepository.findByKey(_favoriteNotesKey);
+    if (existing != null) {
+      await _settingsRepository.update(_favoriteNotesKey, value);
+    } else {
+      await _settingsRepository.create(key: _favoriteNotesKey, value: value);
     }
   }
 }

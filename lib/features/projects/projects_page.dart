@@ -644,7 +644,8 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       final storage = MarkdownStorageService(
         MarkdownDirectoryService(settings),
       );
-      final raw = await storage.readTextFileLocation(relativePath);
+      final fileLocation = await storage.locationForRelativePath(relativePath);
+      final raw = await storage.readRelativeTextFile(relativePath);
       final document = parseMarkdownDocument(
         raw,
         fallbackTitle: favorite.title,
@@ -654,7 +655,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         MaterialPageRoute(
           builder: (_) => LongNoteReaderPage(
             title: document.title.isEmpty ? favorite.title : document.title,
-            filePath: relativePath,
+            filePath: fileLocation,
             body: document.body.isEmpty ? raw : document.body,
             projectId: _selectedProject?.id,
           ),

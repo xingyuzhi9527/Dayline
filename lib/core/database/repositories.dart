@@ -157,6 +157,34 @@ class RecordsRepository extends Repository {
       limit: limit,
     );
   }
+
+  Future<List<DatabaseRow>> findDocumentLibraryCandidates() async {
+    final db = await localDatabase.database;
+    return db.query(
+      tableName,
+      columns: const [
+        'id',
+        'type',
+        'content',
+        'tags',
+        'metadata',
+        'is_deleted',
+        'created_at',
+        'updated_at',
+      ],
+      where:
+          'is_deleted = 0 AND (type = ? OR tags LIKE ? OR tags LIKE ? OR metadata LIKE ? OR metadata LIKE ? OR metadata LIKE ?)',
+      whereArgs: const [
+        'long_note',
+        '%收藏%',
+        '%favorite%',
+        '%"favorite"%',
+        '%"isFavorite"%',
+        '%"is_favorite"%',
+      ],
+      orderBy: 'created_at DESC, id DESC',
+    );
+  }
 }
 
 class MediaAttachmentsRepository extends Repository {

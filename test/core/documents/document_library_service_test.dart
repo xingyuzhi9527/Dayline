@@ -13,6 +13,7 @@ void main() {
 
   late LocalDatabase database;
   late AppSettingsRepository settingsRepository;
+  late RecordsRepository recordsRepository;
   late Directory rootDir;
   late DocumentLibraryService service;
 
@@ -22,6 +23,7 @@ void main() {
       databasePath: inMemoryDatabasePath,
     );
     settingsRepository = AppSettingsRepository(database);
+    recordsRepository = RecordsRepository(database);
     rootDir = await Directory.systemTemp.createTemp('liflow-docs-root-');
     await settingsRepository.create(
       key: 'markdown_root_path',
@@ -31,6 +33,7 @@ void main() {
     final dirService = MarkdownDirectoryService(settingsRepository);
     service = DocumentLibraryService(
       settingsRepository: settingsRepository,
+      recordsRepository: recordsRepository,
       directoryService: dirService,
       storageService: MarkdownStorageService(dirService),
     );
@@ -111,6 +114,89 @@ void main() {
       afterDelete.documents.map((item) => item.name),
       isNot(contains('paper.pdf')),
     );
+  });
+
+  test('load includes normal long note records in notes', () async {
+    final noteDir = Directory(
+      '${rootDir.path}${Platform.pathSeparator}notes${Platform.pathSeparator}2026-06',
+    );
+    await noteDir.create(recursive: true);
+    final file = File('${noteDir.path}${Platform.pathSeparator}ordinary.md');
+    await file.writeAsString('# 普通长笔记\n\n正文');
+
+    await recordsRepository.create(
+      date: DateTime(2026, 6, 30),
+      type: 'long_note',
+      content: '普通长笔记',
+      metadata: {
+        'path': file.path,
+        'title': '普通长笔记',
+        'fileName': 'ordinary.md',
+        'relativePath': 'notes/2026-06/ordinary.md',
+      },
+      createdAt: DateTime(2026, 6, 30, 10),
+    );
+
+    final snapshot = await service.load();
+
+    expect(snapshot.notes.map((item) => item.name), contains('ordinary.md'));
+  });
+
+  test('load returns daily favorites and excludes project favorites', () async {
+    await recordsRepository.create(
+      date: DateTime(2026, 6, 30),
+      type: 'memo',
+      content: '值得收藏的日常记录',
+      tags: const ['收藏'],
+      createdAt: DateTime(2026, 6, 30, 10),
+    );
+    await recordsRepository.create(
+      date: DateTime(2026, 6, 30),
+      type: 'memo',
+      content: '项目收藏记录',
+      tags: const ['收藏'],
+      metadata: const {'projectId': 'project-1'},
+      createdAt: DateTime(2026, 6, 30, 11),
+    );
+
+    final snapshot = await service.load();
+
+    expect(snapshot.favoriteRecords, hasLength(1));
+    expect(snapshot.favoriteRecords.single.title, '值得收藏的日常记录');
+  });
+
+  test('setFavoriteNote adds markdown note to favorites', () async {
+    final notesDir = Directory(
+      '${rootDir.path}${Platform.pathSeparator}notes${Platform.pathSeparator}2026-06',
+    );
+    await notesDir.create(recursive: true);
+    final file = File('${notesDir.path}${Platform.pathSeparator}idea.md');
+    await file.writeAsString('# Idea');
+
+    final snapshot = await service.load();
+    final note = snapshot.notes.singleWhere((item) => item.name == 'idea.md');
+
+    await service.setFavoriteNote(item: note, favorite: true);
+
+    final afterFavorite = await service.load();
+    final favoriteNote = afterFavorite.notes.singleWhere(
+      (item) => item.name == 'idea.md',
+    );
+    expect(favoriteNote.isFavorite, isTrue);
+    expect(afterFavorite.favoriteRecords.map((item) => item.fileName), [
+      'idea.md',
+    ]);
+
+    await service.setFavoriteNote(item: favoriteNote, favorite: false);
+
+    final afterRemove = await service.load();
+    expect(
+      afterRemove.notes
+          .singleWhere((item) => item.name == 'idea.md')
+          .isFavorite,
+      isFalse,
+    );
+    expect(afterRemove.favoriteRecords, isEmpty);
   });
 
   test('load returns stored favorite folders', () async {

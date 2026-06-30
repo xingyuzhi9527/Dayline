@@ -7,7 +7,9 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../long_note/widgets/markdown_reader.dart';
 
-enum _LibraryView { notes, documents, folders }
+enum _LibraryView { notes, documents, favorites, folders }
+
+const _visibleNoteCount = 7;
 
 class DocumentLibraryPage extends ConsumerStatefulWidget {
   const DocumentLibraryPage({super.key});
@@ -90,9 +92,6 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
             }
 
             final data = snapshot.data!;
-            final items = _view == _LibraryView.documents
-                ? data.documents
-                : data.notes;
             return Column(
               children: [
                 Padding(
@@ -126,56 +125,53 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
                         ],
                       ),
                       const SizedBox(height: AppSpacing.xs),
-                      SegmentedButton<_LibraryView>(
-                        segments: [
-                          ButtonSegment<_LibraryView>(
-                            value: _LibraryView.notes,
-                            icon: const Icon(Icons.notes_rounded),
-                            label: Text('笔记 ${data.notes.length}'),
-                          ),
-                          ButtonSegment<_LibraryView>(
-                            value: _LibraryView.documents,
-                            icon: const Icon(Icons.folder_rounded),
-                            label: Text('文档 ${data.documents.length}'),
-                          ),
-                          ButtonSegment<_LibraryView>(
-                            value: _LibraryView.folders,
-                            icon: const Icon(Icons.folder_special_rounded),
-                            label: Text('文件夹 ${data.favoriteFolders.length}'),
-                          ),
-                        ],
-                        selected: {_view},
-                        onSelectionChanged: (value) {
-                          setState(() => _view = value.single);
-                        },
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: SegmentedButton<_LibraryView>(
+                          segments: [
+                            ButtonSegment<_LibraryView>(
+                              value: _LibraryView.notes,
+                              icon: const Icon(Icons.notes_rounded),
+                              label: Text('笔记 ${data.notes.length}'),
+                            ),
+                            ButtonSegment<_LibraryView>(
+                              value: _LibraryView.documents,
+                              icon: const Icon(Icons.folder_rounded),
+                              label: Text('文档 ${data.documents.length}'),
+                            ),
+                            ButtonSegment<_LibraryView>(
+                              value: _LibraryView.favorites,
+                              icon: const Icon(Icons.bookmark_rounded),
+                              label: Text('收藏夹 ${data.favoriteRecords.length}'),
+                            ),
+                            ButtonSegment<_LibraryView>(
+                              value: _LibraryView.folders,
+                              icon: const Icon(Icons.folder_special_rounded),
+                              label: Text('文件夹 ${data.favoriteFolders.length}'),
+                            ),
+                          ],
+                          selected: {_view},
+                          onSelectionChanged: (value) {
+                            setState(() => _view = value.single);
+                          },
+                        ),
                       ),
                     ],
                   ),
                 ),
                 const Divider(height: 1),
                 Expanded(
-                  child: _view == _LibraryView.folders
-                      ? _folderList(data.favoriteFolders)
-                      : items.isEmpty
-                      ? _emptyState(_view)
-                      : ListView.separated(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: AppSpacing.xs,
-                          ),
-                          itemCount: items.length,
-                          separatorBuilder: (context, index) =>
-                              const Divider(height: 1, indent: 72),
-                          itemBuilder: (context, index) {
-                            final item = items[index];
-                            return _LibraryItemTile(
-                              item: item,
-                              onTap: () => _openItem(item),
-                              onDelete: item.isMarkdown
-                                  ? null
-                                  : () => _confirmDeleteDocument(item),
-                            );
-                          },
-                        ),
+                  child: switch (_view) {
+                    _LibraryView.notes => _notesList(data.notes),
+                    _LibraryView.documents =>
+                      data.documents.isEmpty
+                          ? _emptyState(_view)
+                          : _itemList(data.documents),
+                    _LibraryView.favorites => _favoriteRecordList(
+                      data.favoriteRecords,
+                    ),
+                    _LibraryView.folders => _folderList(data.favoriteFolders),
+                  },
                 ),
               ],
             );
@@ -195,6 +191,81 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
               label: const Text('收藏'),
             )
           : null,
+    );
+  }
+
+  Widget _notesList(List<DocumentLibraryItem> notes) {
+    if (notes.isEmpty) return _emptyState(_LibraryView.notes);
+    final recent = notes.take(_visibleNoteCount).toList(growable: false);
+    final archived = notes.skip(_visibleNoteCount).toList(growable: false);
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+      itemCount: recent.length + (archived.isEmpty ? 0 : 1),
+      separatorBuilder: (context, index) =>
+          const Divider(height: 1, indent: 72),
+      itemBuilder: (context, index) {
+        if (index == recent.length) {
+          return _NoteArchiveTile(
+            count: archived.length,
+            onTap: () => _openArchivedNotes(archived),
+          );
+        }
+        final item = recent[index];
+        return _LibraryItemTile(
+          item: item,
+          onTap: () => _openItem(item),
+          onToggleFavorite: () => _toggleFavoriteNote(item),
+        );
+      },
+    );
+  }
+
+  Widget _itemList(List<DocumentLibraryItem> items) {
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+      itemCount: items.length,
+      separatorBuilder: (context, index) =>
+          const Divider(height: 1, indent: 72),
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return _LibraryItemTile(
+          item: item,
+          onTap: () => _openItem(item),
+          onToggleFavorite: item.isMarkdown
+              ? () => _toggleFavoriteNote(item)
+              : null,
+          onDelete: item.isMarkdown ? null : () => _confirmDeleteDocument(item),
+        );
+      },
+    );
+  }
+
+  Widget _favoriteRecordList(List<DocumentFavoriteRecord> records) {
+    if (records.isEmpty) return _emptyState(_LibraryView.favorites);
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+      itemCount: records.length,
+      separatorBuilder: (context, index) =>
+          const Divider(height: 1, indent: 72),
+      itemBuilder: (context, index) {
+        final record = records[index];
+        return _FavoriteRecordTile(
+          record: record,
+          onTap: () => _openFavoriteRecord(record),
+        );
+      },
+    );
+  }
+
+  Future<void> _openArchivedNotes(List<DocumentLibraryItem> notes) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => _MarkdownItemListPage(
+          title: '笔记收纳夹',
+          items: notes,
+          onFavoriteChanged: _refresh,
+        ),
+      ),
     );
   }
 
@@ -218,20 +289,27 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
 
   Widget _emptyState(_LibraryView view) {
     final documents = view == _LibraryView.documents;
+    final favorites = view == _LibraryView.favorites;
     final folders = view == _LibraryView.folders;
     return _LibraryMessage(
       icon: folders
           ? Icons.folder_special_rounded
+          : favorites
+          ? Icons.bookmark_border_rounded
           : documents
           ? Icons.folder_open_rounded
           : Icons.notes_rounded,
       title: folders
           ? '还没有收藏文件夹'
+          : favorites
+          ? '还没有日常收藏'
           : documents
           ? '还没有导入文档'
           : '还没有 Markdown 笔记',
       message: folders
           ? '收藏常用资料文件夹后，可以直接从这里进入并打开里面的文件。'
+          : favorites
+          ? '日常记录标记为收藏后会出现在这里，项目里的收藏不会混进来。'
           : documents
           ? '导入后的 PDF、Word 和其他文件会复制到 Liflow/documents。'
           : '生成日记或保存长笔记后，它们会出现在这里。',
@@ -335,8 +413,10 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
         await Navigator.of(context).push<void>(
           MaterialPageRoute(
             builder: (_) => _MarkdownLibraryReaderPage(
+              item: item,
               title: parsed.title.isEmpty ? item.name : parsed.title,
               body: parsed.body.isEmpty ? raw : parsed.body,
+              onFavoriteChanged: _refresh,
             ),
           ),
         );
@@ -355,6 +435,31 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
           ),
         );
     }
+  }
+
+  Future<void> _openFavoriteRecord(DocumentFavoriteRecord record) async {
+    if (record.isMarkdown) {
+      final relativePath =
+          record.relativePath ?? record.fileName ?? record.title;
+      await _openItem(
+        DocumentLibraryItem(
+          kind: LibraryItemKind.markdown,
+          name: record.fileName ?? record.title,
+          relativePath: relativePath,
+          location: record.location!,
+          mimeType: 'text/markdown',
+          updatedAt: record.createdAt,
+          isFavorite: record.isLibraryNoteFavorite,
+        ),
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => _FavoriteRecordSheet(record: record),
+    );
   }
 
   Future<void> _confirmDeleteDocument(DocumentLibraryItem item) async {
@@ -406,6 +511,39 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
     }
   }
 
+  Future<void> _toggleFavoriteNote(DocumentLibraryItem item) async {
+    try {
+      final nextFavorite = !item.isFavorite;
+      await ref
+          .read(documentLibraryServiceProvider)
+          .setFavoriteNote(item: item, favorite: nextFavorite);
+      if (!mounted) return;
+      setState(() {
+        _snapshotFuture = _load();
+        if (nextFavorite) _view = _LibraryView.favorites;
+      });
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(nextFavorite ? '已收藏 ${item.name}' : '已取消收藏'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 1),
+          ),
+        );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('收藏失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
+
   Future<void> _confirmRemoveFavoriteFolder(
     DocumentFavoriteFolder folder,
   ) async {
@@ -443,6 +581,247 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
       ),
     );
   }
+}
+
+class _NoteArchiveTile extends StatelessWidget {
+  const _NoteArchiveTile({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.xxs,
+      ),
+      leading: CircleAvatar(
+        backgroundColor: AppColors.muted.withAlpha(20),
+        child: const Icon(
+          Icons.inventory_2_outlined,
+          color: AppColors.muted,
+          size: 20,
+        ),
+      ),
+      title: Text(
+        '收纳夹',
+        style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
+      ),
+      subtitle: Text(
+        '$count 条较早笔记',
+        style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+      ),
+      trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+      onTap: onTap,
+    );
+  }
+}
+
+class _FavoriteRecordTile extends StatelessWidget {
+  const _FavoriteRecordTile({required this.record, required this.onTap});
+
+  final DocumentFavoriteRecord record;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.xxs,
+      ),
+      leading: CircleAvatar(
+        backgroundColor: AppColors.focus.withAlpha(22),
+        child: Icon(
+          record.isMarkdown ? Icons.article_outlined : Icons.bookmark_rounded,
+          color: AppColors.focus,
+          size: 20,
+        ),
+      ),
+      title: Text(
+        record.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+      ),
+      subtitle: Text(
+        _favoriteRecordSubtitle(record),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+      ),
+      trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+      onTap: onTap,
+    );
+  }
+}
+
+class _FavoriteRecordSheet extends StatelessWidget {
+  const _FavoriteRecordSheet({required this.record});
+
+  final DocumentFavoriteRecord record;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.sm,
+          AppSpacing.lg,
+          AppSpacing.xl,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              record.title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              _formatRecordDate(record.createdAt),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppColors.muted,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              record.content.isEmpty ? record.title : record.content,
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.55),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MarkdownItemListPage extends ConsumerWidget {
+  const _MarkdownItemListPage({
+    required this.title,
+    required this.items,
+    required this.onFavoriteChanged,
+  });
+
+  final String title;
+  final List<DocumentLibraryItem> items;
+  final VoidCallback onFavoriteChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: SafeArea(
+        child: ListView.separated(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+          itemCount: items.length,
+          separatorBuilder: (context, index) =>
+              const Divider(height: 1, indent: 72),
+          itemBuilder: (context, index) {
+            final item = items[index];
+            return _LibraryItemTile(
+              item: item,
+              onTap: () => _openMarkdownItem(context, ref, item),
+              onToggleFavorite: () => _toggleFavoriteNote(context, ref, item),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openMarkdownItem(
+    BuildContext context,
+    WidgetRef ref,
+    DocumentLibraryItem item,
+  ) async {
+    try {
+      final raw = await ref
+          .read(documentLibraryServiceProvider)
+          .readMarkdown(item);
+      if (!context.mounted) return;
+      final parsed = parseMarkdownDocument(raw, fallbackTitle: item.name);
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => _MarkdownLibraryReaderPage(
+            item: item,
+            title: parsed.title.isEmpty ? item.name : parsed.title,
+            body: parsed.body.isEmpty ? raw : parsed.body,
+            onFavoriteChanged: onFavoriteChanged,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('打开失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
+
+  Future<void> _toggleFavoriteNote(
+    BuildContext context,
+    WidgetRef ref,
+    DocumentLibraryItem item,
+  ) async {
+    try {
+      final nextFavorite = !item.isFavorite;
+      await ref
+          .read(documentLibraryServiceProvider)
+          .setFavoriteNote(item: item, favorite: nextFavorite);
+      onFavoriteChanged();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(nextFavorite ? '已收藏 ${item.name}' : '已取消收藏'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 1),
+          ),
+        );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('收藏失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
+}
+
+String _favoriteRecordSubtitle(DocumentFavoriteRecord record) {
+  final parts = <String>[_formatRecordDate(record.createdAt)];
+  final path = record.relativePath;
+  if (path != null && path.isNotEmpty) parts.add(path);
+  return parts.join(' · ');
+}
+
+String _formatRecordDate(int millis) {
+  if (millis <= 0) return '未知时间';
+  final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+  final month = dt.month.toString().padLeft(2, '0');
+  final day = dt.day.toString().padLeft(2, '0');
+  final hour = dt.hour.toString().padLeft(2, '0');
+  final minute = dt.minute.toString().padLeft(2, '0');
+  return '$month-$day $hour:$minute';
 }
 
 class _FavoriteFolderTile extends StatelessWidget {
@@ -614,11 +993,13 @@ class _LibraryItemTile extends StatelessWidget {
   const _LibraryItemTile({
     required this.item,
     required this.onTap,
+    this.onToggleFavorite,
     this.onDelete,
   });
 
   final DocumentLibraryItem item;
   final VoidCallback onTap;
+  final VoidCallback? onToggleFavorite;
   final VoidCallback? onDelete;
 
   @override
@@ -648,7 +1029,24 @@ class _LibraryItemTile extends StatelessWidget {
         style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
       ),
       trailing: item.isMarkdown
-          ? const Icon(Icons.chevron_right_rounded, color: AppColors.muted)
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: item.isFavorite ? '取消收藏' : '收藏笔记',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onToggleFavorite,
+                  icon: Icon(
+                    item.isFavorite
+                        ? Icons.star_rounded
+                        : Icons.star_border_rounded,
+                    size: 20,
+                    color: item.isFavorite ? AppColors.focus : null,
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+              ],
+            )
           : Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -760,19 +1158,91 @@ class _LibraryMessage extends StatelessWidget {
   }
 }
 
-class _MarkdownLibraryReaderPage extends StatelessWidget {
-  const _MarkdownLibraryReaderPage({required this.title, required this.body});
+class _MarkdownLibraryReaderPage extends ConsumerStatefulWidget {
+  const _MarkdownLibraryReaderPage({
+    required this.item,
+    required this.title,
+    required this.body,
+    required this.onFavoriteChanged,
+  });
 
+  final DocumentLibraryItem item;
   final String title;
   final String body;
+  final VoidCallback onFavoriteChanged;
+
+  @override
+  ConsumerState<_MarkdownLibraryReaderPage> createState() =>
+      _MarkdownLibraryReaderPageState();
+}
+
+class _MarkdownLibraryReaderPageState
+    extends ConsumerState<_MarkdownLibraryReaderPage> {
+  late var _isFavorite = widget.item.isFavorite;
+  var _savingFavorite = false;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        actions: [
+          IconButton(
+            tooltip: _isFavorite ? '取消收藏' : '收藏笔记',
+            onPressed: _savingFavorite ? null : _toggleFavorite,
+            icon: _savingFavorite
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    _isFavorite
+                        ? Icons.star_rounded
+                        : Icons.star_border_rounded,
+                    color: _isFavorite ? AppColors.focus : null,
+                  ),
+          ),
+        ],
       ),
-      body: MarkdownReader(text: body),
+      body: MarkdownReader(text: widget.body),
     );
+  }
+
+  Future<void> _toggleFavorite() async {
+    setState(() => _savingFavorite = true);
+    try {
+      final nextFavorite = !_isFavorite;
+      await ref
+          .read(documentLibraryServiceProvider)
+          .setFavoriteNote(
+            item: widget.item.copyWith(isFavorite: _isFavorite),
+            favorite: nextFavorite,
+          );
+      if (!mounted) return;
+      setState(() => _isFavorite = nextFavorite);
+      widget.onFavoriteChanged();
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(nextFavorite ? '已收藏 ${widget.item.name}' : '已取消收藏'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 1),
+          ),
+        );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('收藏失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _savingFavorite = false);
+    }
   }
 }

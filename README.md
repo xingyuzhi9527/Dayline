@@ -4,9 +4,9 @@
 
 Liflow 是一款 Android Flutter 应用，核心理念是**数据留在本地**：无账号系统、无广告、无埋点、无云端同步。笔记、语音、待办、项目进度、日记草稿、照片和导出的 Markdown 文件全部保存在手机里，你不删就一直在。
 
-[下载 release APK](https://github.com/2478643035/Dayline/releases/download/v2.0.0-build9/Liflow-v2.0.0-build9-release.apk) · [Release 页面](https://github.com/2478643035/Dayline/releases/tag/v2.0.0-build9)
+[下载 release APK](https://github.com/2478643035/Dayline/releases/download/v2.0.0-build10/Liflow-v2.0.0-build10-release.apk) · [Release 页面](https://github.com/2478643035/Dayline/releases/tag/v2.0.0-build10)
 
-当前版本：`2.0.0+9`
+当前版本：`2.0.0+10`
 
 ## 四个页面
 
@@ -99,7 +99,7 @@ test/             单元测试、Widget 测试、仓库层测试
 Android 手机直接下载签名 release APK 安装：
 
 ```text
-https://github.com/2478643035/Dayline/releases/download/v2.0.0-build9/Liflow-v2.0.0-build9-release.apk
+https://github.com/2478643035/Dayline/releases/download/v2.0.0-build10/Liflow-v2.0.0-build10-release.apk
 ```
 
 APK 体积较大是因为打包了离线语音识别模型。
@@ -166,10 +166,10 @@ storeFile=<你的密钥库路径>
 
 最新 release：
 
-- Tag：`v2.0.0-build9`
-- Commit：`04749de`
-- APK：`Liflow-v2.0.0-build9-release.apk`
-- SHA-256：`A742544FAD085A1AA50559712162CA78C976975C4A18025ADEA7E44A2508FDFB`
+- Tag：`v2.0.0-build10`
+- Commit：见 release tag
+- APK：`Liflow-v2.0.0-build10-release.apk`
+- SHA-256：`FD92FB53493473C736098D06A907CD33C03C58E9D57481DAF37EB9CEC990780C`
 
 ## 备注
 
