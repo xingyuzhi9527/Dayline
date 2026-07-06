@@ -49,6 +49,17 @@ docs/
 # Android signing
 android/key.properties
 
+# Secrets & credentials
+*.env
+*.env.*
+*.jks
+*.keystore
+*.pem
+*.gpg
+*.pgp
+credentials*
+.secret*
+
 # OS files
 .DS_Store
 Thumbs.db

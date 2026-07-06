@@ -96,7 +96,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     final ts = DateTime.now().microsecondsSinceEpoch;
     final line = '[$ts] $message';
     developer.log(line, name: 'LiflowKB');
-    debugPrint('LiflowKB $line');
+    if (kDebugMode) debugPrint('LiflowKB $line');
   }
 
   @override
