@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/database/local_database.dart';
 import '../../core/database/repository_providers.dart';
+import '../../core/database/write_operations_repository.dart';
 import '../../core/media/audio_recording_service.dart';
 import '../../core/media/photo_moment_service.dart';
 import '../../core/parser/expense_line_item.dart';
@@ -22,8 +26,13 @@ final flashRecordProvider =
       FlashRecordNotifier.new,
     );
 
+final flashSaveTimeoutProvider = Provider<Duration>((ref) {
+  return const Duration(seconds: 8);
+});
+
 class FlashRecordNotifier extends Notifier<FlashRecordState> {
-  static const _saveTimeout = Duration(seconds: 8);
+  static const _parsedWriteOperationType = 'flash_record.parsed.v2';
+  static const _audioWriteOperationType = 'flash_record.audio.v2';
   static final _riskyAmountMemoContext = RegExp(
     r'(工资|薪资|收入|房贷|申报|报销|预算|以上|以内|不超过|至少|额度|规则)',
   );
@@ -36,16 +45,18 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     caseSensitive: false,
   );
 
-  late final SttEngine _sttEngine;
+  late SttEngine _sttEngine;
   SttListenSession? _sttSession;
   StreamSubscription<SttTranscript>? _sttSub;
   SttRecordingDraft? _recordingDraft;
   AudioRecordingService? _audioRecordingService;
+  Future<void>? _saveInFlight;
   bool _disposed = false;
   int _listenRequestId = 0;
 
   @override
   FlashRecordState build() {
+    _disposed = false;
     _sttEngine = ref.watch(sttEngineProvider);
     ref.onDispose(() {
       _disposed = true;
@@ -53,13 +64,6 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       unawaited(_sttSession?.cancel());
       unawaited(_audioRecordingService?.deleteDraftIfExists(_recordingDraft));
     });
-    unawaited(
-      Future<void>.microtask(() async {
-        if (!_disposed) {
-          await _initializeStt();
-        }
-      }),
-    );
     return const FlashRecordState();
   }
 
@@ -91,6 +95,9 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   }
 
   Future<void> startListening() async {
+    if (_saveInFlight != null) return;
+    if (!await _releaseCompletedOperationForNewText('')) return;
+
     final requestId = ++_listenRequestId;
     await _discardRecordingDraft();
     _recordingDraft = null;
@@ -359,54 +366,114 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   }
 
   void cancelConfirm() {
-    unawaited(_discardRecordingDraft());
+    if (_saveInFlight != null) {
+      state = state.copyWith(errorMessage: '保存仍在处理，请稍候。');
+      return;
+    }
+    unawaited(_cancelConfirmWhenIdle());
+  }
+
+  Future<void> _cancelConfirmWhenIdle() async {
+    final operationId = state.saveOperationId;
+    if (operationId != null) {
+      final operation = await ref
+          .read(writeOperationsRepositoryProvider)
+          .findById(operationId);
+      if (operation?.status == WriteOperationStatus.committed) {
+        if (!_disposed) {
+          state = state.copyWith(errorMessage: '记录已写入，正在完成文件同步，请再次保存。');
+        }
+        return;
+      }
+    }
+
+    await _discardRecordingDraft();
+    if (_disposed) return;
     state = _idleStateKeepingStt();
+    await _releaseOperation(operationId);
   }
 
   Future<void> save() async {
     final parsed = state.parsedInput;
-    if (parsed == null) return;
+    if (parsed == null || state.phase == FlashPhase.saved) return;
 
-    state = state.copyWith(phase: FlashPhase.saving);
-
-    try {
-      final draft = state.recordingDraft;
-      if (draft != null) {
-        _audioService();
-      }
-      final draftConsumed = await _persist(
-        parsed,
-        recordingDraft: draft,
-        selectedProjectId: state.selectedProjectId,
-        receiptImagePath: state.expenseReceiptImagePath,
-      ).timeout(_saveTimeout);
-      await ensureDailyDraftAfterActivity(ref, DateTime.now());
-      if (!draftConsumed) {
-        await _audioRecordingService?.deleteDraftIfExists(draft);
-      }
-      ref.read(dataVersionProvider.notifier).increment();
-      _recordingDraft = null;
-      state = state.copyWith(
-        phase: FlashPhase.saved,
-        recordingDraft: null,
-        selectedProjectId: null,
-        expenseReceiptImagePath: null,
-      );
-    } on TimeoutException {
-      state = state.copyWith(
-        phase: FlashPhase.confirming,
-        errorMessage: '保存超时，请再试一次。',
-      );
-    } catch (e) {
-      state = state.copyWith(
-        phase: FlashPhase.confirming,
-        errorMessage: e.toString(),
-      );
+    final currentSave = _saveInFlight;
+    if (currentSave != null) {
+      await _waitForExistingSave(currentSave);
+      return;
     }
+
+    final draft = state.recordingDraft;
+    final selectedProjectId = state.selectedProjectId;
+    final receiptImagePath = state.expenseReceiptImagePath;
+    final rawText = state.rawText;
+    state = state.copyWith(phase: FlashPhase.saving, errorMessage: null);
+
+    await _startSaveOperation(
+      onTimeout: () {
+        state = state.copyWith(
+          phase: FlashPhase.saving,
+          errorMessage: '保存仍在处理，请稍候。',
+        );
+      },
+      operation: () async {
+        try {
+          if (draft != null) {
+            _audioService();
+          }
+          final operation = await _prepareOperation(
+            type: _parsedWriteOperationType,
+            fingerprint: _parsedOperationFingerprint(
+              parsed,
+              rawText: rawText,
+              selectedProjectId: selectedProjectId,
+              receiptImagePath: receiptImagePath,
+              recordingDraft: draft,
+            ),
+          );
+          await _commitParsedOperation(
+            operation,
+            parsed,
+            rawText: rawText,
+            recordingDraft: draft,
+            selectedProjectId: selectedProjectId,
+            receiptImagePath: receiptImagePath,
+          );
+          if (_disposed) return;
+          ref
+              .read(dataVersionProvider.notifier)
+              .increment(
+                domains: _domainsForParsedInput(
+                  parsed,
+                  hasAudio: draft != null,
+                  hasReceipt: receiptImagePath?.trim().isNotEmpty == true,
+                  projectEntry: selectedProjectId != null,
+                ),
+              );
+          _recordingDraft = null;
+          state = state.copyWith(
+            phase: FlashPhase.saved,
+            recordingDraft: null,
+            selectedProjectId: null,
+            expenseReceiptImagePath: null,
+            saveOperationId: operation.id,
+            errorMessage: null,
+          );
+        } catch (e) {
+          if (_disposed) return;
+          state = state.copyWith(
+            phase: FlashPhase.confirming,
+            errorMessage: e.toString(),
+          );
+        }
+      },
+    );
   }
 
   void resetAfterSaved() {
+    final operationId = state.saveOperationId;
     state = _idleStateKeepingStt();
+    unawaited(_acknowledgeOperation(operationId));
   }
 
   FlashRecordState _idleStateKeepingStt() {
@@ -414,40 +481,66 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       sttStatus: state.sttStatus,
       sttStatusMessage: state.sttStatusMessage,
       recordingMode: state.recordingMode,
+      saveOperationId: null,
     );
   }
 
   Future<void> saveAudioOnly() async {
+    final currentSave = _saveInFlight;
+    if (currentSave != null) {
+      await _waitForExistingSave(currentSave);
+      return;
+    }
+
+    if (!await _releaseCompletedOperationForNewText('')) return;
+
     final draft = state.recordingDraft;
     if (draft == null) {
       state = state.copyWith(errorMessage: '没有可保存的录音。');
       return;
     }
 
-    state = state.copyWith(phase: FlashPhase.saving);
+    final content = state.rawText;
+    state = state.copyWith(phase: FlashPhase.saving, errorMessage: null);
 
-    try {
-      await _audioService()
-          .createVoiceMemo(
+    await _startSaveOperation(
+      onTimeout: () {
+        state = state.copyWith(
+          phase: FlashPhase.saving,
+          errorMessage: '保存仍在处理，请稍候。',
+        );
+      },
+      operation: () async {
+        try {
+          final operation = await _prepareOperation(
+            type: _audioWriteOperationType,
+            fingerprint: _audioOperationFingerprint(draft, content),
+          );
+          await _commitAudioOperation(
+            operation,
             draft: draft,
-            content: state.rawText,
-            createdAt: DateTime.now(),
-          )
-          .timeout(_saveTimeout);
-      ref.read(dataVersionProvider.notifier).increment();
-      _recordingDraft = null;
-      state = state.copyWith(phase: FlashPhase.saved, recordingDraft: null);
-    } on TimeoutException {
-      state = state.copyWith(
-        phase: FlashPhase.recognized,
-        errorMessage: '保存超时，请再试一次。',
-      );
-    } catch (e) {
-      state = state.copyWith(
-        phase: FlashPhase.recognized,
-        errorMessage: e.toString(),
-      );
-    }
+            content: content,
+          );
+          if (_disposed) return;
+          ref
+              .read(dataVersionProvider.notifier)
+              .increment(domains: const {DataDomain.records, DataDomain.media});
+          _recordingDraft = null;
+          state = state.copyWith(
+            phase: FlashPhase.saved,
+            recordingDraft: null,
+            saveOperationId: operation.id,
+            errorMessage: null,
+          );
+        } catch (e) {
+          if (_disposed) return;
+          state = state.copyWith(
+            phase: FlashPhase.recognized,
+            errorMessage: e.toString(),
+          );
+        }
+      },
+    );
   }
 
   // ---- text path ----
@@ -455,6 +548,14 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   Future<void> saveAsText(String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
+
+    final currentSave = _saveInFlight;
+    if (currentSave != null) {
+      await _waitForExistingSave(currentSave);
+      return;
+    }
+
+    if (!await _releaseCompletedOperationForNewText(trimmed)) return;
 
     final parsed = LuiLiteParser.parse(trimmed);
     if (_requiresTextConfirmation(trimmed, parsed)) {
@@ -478,30 +579,342 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       errorMessage: null,
     );
 
+    await _startSaveOperation(
+      onTimeout: () {
+        state = state.copyWith(
+          phase: FlashPhase.idle,
+          textSaving: true,
+          errorMessage: '保存仍在处理，请稍候。',
+        );
+      },
+      operation: () async {
+        try {
+          final operation = await _prepareOperation(
+            type: _parsedWriteOperationType,
+            fingerprint: _parsedOperationFingerprint(parsed, rawText: trimmed),
+          );
+          await _commitParsedOperation(operation, parsed, rawText: trimmed);
+          if (_disposed) return;
+          ref
+              .read(dataVersionProvider.notifier)
+              .incrementSoon(domains: _domainsForParsedInput(parsed));
+          state = state.copyWith(
+            phase: FlashPhase.idle,
+            rawText: '',
+            parsedInput: null,
+            textSaving: false,
+            savedSequence: state.savedSequence + 1,
+            saveOperationId: operation.id,
+            errorMessage: null,
+          );
+        } catch (e) {
+          if (_disposed) return;
+          state = state.copyWith(
+            phase: FlashPhase.idle,
+            textSaving: false,
+            errorMessage: e.toString(),
+          );
+        }
+      },
+    );
+  }
+
+  Future<void> _startSaveOperation({
+    required Future<void> Function() operation,
+    required void Function() onTimeout,
+  }) async {
+    late final Future<void> tracked;
+    tracked = Future<void>.sync(operation).whenComplete(() {
+      if (identical(_saveInFlight, tracked)) {
+        _saveInFlight = null;
+      }
+    });
+    _saveInFlight = tracked;
+    await _waitForSave(tracked, onTimeout: onTimeout);
+  }
+
+  Future<void> _waitForExistingSave(Future<void> operation) async {
+    await _waitForSave(
+      operation,
+      onTimeout: () {
+        state = state.copyWith(errorMessage: '上一次保存仍在处理，请稍候。');
+      },
+    );
+  }
+
+  Future<void> _waitForSave(
+    Future<void> operation, {
+    required void Function() onTimeout,
+  }) async {
     try {
-      await _persist(parsed).timeout(_saveTimeout);
-      await ensureDailyDraftAfterActivity(ref, DateTime.now());
-      ref.read(dataVersionProvider.notifier).incrementSoon();
-      state = state.copyWith(
-        phase: FlashPhase.idle,
-        rawText: '',
-        parsedInput: null,
-        textSaving: false,
-        savedSequence: state.savedSequence + 1,
-      );
+      await operation.timeout(ref.read(flashSaveTimeoutProvider));
     } on TimeoutException {
-      state = state.copyWith(
-        phase: FlashPhase.idle,
-        textSaving: false,
-        errorMessage: '保存超时，请再试一次。',
-      );
-    } catch (e) {
-      state = state.copyWith(
-        phase: FlashPhase.idle,
-        textSaving: false,
-        errorMessage: e.toString(),
-      );
+      if (!_disposed) onTimeout();
     }
+  }
+
+  Future<WriteOperation> _prepareOperation({
+    required String type,
+    required String fingerprint,
+  }) async {
+    final repository = ref.read(writeOperationsRepositoryProvider);
+    final preferredId = state.saveOperationId;
+    if (preferredId != null && preferredId.trim().isNotEmpty) {
+      final preferred = await repository.findById(preferredId);
+      if (preferred != null &&
+          preferred.type == type &&
+          preferred.fingerprint == fingerprint) {
+        return preferred;
+      }
+
+      if (preferred != null) {
+        if (preferred.isCompleted) {
+          await repository.acknowledge(preferred.id);
+        } else if (preferred.isCommitted) {
+          throw StateError('上一条保存已写入，正在完成派生文件同步，请稍候重试。');
+        }
+      }
+      if (!_disposed) {
+        state = state.copyWith(saveOperationId: null);
+      }
+    }
+
+    final prepared = await repository.prepare(
+      type: type,
+      fingerprint: fingerprint,
+    );
+    if (!_disposed) {
+      state = state.copyWith(saveOperationId: prepared.id);
+    }
+    return prepared;
+  }
+
+  Future<bool> _commitParsedOperation(
+    WriteOperation operation,
+    ParsedInput parsed, {
+    required String rawText,
+    SttRecordingDraft? recordingDraft,
+    String? selectedProjectId,
+    String? receiptImagePath,
+  }) async {
+    final operations = ref.read(writeOperationsRepositoryProvider);
+    var current = await operations.findById(operation.id);
+    if (current == null) {
+      throw StateError('保存请求已不存在，请重新保存。');
+    }
+
+    if (!current.isCommitted) {
+      current = await ref.read(localDatabaseProvider).transaction(() async {
+        final latest = await operations.findById(operation.id);
+        if (latest == null) {
+          throw StateError('保存请求已不存在，请重新保存。');
+        }
+        if (latest.isCommitted) return latest;
+
+        final draftConsumed = await _persist(
+          parsed,
+          operationId: latest.id,
+          operationStartedAt: latest.createdAt,
+          rawText: rawText,
+          recordingDraft: recordingDraft,
+          selectedProjectId: selectedProjectId,
+          receiptImagePath: receiptImagePath,
+        );
+        return operations.markCommitted(
+          operation.id,
+          result: {'draftConsumed': draftConsumed},
+        );
+      });
+    }
+
+    if (!current.isCompleted) {
+      await ensureDailyDraftAfterActivity(ref, current.createdAt);
+      if (selectedProjectId != null) {
+        try {
+          await syncProjectFlashEntryArchive(
+            ref,
+            projectId: selectedProjectId,
+            text: _projectEntryText(parsed, rawText),
+            isTodo: parsed.type == ParsedInputType.todo,
+            operationId: current.id,
+            updatedAt: current.createdAt,
+            notify: false,
+          );
+        } catch (_) {
+          // The project JSON and timeline record are authoritative. A later
+          // project edit can rebuild the derived Markdown archive.
+        }
+      }
+      if (parsed.type == ParsedInputType.expense) {
+        try {
+          await syncMonthlyExpenseReportForDate(
+            settingsRepository: ref.read(appSettingsRepositoryProvider),
+            expensesRepository: ref.read(expensesRepositoryProvider),
+            date: current.createdAt,
+            generatedAt: current.createdAt,
+          );
+        } catch (_) {
+          // The SQLite expense is authoritative. A later expense/export can
+          // refresh the derived monthly Markdown report.
+        }
+      }
+      if (current.result['draftConsumed'] == true) {
+        await _audioRecordingService?.deleteDraftIfExists(recordingDraft);
+      }
+      current = await operations.markCompleted(operation.id);
+    }
+
+    return current.result['draftConsumed'] == true;
+  }
+
+  Future<void> _commitAudioOperation(
+    WriteOperation operation, {
+    required SttRecordingDraft draft,
+    required String content,
+  }) async {
+    final operations = ref.read(writeOperationsRepositoryProvider);
+    var current = await operations.findById(operation.id);
+    if (current == null) {
+      throw StateError('录音保存请求已不存在，请重新保存。');
+    }
+
+    if (!current.isCommitted) {
+      current = await ref.read(localDatabaseProvider).transaction(() async {
+        final latest = await operations.findById(operation.id);
+        if (latest == null) {
+          throw StateError('录音保存请求已不存在，请重新保存。');
+        }
+        if (latest.isCommitted) return latest;
+
+        await _audioService().createVoiceMemo(
+          draft: draft,
+          content: content,
+          createdAt: latest.createdAt,
+          deleteDraftAfterAttach: false,
+        );
+        return operations.markCommitted(
+          operation.id,
+          result: const {'draftConsumed': true},
+        );
+      });
+    }
+
+    if (!current.isCompleted) {
+      if (current.result['draftConsumed'] == true) {
+        await _audioService().deleteDraftIfExists(draft);
+      }
+      await operations.markCompleted(operation.id);
+    }
+  }
+
+  Future<bool> _releaseCompletedOperationForNewText(String text) async {
+    final operationId = state.saveOperationId;
+    if (operationId == null || operationId.trim().isEmpty) return true;
+
+    // A failed request keeps its original text so an identical retry reuses
+    // the request. Once the input has been cleared or changed, release the
+    // previous completed/pending request before accepting a new one.
+    if (state.rawText.trim() == text && state.parsedInput != null) return true;
+    final operation = await ref
+        .read(writeOperationsRepositoryProvider)
+        .findById(operationId);
+    if (operation?.status == WriteOperationStatus.committed) {
+      if (!_disposed) {
+        state = state.copyWith(errorMessage: '上一条保存已写入，正在完成文件同步，请稍候重试。');
+      }
+      return false;
+    }
+    await _releaseOperation(operationId);
+    if (!_disposed) {
+      state = state.copyWith(saveOperationId: null);
+    }
+    return true;
+  }
+
+  Future<void> _releaseOperation(String? operationId) async {
+    final id = operationId?.trim();
+    if (id == null || id.isEmpty) return;
+    final repository = ref.read(writeOperationsRepositoryProvider);
+    final operation = await repository.findById(id);
+    if (operation == null) return;
+    if (operation.status == WriteOperationStatus.pending) {
+      await repository.abandon(id);
+    } else if (operation.isCompleted) {
+      await repository.acknowledge(id);
+    }
+  }
+
+  Future<void> _acknowledgeOperation(String? operationId) async {
+    final id = operationId?.trim();
+    if (id == null || id.isEmpty) return;
+    try {
+      final repository = ref.read(writeOperationsRepositoryProvider);
+      final operation = await repository.findById(id);
+      if (operation?.isCompleted == true) {
+        await repository.acknowledge(id);
+      }
+    } catch (_) {
+      // Acknowledgement is housekeeping; the committed data is already safe.
+    }
+  }
+
+  String _parsedOperationFingerprint(
+    ParsedInput parsed, {
+    String? rawText,
+    String? selectedProjectId,
+    String? receiptImagePath,
+    SttRecordingDraft? recordingDraft,
+  }) {
+    return _fingerprint({
+      'rawText': (rawText ?? state.rawText).trim(),
+      'type': parsed.type.name,
+      'content': parsed.content,
+      'time': parsed.time,
+      'date': parsed.date?.toIso8601String(),
+      'tags': parsed.tags,
+      'metadata': parsed.metadata,
+      'selectedProjectId': selectedProjectId ?? state.selectedProjectId,
+      'receiptImagePath': receiptImagePath ?? state.expenseReceiptImagePath,
+      if (recordingDraft != null)
+        'recordingDraft': {
+          'path': recordingDraft.path,
+          'durationMs': recordingDraft.duration.inMilliseconds,
+          'mimeType': recordingDraft.mimeType,
+          'sampleRate': recordingDraft.sampleRate,
+          'codec': recordingDraft.codec,
+        },
+    });
+  }
+
+  String _audioOperationFingerprint(SttRecordingDraft draft, String content) {
+    return _fingerprint({
+      'content': content,
+      'draftPath': draft.path,
+      'durationMs': draft.duration.inMilliseconds,
+      'mimeType': draft.mimeType,
+      'sampleRate': draft.sampleRate,
+      'codec': draft.codec,
+    });
+  }
+
+  String _fingerprint(Object? payload) {
+    final canonical = jsonEncode(_canonicalize(payload));
+    return sha256.convert(utf8.encode(canonical)).toString();
+  }
+
+  Object? _canonicalize(Object? value) {
+    if (value is Map) {
+      final entries = {
+        for (final entry in value.entries) '${entry.key}': entry.value,
+      };
+      final keys = entries.keys.toList()..sort();
+      return {for (final key in keys) key: _canonicalize(entries[key])};
+    }
+    if (value is Iterable) {
+      return [for (final item in value) _canonicalize(item)];
+    }
+    if (value is DateTime) return value.toIso8601String();
+    return value;
   }
 
   static bool _requiresTextConfirmation(String rawText, ParsedInput parsed) {
@@ -519,13 +932,51 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
 
   // ---- persistence ----
 
+  Set<DataDomain> _domainsForParsedInput(
+    ParsedInput parsed, {
+    bool hasAudio = false,
+    bool hasReceipt = false,
+    bool projectEntry = false,
+  }) {
+    if (projectEntry) {
+      return const {DataDomain.projects, DataDomain.records};
+    }
+
+    final domains = <DataDomain>{
+      switch (parsed.type) {
+        ParsedInputType.memo ||
+        ParsedInputType.sleep ||
+        ParsedInputType.mood => DataDomain.records,
+        ParsedInputType.todo => DataDomain.todos,
+        ParsedInputType.focus => DataDomain.focus,
+        ParsedInputType.expense => DataDomain.expenses,
+        ParsedInputType.body => DataDomain.bodyLogs,
+        ParsedInputType.tracker => DataDomain.trackerLogs,
+      },
+    };
+
+    if (hasAudio && domains.contains(DataDomain.records)) {
+      domains.add(DataDomain.media);
+    }
+    if (hasReceipt && parsed.type == ParsedInputType.expense) {
+      // The receipt creates a moment record and a media attachment.
+      domains
+        ..add(DataDomain.records)
+        ..add(DataDomain.media);
+    }
+    return domains;
+  }
+
   Future<bool> _persist(
     ParsedInput parsed, {
+    required String operationId,
+    required DateTime operationStartedAt,
+    required String rawText,
     SttRecordingDraft? recordingDraft,
     String? selectedProjectId,
     String? receiptImagePath,
   }) async {
-    final now = DateTime.now();
+    final now = operationStartedAt;
     final createdAt = parsedInputTimeToDateTime(now, parsed.time) ?? now;
     final project = selectedProjectId == null
         ? null
@@ -537,6 +988,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         project: project,
         now: now,
         createdAt: createdAt,
+        rawText: rawText,
       );
     }
 
@@ -610,17 +1062,12 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
                   expenseAmount: expenseLineItemsTotal(items),
                   expenseIds: expenseIds,
                   createdAt: createdAt,
+                  operationId: operationId,
                 );
           } catch (_) {
             // Keep the expense rows even if the optional reimbursement image fails.
           }
         }
-        await syncMonthlyExpenseReportForDate(
-          settingsRepository: ref.read(appSettingsRepositoryProvider),
-          expensesRepository: ref.read(expensesRepositoryProvider),
-          date: now,
-          generatedAt: now,
-        );
         return false;
 
       case ParsedInputType.body:
@@ -672,11 +1119,12 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     required ProjectOption project,
     required DateTime now,
     required DateTime createdAt,
+    required String rawText,
   }) async {
     final content = parsed.content.trim().isEmpty
-        ? state.rawText.trim()
+        ? rawText.trim()
         : parsed.content.trim();
-    final title = content.isEmpty ? state.rawText.trim() : content;
+    final title = content.isEmpty ? rawText.trim() : content;
     final tags = _normalizeTags([...parsed.tags, '项目', project.name]);
     final metadata = {
       ...parsed.metadata,
@@ -694,6 +1142,8 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
         projectId: project.id,
         title: title,
         updatedAt: createdAt,
+        syncArchive: false,
+        notify: false,
       );
       await ref
           .read(recordsRepositoryProvider)
@@ -714,6 +1164,8 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
       projectId: project.id,
       text: title,
       updatedAt: createdAt,
+      syncArchive: false,
+      notify: false,
     );
     await ref
         .read(recordsRepositoryProvider)
@@ -727,6 +1179,13 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
           createdAt: createdAt,
         );
     return false;
+  }
+
+  String _projectEntryText(ParsedInput parsed, String rawText) {
+    final content = parsed.content.trim().isEmpty
+        ? rawText.trim()
+        : parsed.content.trim();
+    return content.isEmpty ? rawText.trim() : content;
   }
 
   Future<bool> _createRecordWithOptionalAudio({
@@ -762,6 +1221,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
             recordId: recordId,
             draft: recordingDraft,
             writtenAt: createdAt,
+            deleteDraftAfterAttach: false,
           );
       return true;
     } catch (_) {

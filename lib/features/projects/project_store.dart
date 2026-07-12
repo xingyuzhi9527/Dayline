@@ -9,11 +9,13 @@ import '../../core/database/repository_providers.dart';
 import '../../core/markdown/markdown_directory_service.dart';
 import '../../core/markdown/markdown_storage_service.dart';
 import '../../core/markdown/project_markdown_paths.dart';
+import '../../core/storage/recoverable_local_file_writer.dart';
 import '../../core/theme/app_colors.dart';
 import 'project_markdown_service.dart';
 
 const projectsSettingsKey = 'projects_state_v1';
 const _projectUpdatesRetainLimit = 60;
+const _localFileWriter = RecoverableLocalFileWriter();
 
 final projectOptionsProvider = FutureProvider<List<ProjectOption>>((ref) async {
   ref.watch(dataVersionProvider);
@@ -138,15 +140,21 @@ Future<void> addProjectTodo(
   required String projectId,
   required String title,
   required DateTime updatedAt,
+  bool syncArchive = true,
+  String? operationId,
+  bool notify = true,
 }) async {
   await _updateProject(
     ref,
     projectId: projectId,
     updatedAt: updatedAt,
+    syncArchive: syncArchive,
+    notify: notify,
     archiveEntry: ProjectArchiveEntry(
       text: '添加待办：$title',
       source: '待办',
       createdAt: updatedAt,
+      operationId: operationId,
     ),
     update: (project) {
       final todos = _listOfMaps(project['todos']);
@@ -184,15 +192,21 @@ Future<void> addProjectUpdate(
   required String projectId,
   required String text,
   required DateTime updatedAt,
+  bool syncArchive = true,
+  String? operationId,
+  bool notify = true,
 }) async {
   await _updateProject(
     ref,
     projectId: projectId,
     updatedAt: updatedAt,
+    syncArchive: syncArchive,
+    notify: notify,
     archiveEntry: ProjectArchiveEntry(
       text: text,
       source: '文本记录',
       createdAt: updatedAt,
+      operationId: operationId,
     ),
     archiveEntryAsMajor: true,
     update: (project) {
@@ -214,6 +228,31 @@ Future<void> addProjectUpdate(
         ],
       };
     },
+  );
+}
+
+Future<void> syncProjectFlashEntryArchive(
+  dynamic ref, {
+  required String projectId,
+  required String text,
+  required bool isTodo,
+  required String operationId,
+  required DateTime updatedAt,
+  bool notify = true,
+}) async {
+  await _updateProject(
+    ref,
+    projectId: projectId,
+    updatedAt: updatedAt,
+    notify: notify,
+    archiveEntry: ProjectArchiveEntry(
+      text: isTodo ? '添加待办：$text' : text,
+      source: isTodo ? '待办' : '文本记录',
+      createdAt: updatedAt,
+      operationId: operationId,
+    ),
+    archiveEntryAsMajor: !isTodo,
+    update: (project) => project,
   );
 }
 
@@ -309,10 +348,10 @@ Future<ProjectFileMaterial> addProjectFileMaterial(
 
   final root = await directoryService.ensureRoot();
   final localPath = _localPathForRelative(root, relativePath);
-  if (!await File(localPath).exists()) {
-    await File(localPath).parent.create(recursive: true);
-    await sourceFile.copy(localPath);
-  }
+  await _localFileWriter.copyFile(
+    sourcePath: sourceFile.path,
+    targetPath: localPath,
+  );
 
   await _recordProjectFileMaterial(
     ref,
@@ -937,6 +976,8 @@ Future<void> _updateProject(
   required DateTime updatedAt,
   ProjectArchiveEntry? archiveEntry,
   bool archiveEntryAsMajor = false,
+  bool syncArchive = true,
+  bool notify = true,
   required FutureOr<Map<String, Object?>> Function(Map<String, Object?> project)
   update,
 }) async {
@@ -957,7 +998,7 @@ Future<void> _updateProject(
   if (!changed) return;
   var projectsToSave = nextProjects;
   final archiveProject = changedProject;
-  if (archiveProject != null) {
+  if (archiveProject != null && syncArchive) {
     try {
       final settings = ref.read(appSettingsRepositoryProvider);
       final location = await ProjectMarkdownService(settings).syncArchive(
@@ -980,7 +1021,12 @@ Future<void> _updateProject(
       projectsToSave = nextProjects;
     }
   }
-  await _saveProjects(ref, projectsToSave, updatedAt: updatedAt);
+  await _saveProjects(
+    ref,
+    projectsToSave,
+    updatedAt: updatedAt,
+    notify: notify,
+  );
 }
 
 bool _matchesLongNoteUpdate(
@@ -1075,6 +1121,7 @@ Future<void> _saveProjects(
   dynamic ref,
   List<Map<String, Object?>> projects, {
   required DateTime updatedAt,
+  bool notify = true,
 }) async {
   final settings = ref.read(appSettingsRepositoryProvider);
   final value = jsonEncode(projects);
@@ -1088,7 +1135,11 @@ Future<void> _saveProjects(
   } else {
     await settings.update(projectsSettingsKey, value, updatedAt: updatedAt);
   }
-  ref.read(dataVersionProvider.notifier).increment();
+  if (notify) {
+    ref
+        .read(dataVersionProvider.notifier)
+        .increment(domains: {DataDomain.projects});
+  }
 }
 
 Map<String, Object?>? _normalizeProject(Object? raw) {
@@ -1139,10 +1190,10 @@ Future<String> _ensureLocalProjectImageCopy(
 }) async {
   final root = await directoryService.ensureRoot();
   final target = File(_localPathForRelative(root, relativePath));
-  if (await target.exists()) return target.path;
-
-  await target.parent.create(recursive: true);
-  await File(sourceImagePath).copy(target.path);
+  await _localFileWriter.copyFile(
+    sourcePath: sourceImagePath,
+    targetPath: target.path,
+  );
   return target.path;
 }
 

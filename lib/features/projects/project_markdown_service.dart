@@ -10,11 +10,13 @@ class ProjectArchiveEntry {
     required this.text,
     required this.source,
     required this.createdAt,
+    this.operationId,
   });
 
   final String text;
   final String source;
   final DateTime createdAt;
+  final String? operationId;
 }
 
 class ProjectMarkdownService {
@@ -80,13 +82,26 @@ class ProjectMarkdownService {
     var logBody = _markedBody(existing, _logStart, _logEnd);
 
     if (entry != null) {
+      final operationMarker = _operationMarker(entry.operationId);
       final logLine =
           '- ${_formatDateTime(entry.createdAt)} ${entry.source}：${_oneLine(entry.text)}';
-      logBody = _prepend(logBody, logLine);
+      if (operationMarker == null || !logBody.contains(operationMarker)) {
+        logBody = _prepend(
+          logBody,
+          operationMarker == null ? logLine : '$operationMarker\n$logLine',
+        );
+      }
       if (entryAsMajor) {
         final majorEntry =
             '### ${_formatDateTime(entry.createdAt)}\n\n${entry.text.trim()}';
-        majorBody = _prepend(majorBody, majorEntry);
+        if (operationMarker == null || !majorBody.contains(operationMarker)) {
+          majorBody = _prepend(
+            majorBody,
+            operationMarker == null
+                ? majorEntry
+                : '$operationMarker\n$majorEntry',
+          );
+        }
       }
     }
 
@@ -200,6 +215,13 @@ class ProjectMarkdownService {
     final trimmed = existing.trim();
     if (trimmed.isEmpty || trimmed.startsWith('_暂无')) return value.trim();
     return '${value.trim()}\n\n$trimmed';
+  }
+
+  String? _operationMarker(String? operationId) {
+    final id = operationId?.trim();
+    if (id == null || id.isEmpty) return null;
+    final safeId = id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+    return '<!-- dayline:operation:$safeId -->';
   }
 
   List<Map<String, Object?>> _listOfMaps(Object? raw) {

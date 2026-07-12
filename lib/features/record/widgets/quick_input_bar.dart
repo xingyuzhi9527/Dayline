@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../record_notifier.dart';
 
@@ -92,6 +91,7 @@ class _QuickInputBarState extends ConsumerState<QuickInputBar> {
 
     final canSubmit = _controller.text.trim().isNotEmpty && !state.isSaving;
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final buttonLabel = widget.mode == QuickInputMode.saveImmediately
         ? '保存'
         : '整理';
@@ -111,13 +111,10 @@ class _QuickInputBarState extends ConsumerState<QuickInputBar> {
                   height: 42,
                   margin: const EdgeInsets.only(right: AppSpacing.xs),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withAlpha(14),
+                    color: colors.primary.withAlpha(14),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
-                    Icons.edit_rounded,
-                    color: AppColors.primary,
-                  ),
+                  child: Icon(Icons.edit_rounded, color: colors.primary),
                 ),
                 prefixIconConstraints: const BoxConstraints(
                   minWidth: 52,
@@ -174,19 +171,18 @@ class _ToolIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Tooltip(
       message: tooltip,
       child: Container(
         width: 34,
         height: 34,
         decoration: BoxDecoration(
-          color: AppColors.canvas,
+          color: colors.surfaceContainerLow,
           shape: BoxShape.circle,
-          border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
+          border: Border.all(color: colors.outlineVariant),
         ),
-        child: Icon(icon, size: 18, color: AppColors.muted),
+        child: Icon(icon, size: 18, color: colors.onSurfaceVariant),
       ),
     );
   }

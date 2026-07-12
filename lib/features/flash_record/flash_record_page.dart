@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
@@ -353,6 +354,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     _intentDragOffset = Offset.zero;
   }
 
+  void _handleIntentPanCancel() {
+    _intentDragOffset = Offset.zero;
+  }
+
   void _openMemoryScatter() {
     FocusScope.of(context).unfocus();
     _closeToolDrawer();
@@ -658,6 +663,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     ThemeData theme,
     AsyncValue<List<TimelineEvent>> memoryEvents,
   ) {
+    final colorScheme = theme.colorScheme;
     final subtitle = memoryEvents.when(
       data: (events) {
         final todoCount = events
@@ -676,9 +682,9 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         constraints: const BoxConstraints(maxWidth: 88, minWidth: 76),
         child: Material(
           key: const ValueKey('today-todo-entry'),
-          color: AppColors.surface.withAlpha(232),
+          color: colorScheme.surface.withAlpha(232),
           elevation: 1,
-          shadowColor: AppColors.softShadow,
+          shadowColor: colorScheme.shadow.withAlpha(20),
           borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
           child: InkWell(
             borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
@@ -695,15 +701,15 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                     width: 30,
                     height: 30,
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withAlpha(18),
+                      color: colorScheme.primary.withAlpha(18),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: AppColors.primary.withAlpha(90),
+                        color: colorScheme.primary.withAlpha(90),
                       ),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.checklist_rounded,
-                      color: AppColors.primary,
+                      color: colorScheme.primary,
                       size: 17,
                     ),
                   ),
@@ -714,7 +720,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelMedium?.copyWith(
-                        color: AppColors.primary,
+                        color: colorScheme.primary,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -780,7 +786,9 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                 child: GestureDetector(
                   onTap: _closeMemoryScatter,
                   child: ColoredBox(
-                    color: Colors.black.withAlpha((38 * fade).round()),
+                    color: theme.colorScheme.scrim.withAlpha(
+                      (38 * fade).round(),
+                    ),
                   ),
                 ),
               ),
@@ -836,13 +844,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     ThemeData theme,
     AsyncValue<List<TimelineEvent>> memoryEvents,
   ) {
+    final colorScheme = theme.colorScheme;
     return GestureDetector(
       onTap: () {},
       child: Material(
         key: const ValueKey('todo-panel-bottom-sheet'),
-        color: AppColors.surface.withAlpha(248),
+        color: colorScheme.surface.withAlpha(248),
         elevation: 14,
-        shadowColor: AppColors.softShadow,
+        shadowColor: colorScheme.shadow.withAlpha(36),
         borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
@@ -859,12 +868,12 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                     width: 32,
                     height: 32,
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withAlpha(18),
+                      color: colorScheme.primary.withAlpha(18),
                       borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.checklist_rounded,
-                      color: AppColors.primary,
+                      color: colorScheme.primary,
                       size: 20,
                     ),
                   ),
@@ -874,7 +883,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                     tooltip: '收起',
                     onPressed: _closeMemoryScatter,
                     icon: const Icon(Icons.close_rounded),
-                    color: AppColors.primary,
+                    color: colorScheme.primary,
                   ),
                 ],
               ),
@@ -935,13 +944,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     required List<TimelineEvent> events,
     required bool todoColumn,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       key: key,
       padding: const EdgeInsets.all(AppSpacing.xs),
       decoration: BoxDecoration(
-        color: AppColors.surfaceLow.withAlpha(160),
+        color: colorScheme.surfaceContainerLow.withAlpha(220),
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        border: Border.all(color: AppColors.border.withAlpha(210)),
+        border: Border.all(color: colorScheme.outlineVariant.withAlpha(210)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -987,7 +997,11 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
 
   Widget _buildMemoryPanelMessage({required IconData icon}) {
     return Center(
-      child: Icon(icon, color: AppColors.muted.withAlpha(110), size: 30),
+      child: Icon(
+        icon,
+        color: Theme.of(context).colorScheme.onSurfaceVariant.withAlpha(140),
+        size: 30,
+      ),
     );
   }
 
@@ -1055,7 +1069,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         ? '大话筒会保存原始录音'
         : state.sttLoading
         ? '正在唤醒离线大脑...'
-        : state.sttReady
+        : state.sttReady || state.sttIdle
         ? '时刻准备记录你的灵感'
         : state.sttStatusMessage;
 
@@ -1064,7 +1078,9 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         : state.rawText.trim();
     final errorText = state.errorMessage?.trim();
     final voiceAvailable =
-        state.recordingMode == FlashRecordingMode.audioOnly || state.sttReady;
+        state.recordingMode == FlashRecordingMode.audioOnly ||
+        state.sttIdle ||
+        state.sttReady;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1099,7 +1115,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             state.sttStatusMessage,
             textAlign: TextAlign.center,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: AppColors.muted.withAlpha(140),
+              color: theme.colorScheme.onSurfaceVariant.withAlpha(180),
             ),
           ),
         const SizedBox(height: AppSpacing.xs),
@@ -1117,8 +1133,8 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             key: ValueKey(effectiveLabel),
             style: theme.textTheme.bodyLarge?.copyWith(
               color: state.phase == FlashPhase.listening
-                  ? AppColors.primary
-                  : AppColors.muted,
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurfaceVariant,
             ),
           ),
         ),
@@ -1162,9 +1178,9 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           Container(
             padding: const EdgeInsets.all(AppSpacing.lg),
             decoration: BoxDecoration(
-              color: AppColors.surface,
+              color: theme.colorScheme.surface,
               borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-              border: Border.all(color: AppColors.border),
+              border: Border.all(color: theme.colorScheme.outlineVariant),
             ),
             child: Column(
               children: [
@@ -1178,19 +1194,25 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                   decoration: InputDecoration(
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                      borderSide: BorderSide(color: AppColors.border),
+                      borderSide: BorderSide(
+                        color: theme.colorScheme.outlineVariant,
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                      borderSide: BorderSide(color: AppColors.border),
+                      borderSide: BorderSide(
+                        color: theme.colorScheme.outlineVariant,
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                      borderSide: const BorderSide(color: AppColors.primary),
+                      borderSide: BorderSide(color: theme.colorScheme.primary),
                     ),
                     contentPadding: const EdgeInsets.all(AppSpacing.sm),
                     hintText: '修改识别结果…',
-                    hintStyle: TextStyle(color: AppColors.muted.withAlpha(120)),
+                    hintStyle: TextStyle(
+                      color: theme.colorScheme.onSurfaceVariant.withAlpha(170),
+                    ),
                   ),
                 ),
                 const SizedBox(height: AppSpacing.lg),
@@ -1238,16 +1260,16 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       child: Container(
         padding: const EdgeInsets.all(AppSpacing.lg),
         decoration: BoxDecoration(
-          color: AppColors.surface,
+          color: theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-          border: Border.all(color: AppColors.border),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.graphic_eq_rounded,
-              color: AppColors.primary,
+              color: theme.colorScheme.primary,
               size: 42,
             ),
             const SizedBox(height: AppSpacing.sm),
@@ -1305,7 +1327,9 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         const SizedBox(height: AppSpacing.md),
         Text(
           '保存中…',
-          style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.muted),
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
     );
@@ -1320,6 +1344,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     final horizontalPadding = expanded ? AppSpacing.containerMargin + 12 : 0.0;
     final isListening = state.phase == FlashPhase.listening;
     final keyboardMotion = _keyboardLaunchExpanding;
+    final colorScheme = theme.colorScheme;
 
     return AnimatedPadding(
       duration: keyboardMotion ? Duration.zero : _intentSettleDuration,
@@ -1358,21 +1383,24 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                   width: expanded ? expandedWidth : _intentPillWidth,
                   height: _intentPillHeight,
                   decoration: BoxDecoration(
-                    color: (isListening ? AppColors.primary : AppColors.surface)
-                        .withAlpha(isListening ? 232 : 218),
+                    color:
+                        (isListening
+                                ? colorScheme.primary
+                                : colorScheme.surface)
+                            .withAlpha(isListening ? 232 : 218),
                     borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
                     border: Border.all(
                       color: isListening
-                          ? AppColors.primary.withAlpha(90)
-                          : AppColors.border.withAlpha(132),
+                          ? colorScheme.primary.withAlpha(90)
+                          : colorScheme.outlineVariant.withAlpha(180),
                     ),
                     boxShadow: [
                       BoxShadow(
                         color:
                             (isListening
-                                    ? AppColors.primary
-                                    : AppColors.softShadow)
-                                .withAlpha(isListening ? 36 : 24),
+                                    ? colorScheme.primary
+                                    : colorScheme.shadow)
+                                .withAlpha(isListening ? 36 : 28),
                         blurRadius: isListening ? 22 : 16,
                         offset: const Offset(0, 8),
                       ),
@@ -1414,17 +1442,18 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 
   Widget _buildToolDrawer(ThemeData theme) {
+    final colorScheme = theme.colorScheme;
     return Material(
-      color: AppColors.surface.withAlpha(242),
+      color: colorScheme.surface.withAlpha(242),
       elevation: 6,
-      shadowColor: AppColors.softShadow,
+      shadowColor: colorScheme.shadow.withAlpha(28),
       borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(AppSpacing.md),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-          border: Border.all(color: AppColors.border.withAlpha(145)),
+          border: Border.all(color: colorScheme.outlineVariant.withAlpha(180)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1433,7 +1462,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               '记录一个片刻',
               style: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w700,
-                color: AppColors.primary,
+                color: colorScheme.primary,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
@@ -1478,7 +1507,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
 
   Widget _buildCollapsedIntentPill(FlashRecordState state, ThemeData theme) {
     final isListening = state.phase == FlashPhase.listening;
-    final foreground = isListening ? Colors.white : AppColors.primary;
+    final colorScheme = theme.colorScheme;
+    final foreground = isListening
+        ? colorScheme.onPrimary
+        : colorScheme.primary;
 
     return Listener(
       key: const ValueKey('collapsed-intent-pill'),
@@ -1491,6 +1523,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         onLongPress: isListening ? null : () => _handleIntentLongPress(state),
         onLongPressEnd: isListening ? null : (_) => _handleIntentLongPressEnd(),
         onLongPressUp: isListening ? null : _handleIntentLongPressEnd,
+        onPanStart: _handleIntentPanStart,
+        onPanUpdate: _handleIntentPanUpdate,
+        onPanEnd: _handleIntentPanEnd,
+        onPanCancel: _handleIntentPanCancel,
         child: Stack(
           alignment: Alignment.center,
           children: [
@@ -1535,15 +1571,17 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             height: 18,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: AppColors.surface.withAlpha(188),
+              color: theme.colorScheme.surface.withAlpha(210),
               borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-              border: Border.all(color: AppColors.border.withAlpha(120)),
+              border: Border.all(
+                color: theme.colorScheme.outlineVariant.withAlpha(170),
+              ),
             ),
             child: Container(
               width: 34,
               height: 4,
               decoration: BoxDecoration(
-                color: AppColors.primary.withAlpha(105),
+                color: theme.colorScheme.primary.withAlpha(125),
                 borderRadius: BorderRadius.circular(99),
               ),
             ),
@@ -1568,7 +1606,9 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             maxLines: 1,
             decoration: InputDecoration(
               hintText: '文字',
-              hintStyle: TextStyle(color: AppColors.muted.withAlpha(145)),
+              hintStyle: TextStyle(
+                color: theme.colorScheme.onSurfaceVariant.withAlpha(180),
+              ),
               filled: false,
               fillColor: Colors.transparent,
               isCollapsed: true,
@@ -1597,10 +1637,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(
+                  : Icon(
                       Icons.send_rounded,
                       key: ValueKey('record-text-send-icon'),
-                      color: AppColors.primary,
+                      color: theme.colorScheme.primary,
                     ),
             ),
           ),
@@ -1624,14 +1664,16 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         compact ? 0 : AppSpacing.md,
       ),
       child: Material(
-        color: AppColors.surface.withAlpha(218),
+        color: theme.colorScheme.surface.withAlpha(220),
         elevation: 0,
         borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
         child: Container(
           height: 54,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-            border: Border.all(color: AppColors.border.withAlpha(130)),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withAlpha(170),
+            ),
           ),
           child: Row(
             children: [
@@ -1645,7 +1687,9 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                   maxLines: 1,
                   decoration: InputDecoration(
                     hintText: '文字',
-                    hintStyle: TextStyle(color: AppColors.muted.withAlpha(145)),
+                    hintStyle: TextStyle(
+                      color: theme.colorScheme.onSurfaceVariant.withAlpha(180),
+                    ),
                     filled: false,
                     fillColor: Colors.transparent,
                     isCollapsed: true,
@@ -1674,10 +1718,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(
+                        : Icon(
                             Icons.send_rounded,
                             key: ValueKey('record-text-send-icon'),
-                            color: AppColors.primary,
+                            color: theme.colorScheme.primary,
                           ),
                   ),
                 ),
@@ -1714,9 +1758,11 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               maxLines: 1,
               decoration: InputDecoration(
                 hintText: '或输入文字…',
-                hintStyle: TextStyle(color: AppColors.muted.withAlpha(160)),
+                hintStyle: TextStyle(
+                  color: theme.colorScheme.onSurfaceVariant.withAlpha(190),
+                ),
                 filled: true,
-                fillColor: AppColors.surface,
+                fillColor: theme.colorScheme.surface,
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.md,
                   vertical: AppSpacing.sm,
@@ -1744,10 +1790,10 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                         height: 22,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(
+                    : Icon(
                         Icons.send_rounded,
                         key: ValueKey('record-text-send-icon'),
-                        color: AppColors.primary,
+                        color: theme.colorScheme.primary,
                       ),
               ),
             ),
@@ -1766,7 +1812,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     return GestureDetector(
       onTap: () {},
       child: Container(
-        color: Colors.black.withAlpha(80),
+        color: theme.colorScheme.scrim.withAlpha(100),
         alignment: Alignment.center,
         child: Padding(
           padding: const EdgeInsets.symmetric(
@@ -1823,7 +1869,8 @@ class _MiniTimelineEvent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final tint = _tintForType(event.type);
+    final colorScheme = theme.colorScheme;
+    final tint = _tintForType(event.type, primary: colorScheme.primary);
     final note = event.description.trim();
     final tags = event.tags.take(2).toList();
 
@@ -1856,7 +1903,7 @@ class _MiniTimelineEvent extends StatelessWidget {
                   width: 1,
                   height: 34,
                   margin: const EdgeInsets.only(top: 2),
-                  color: AppColors.border,
+                  color: colorScheme.outlineVariant,
                 ),
             ],
           ),
@@ -1868,9 +1915,11 @@ class _MiniTimelineEvent extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.all(AppSpacing.xs),
               decoration: BoxDecoration(
-                color: AppColors.surface.withAlpha(232),
+                color: colorScheme.surface.withAlpha(232),
                 borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                border: Border.all(color: AppColors.border.withAlpha(190)),
+                border: Border.all(
+                  color: colorScheme.outlineVariant.withAlpha(190),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1880,7 +1929,7 @@ class _MiniTimelineEvent extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      color: AppColors.ink,
+                      color: colorScheme.onSurface,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -1891,7 +1940,7 @@ class _MiniTimelineEvent extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppColors.muted,
+                        color: colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -1943,12 +1992,13 @@ class _TodoPanelEventCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final isCompleted = (event.data['is_completed'] as int? ?? 0) == 1;
 
     return Material(
-      color: AppColors.surface.withAlpha(248),
+      color: colorScheme.surface.withAlpha(248),
       elevation: 4,
-      shadowColor: AppColors.softShadow,
+      shadowColor: colorScheme.shadow.withAlpha(28),
       borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
@@ -1961,14 +2011,18 @@ class _TodoPanelEventCard extends ConsumerWidget {
           ),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            border: Border.all(color: AppColors.border.withAlpha(210)),
+            border: Border.all(
+              color: colorScheme.outlineVariant.withAlpha(210),
+            ),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Icon(
                 isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
-                color: isCompleted ? AppColors.todo : AppColors.muted,
+                color: isCompleted
+                    ? AppColors.todo
+                    : colorScheme.onSurfaceVariant,
                 size: 19,
               ),
               const SizedBox(width: AppSpacing.xs),
@@ -1983,8 +2037,8 @@ class _TodoPanelEventCard extends ConsumerWidget {
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: isCompleted
-                            ? AppColors.muted
-                            : AppColors.primary,
+                            ? colorScheme.onSurfaceVariant
+                            : colorScheme.primary,
                         fontWeight: FontWeight.w700,
                         height: 1.22,
                         decoration: isCompleted
@@ -2010,7 +2064,9 @@ class _TodoPanelEventCard extends ConsumerWidget {
       await repo.complete(event.sourceId);
     }
     ref.invalidate(todayTodoPanelEventsProvider);
-    ref.read(dataVersionProvider.notifier).increment();
+    ref
+        .read(dataVersionProvider.notifier)
+        .increment(domains: {DataDomain.todos});
   }
 }
 
@@ -2028,7 +2084,10 @@ class _ToolDrawerAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = onTap != null;
-    final tint = active ? AppColors.primary : AppColors.muted.withAlpha(160);
+    final colorScheme = Theme.of(context).colorScheme;
+    final tint = active
+        ? colorScheme.primary
+        : colorScheme.onSurfaceVariant.withAlpha(160);
 
     return Material(
       color: tint.withAlpha(active ? 18 : 8),
@@ -2087,9 +2146,11 @@ class _RecordingModeToggle extends StatelessWidget {
       width: 132,
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: AppColors.surface.withAlpha(220),
+        color: theme.colorScheme.surfaceContainer.withAlpha(220),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppColors.border.withAlpha(180)),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withAlpha(200),
+        ),
       ),
       child: Row(
         children: [
@@ -2138,7 +2199,8 @@ class _RecordingModeSegment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tint = selected ? AppColors.primary : AppColors.muted;
+    final colorScheme = theme.colorScheme;
+    final tint = selected ? colorScheme.primary : colorScheme.onSurfaceVariant;
 
     return Expanded(
       child: Semantics(
@@ -2154,7 +2216,7 @@ class _RecordingModeSegment extends StatelessWidget {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: selected
-                  ? AppColors.primary.withAlpha(28)
+                  ? colorScheme.primary.withAlpha(28)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(999),
             ),
@@ -2220,8 +2282,8 @@ class _VoiceHelperText extends StatelessWidget {
                   color: isError
                       ? AppColors.accent
                       : isFinal
-                      ? AppColors.ink
-                      : AppColors.muted,
+                      ? theme.colorScheme.onSurface
+                      : theme.colorScheme.onSurfaceVariant,
                 ),
               ),
       ),
@@ -2243,7 +2305,7 @@ String _formatEventTime(int timestamp) {
   return '$hour:$minute';
 }
 
-Color _tintForType(String type) => switch (type) {
+Color _tintForType(String type, {Color? primary}) => switch (type) {
   'todo' => AppColors.todo,
   'tracker' => AppColors.tracker,
   'focus' => AppColors.focus,
@@ -2251,5 +2313,5 @@ Color _tintForType(String type) => switch (type) {
   'body' => AppColors.body,
   'sleep' => const Color(0xFF7A6EA8),
   'mood' => const Color(0xFFD5952F),
-  _ => AppColors.primary,
+  _ => primary ?? AppColors.primary,
 };

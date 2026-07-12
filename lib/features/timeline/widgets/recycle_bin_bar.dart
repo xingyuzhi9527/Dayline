@@ -21,6 +21,7 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
   @override
   Widget build(BuildContext context) {
     final deletedAsync = ref.watch(deletedRecordsProvider);
+    final colors = Theme.of(context).colorScheme;
 
     return deletedAsync.when(
       data: (deleted) {
@@ -37,9 +38,9 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
                   vertical: AppSpacing.xs,
                 ),
                 decoration: BoxDecoration(
-                  color: AppColors.muted.withAlpha(20),
-                  border: const Border(
-                    bottom: BorderSide(color: AppColors.border),
+                  color: colors.onSurfaceVariant.withAlpha(20),
+                  border: Border(
+                    bottom: BorderSide(color: colors.outlineVariant),
                   ),
                 ),
                 child: Row(
@@ -62,7 +63,7 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
                           ? Icons.expand_less_rounded
                           : Icons.expand_more_rounded,
                       size: 18,
-                      color: AppColors.muted,
+                      color: colors.onSurfaceVariant,
                     ),
                   ],
                 ),
@@ -72,9 +73,9 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
               Container(
                 constraints: const BoxConstraints(maxHeight: 200),
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceLow.withAlpha(60),
-                  border: const Border(
-                    bottom: BorderSide(color: AppColors.border),
+                  color: colors.surfaceContainerLow.withAlpha(60),
+                  border: Border(
+                    bottom: BorderSide(color: colors.outlineVariant),
                   ),
                 ),
                 child: ListView.separated(
@@ -107,7 +108,7 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: AppColors.muted),
+                                ?.copyWith(color: colors.onSurfaceVariant),
                           ),
                         ),
                         SizedBox(
@@ -155,7 +156,9 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
     await ref.read(recordsRepositoryProvider).restore(id);
     ref.invalidate(deletedRecordsProvider);
     ref.invalidate(timelineEventsProvider);
-    ref.read(dataVersionProvider.notifier).increment();
+    ref
+        .read(dataVersionProvider.notifier)
+        .increment(domains: {DataDomain.records});
   }
 
   Future<void> _permanentlyDelete(Map<String, Object?> row) async {
@@ -171,6 +174,8 @@ class _RecycleBinBarState extends ConsumerState<RecycleBinBar> {
       await ref.read(recordsRepositoryProvider).permanentDelete(id);
     }
     ref.invalidate(deletedRecordsProvider);
-    ref.read(dataVersionProvider.notifier).increment();
+    ref
+        .read(dataVersionProvider.notifier)
+        .increment(domains: {DataDomain.records, DataDomain.media});
   }
 }

@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/app_colors.dart';
-
 class MarkdownToolbar extends StatelessWidget {
   const MarkdownToolbar({required this.controller, super.key});
 
@@ -25,9 +23,8 @@ class MarkdownToolbar extends StatelessWidget {
           _ToolButton(label: '```', onTap: () => _insertBlock('```', '```')),
           _ToolButton(
             label: 'T',
-            onTap: () => _insertAtCursor(
-              '| 项目 | 内容 |\n| --- | --- |\n|  |  |\n',
-            ),
+            onTap: () =>
+                _insertAtCursor('| 项目 | 内容 |\n| --- | --- |\n|  |  |\n'),
           ),
         ],
       ),
@@ -50,10 +47,16 @@ class MarkdownToolbar extends StatelessWidget {
       );
     } else {
       final selected = text.substring(sel.start, sel.end);
-      final newText = text.replaceRange(sel.start, sel.end, '$open$selected$close');
+      final newText = text.replaceRange(
+        sel.start,
+        sel.end,
+        '$open$selected$close',
+      );
       controller.value = TextEditingValue(
         text: newText,
-        selection: TextSelection.collapsed(offset: sel.start + open.length + selected.length + close.length),
+        selection: TextSelection.collapsed(
+          offset: sel.start + open.length + selected.length + close.length,
+        ),
       );
     }
   }
@@ -79,9 +82,7 @@ class MarkdownToolbar extends StatelessWidget {
     final newText = text.replaceRange(lineStart, lineEnd, newLine);
     controller.value = TextEditingValue(
       text: newText,
-      selection: TextSelection.collapsed(
-        offset: lineStart + newLine.length,
-      ),
+      selection: TextSelection.collapsed(offset: lineStart + newLine.length),
     );
   }
 
@@ -111,9 +112,7 @@ class MarkdownToolbar extends StatelessWidget {
     final newText = current.replaceRange(start, end, block);
     controller.value = TextEditingValue(
       text: newText,
-      selection: TextSelection.collapsed(
-        offset: start + open.length + 1,
-      ),
+      selection: TextSelection.collapsed(offset: start + open.length + 1),
     );
   }
 }
@@ -126,10 +125,11 @@ class _ToolButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 6),
       child: Material(
-        color: AppColors.surfaceLow,
+        color: colors.surfaceContainerLow,
         borderRadius: BorderRadius.circular(6),
         child: InkWell(
           onTap: onTap,
@@ -143,7 +143,7 @@ class _ToolButton extends StatelessWidget {
                 fontFamily: 'monospace',
                 fontSize: label.length > 2 ? 11 : 13,
                 fontWeight: FontWeight.w600,
-                color: AppColors.primary,
+                color: colors.primary,
               ),
             ),
           ),

@@ -1,9 +1,13 @@
 import 'dart:async';
 
-enum SttAvailabilityStatus { loading, ready, unavailable, error }
+enum SttAvailabilityStatus { idle, loading, ready, unavailable, error }
 
 class SttAvailability {
   const SttAvailability({required this.status, required this.message});
+
+  const SttAvailability.idle()
+    : status = SttAvailabilityStatus.idle,
+      message = '按下后准备离线语音';
 
   const SttAvailability.loading()
     : status = SttAvailabilityStatus.loading,

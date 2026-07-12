@@ -1,15 +1,25 @@
 package com.example.liflow_app
 
 import android.content.Intent
+import android.content.res.AssetManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.OpenableColumns
+import io.flutter.FlutterInjector
 import androidx.documentfile.provider.DocumentFile
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.FilterOutputStream
+import java.io.OutputStream
+import java.io.OutputStreamWriter
+import java.security.DigestOutputStream
+import java.security.MessageDigest
+import java.util.UUID
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     private var pendingDirectoryResult: MethodChannel.Result? = null
@@ -20,10 +30,17 @@ class MainActivity : FlutterActivity() {
     private var audioChannel: MethodChannel? = null
     private var mediaPlayer: MediaPlayer? = null
     private var playingAudioPath: String? = null
+    // SAF providers can perform real disk/cloud I/O from openOutputStream.
+    // Keep those calls off Flutter's platform-channel/UI thread and serialize
+    // them so two replacements cannot interleave their sidecar recovery.
+    private val safIoExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "liflow-saf-io")
+    }
     private val PICK_DIRECTORY = 1001
     private val PICK_DOCUMENT = 1002
 
     override fun onDestroy() {
+        safIoExecutor.shutdownNow()
         releaseAudioPlayer(notifyStop = false)
         super.onDestroy()
     }
@@ -77,6 +94,20 @@ class MainActivity : FlutterActivity() {
                 }
             } catch (error: Throwable) {
                 result.error("markdown_storage_error", error.message, null)
+            }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "liflow/stt_assets",
+        ).setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    "copyAssetToFile" -> copyAssetToFile(call, result)
+                    else -> result.notImplemented()
+                }
+            } catch (error: Throwable) {
+                result.error("stt_asset_error", error.message, null)
             }
         }
 
@@ -134,6 +165,33 @@ class MainActivity : FlutterActivity() {
             start()
         }
         result.success(null)
+    }
+
+    private fun copyAssetToFile(call: MethodCall, result: MethodChannel.Result) {
+        val assetPath = call.argument<String>("assetPath")
+            ?: throw IllegalArgumentException("Missing: assetPath")
+        val outputPath = call.argument<String>("outputPath")
+            ?: throw IllegalArgumentException("Missing: outputPath")
+        val lookupKey = FlutterInjector.instance().flutterLoader()
+            .getLookupKeyForAsset(assetPath)
+
+        safIoExecutor.execute {
+            try {
+                val outputFile = File(outputPath)
+                outputFile.parentFile?.mkdirs()
+                assets.open(lookupKey, AssetManager.ACCESS_STREAMING).use { input ->
+                    outputFile.outputStream().buffered().use { output ->
+                        input.copyTo(output, DEFAULT_BUFFER_SIZE)
+                        output.flush()
+                    }
+                }
+                runOnUiThread { result.success(null) }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    result.error("stt_asset_copy_error", error.message, null)
+                }
+            }
+        }
     }
 
     private fun releaseAudioPlayer(notifyStop: Boolean) {
@@ -210,7 +268,7 @@ class MainActivity : FlutterActivity() {
             ?: throw IllegalArgumentException("Missing: treeUri")
         val roots = call.argument<List<String>>("roots") ?: emptyList()
 
-        Thread {
+        safIoExecutor.execute {
             try {
                 val rows = mutableListOf<Map<String, Any?>>()
 
@@ -231,7 +289,7 @@ class MainActivity : FlutterActivity() {
                     result.error("list_files_error", error.message, null)
                 }
             }
-        }.start()
+        }
     }
 
     private fun importDocument(call: MethodCall, result: MethodChannel.Result) {
@@ -359,15 +417,14 @@ class MainActivity : FlutterActivity() {
             throw IllegalStateException("Source file not found: $sourcePath")
         }
 
-        val targetFile = resolveFile(Uri.parse(treeUri), relativePath, true, mimeType)
-        val output = contentResolver.openOutputStream(targetFile.uri, "w")
-            ?: throw IllegalStateException("Cannot open output stream")
-        sourceFile.inputStream().use { source ->
-            output.use { target ->
-                source.copyTo(target)
+        executeSafIo(result) {
+            replaceSafFile(Uri.parse(treeUri), relativePath, mimeType) { target ->
+                sourceFile.inputStream().use { source ->
+                    source.copyTo(target)
+                }
             }
+            null
         }
-        result.success(null)
     }
 
     private fun writeTextFile(call: MethodCall, result: MethodChannel.Result) {
@@ -377,12 +434,19 @@ class MainActivity : FlutterActivity() {
             ?: throw IllegalArgumentException("Missing: relativePath")
         val content = call.argument<String>("content")
             ?: throw IllegalArgumentException("Missing: content")
+        val mimeType = call.argument<String>("mimeType")
+            ?.takeIf { it.isNotBlank() }
+            ?: "text/markdown"
 
-        val file = resolveFile(Uri.parse(treeUri), relativePath, true, "text/markdown")
-        val stream = contentResolver.openOutputStream(file.uri, "wt")
-            ?: throw IllegalStateException("Cannot open output stream")
-        stream.bufferedWriter(Charsets.UTF_8).use { it.write(content) }
-        result.success(null)
+        executeSafIo(result) {
+            replaceSafFile(Uri.parse(treeUri), relativePath, mimeType) { target ->
+                OutputStreamWriter(target, Charsets.UTF_8).use {
+                    it.write(content)
+                    it.flush()
+                }
+            }
+            null
+        }
     }
 
     private fun readTextFile(call: MethodCall, result: MethodChannel.Result) {
@@ -391,11 +455,28 @@ class MainActivity : FlutterActivity() {
         val relativePath = call.argument<String>("relativePath")
             ?: throw IllegalArgumentException("Missing: relativePath")
 
-        val file = resolveFile(Uri.parse(treeUri), relativePath, false)
-        val stream = contentResolver.openInputStream(file.uri)
-            ?: throw IllegalStateException("Cannot open input stream")
-        val text = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-        result.success(text)
+        executeSafIo(result) {
+            val file = resolveFile(Uri.parse(treeUri), relativePath, false)
+            val stream = contentResolver.openInputStream(file.uri)
+                ?: throw IllegalStateException("Cannot open input stream")
+            stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        }
+    }
+
+    private fun executeSafIo(
+        result: MethodChannel.Result,
+        operation: () -> Any?,
+    ) {
+        safIoExecutor.execute {
+            try {
+                val value = operation()
+                runOnUiThread { result.success(value) }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    result.error("markdown_storage_error", error.message, null)
+                }
+            }
+        }
     }
 
     private fun resolveFile(
@@ -404,36 +485,364 @@ class MainActivity : FlutterActivity() {
         createIfMissing: Boolean,
         mimeType: String = "text/markdown",
     ): DocumentFile {
+        val target = resolveFileTarget(treeUri, relativePath, createIfMissing)
+        recoverSafArtifacts(target)
+        val existingEntry = target.parent.findFile(target.fileName)
+        if (existingEntry != null && !existingEntry.isFile) {
+            throw IllegalStateException("Path is not a file: ${target.fileName}")
+        }
+        val existing = existingEntry?.takeIf { it.isFile }
+        if (existing != null) return existing
+        if (createIfMissing) {
+            return target.parent.createFile(mimeType, target.fileName)
+                ?: throw IllegalStateException("Cannot create file: ${target.fileName}")
+        }
+        throw IllegalStateException("Cannot resolve file: ${target.fileName}")
+    }
+
+    private data class SafFileTarget(
+        val parent: DocumentFile,
+        val fileName: String,
+    )
+
+    private fun resolveFileTarget(
+        treeUri: Uri,
+        relativePath: String,
+        createDirectories: Boolean,
+    ): SafFileTarget {
         val root = DocumentFile.fromTreeUri(this, treeUri)
             ?: throw IllegalStateException("Cannot access folder")
+        val segments = parseRelativeSegments(relativePath)
 
-        val segments = relativePath
-            .split("/")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        require(segments.isNotEmpty()) { "Relative path must not be empty" }
-
-        var current: DocumentFile = root
+        var current = root
         for (segment in segments.dropLast(1)) {
-            val dir = current.findFile(segment)?.takeIf { it.isDirectory }
-            current = if (dir != null) {
-                dir
-            } else if (createIfMissing) {
+            val entry = current.findFile(segment)
+            if (entry != null && !entry.isDirectory) {
+                throw IllegalStateException("Path is not a directory: $segment")
+            }
+            current = if (entry != null) {
+                entry
+            } else if (createDirectories) {
                 current.createDirectory(segment)
                     ?: throw IllegalStateException("Cannot create dir: $segment")
             } else {
                 throw IllegalStateException("Cannot resolve dir: $segment")
             }
         }
+        return SafFileTarget(current, segments.last())
+    }
 
-        val fileName = segments.last()
-        val existing = current?.findFile(fileName)?.takeIf { it.isFile }
-        if (existing != null) return existing
-        if (createIfMissing) {
-            return current?.createFile(mimeType, fileName)
-                ?: throw IllegalStateException("Cannot create file: $fileName")
+    private fun parseRelativeSegments(
+        relativePath: String,
+        allowEmpty: Boolean = false,
+    ): List<String> {
+        val segments = relativePath.split("/").map { it.trim() }
+        if (allowEmpty && segments.all { it.isEmpty() }) return emptyList()
+        require(
+            segments.isNotEmpty() && segments.all {
+                it.isNotEmpty() && it != "." && it != ".."
+            },
+        ) { "Relative path contains an empty or unsafe segment" }
+        return segments
+    }
+
+    private fun replaceSafFile(
+        treeUri: Uri,
+        relativePath: String,
+        mimeType: String,
+        writeContent: (OutputStream) -> Unit,
+    ): DocumentFile {
+        val target = resolveFileTarget(treeUri, relativePath, true)
+        return replaceSafFile(target, mimeType, writeContent)
+    }
+
+    private fun replaceSafFile(
+        target: SafFileTarget,
+        mimeType: String,
+        writeContent: (OutputStream) -> Unit,
+    ): DocumentFile {
+        recoverSafArtifacts(target)
+
+        val existingEntry = target.parent.findFile(target.fileName)
+        if (existingEntry != null && !existingEntry.isFile) {
+            throw IllegalStateException("Path is not a file: ${target.fileName}")
         }
-        throw IllegalStateException("Cannot resolve file: $fileName")
+        val existing = existingEntry?.takeIf { it.isFile }
+        val transactionId = UUID.randomUUID().toString().replace("-", "")
+        val temp = createSafArtifact(
+            target,
+            mimeType,
+            "temp",
+            transactionId,
+        )
+        val tempName = temp.name
+            ?: throw IllegalStateException("Temporary file has no display name")
+
+        try {
+            val writeDigest = MessageDigest.getInstance("SHA-256")
+            val countingOutput = CountingOutputStream(
+                DigestOutputStream(openTruncatingOutput(temp), writeDigest),
+            )
+            countingOutput.use { output ->
+                writeContent(output)
+            }
+            verifySafFile(temp, countingOutput.bytesWritten, writeDigest.digest())
+        } catch (error: Throwable) {
+            deleteQuietly(temp)
+            throw error
+        }
+
+        if (existing == null) {
+            if (!temp.renameTo(target.fileName)) {
+                throw IllegalStateException(
+                    "Cannot commit new file: ${target.fileName}; temporary file retained",
+                )
+            }
+            return target.parent.findFile(target.fileName)?.takeIf { it.isFile }
+                ?: throw IllegalStateException(
+                    "Committed file cannot be resolved: ${target.fileName}",
+                )
+        }
+        val backupName = safArtifactName(
+            target.fileName,
+            "backup",
+            transactionId,
+        )
+        if (!existing.renameTo(backupName)) {
+            throw IllegalStateException(
+                "Cannot preserve existing file: ${target.fileName}; temporary file retained",
+            )
+        }
+        val backup = target.parent.findFile(backupName)?.takeIf { it.isFile }
+            ?: throw IllegalStateException(
+                "Backup cannot be resolved after rename: $backupName",
+            )
+        val resolvedTemp = target.parent.findFile(tempName)?.takeIf { it.isFile }
+        if (resolvedTemp == null) {
+            val error = IllegalStateException(
+                "Temporary file cannot be resolved after backup: $tempName",
+            )
+            rollbackSafReplacement(target, backupName, tempName, error)
+            throw error
+        }
+        if (!resolvedTemp.renameTo(target.fileName)) {
+            val error = IllegalStateException(
+                "Cannot commit replacement: ${target.fileName}",
+            )
+            rollbackSafReplacement(target, backupName, tempName, error)
+            throw error
+        }
+
+        val committed = target.parent.findFile(target.fileName)?.takeIf { it.isFile }
+        if (committed == null) {
+            val error = IllegalStateException(
+                "Committed replacement cannot be resolved: ${target.fileName}",
+            )
+            rollbackSafReplacement(target, backupName, tempName, error)
+            throw error
+        }
+        target.parent.findFile(backupName)?.let(::deleteQuietly)
+        return committed
+    }
+
+    private fun verifySafFile(
+        file: DocumentFile,
+        expectedSize: Long,
+        expectedDigest: ByteArray,
+    ) {
+        val readDigest = MessageDigest.getInstance("SHA-256")
+        var actualSize = 0L
+        val input = contentResolver.openInputStream(file.uri)
+            ?: throw IllegalStateException("Cannot verify temporary file: ${file.name}")
+        input.use { source ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = source.read(buffer)
+                if (read == -1) break
+                if (read == 0) continue
+                actualSize += read
+                readDigest.update(buffer, 0, read)
+            }
+        }
+        if (
+            actualSize != expectedSize ||
+            !MessageDigest.isEqual(expectedDigest, readDigest.digest())
+        ) {
+            throw IllegalStateException(
+                "Temporary file verification failed: ${file.name} " +
+                    "(expected $expectedSize bytes, read $actualSize)",
+            )
+        }
+    }
+
+    private class CountingOutputStream(output: OutputStream) :
+        FilterOutputStream(output) {
+        var bytesWritten: Long = 0
+            private set
+
+        override fun write(value: Int) {
+            out.write(value)
+            bytesWritten++
+        }
+
+        override fun write(buffer: ByteArray, offset: Int, length: Int) {
+            out.write(buffer, offset, length)
+            bytesWritten += length
+        }
+    }
+
+    private data class SafTransactionArtifacts(
+        val id: String,
+        var temp: DocumentFile? = null,
+        var backup: DocumentFile? = null,
+    )
+
+    private fun recoverSafArtifacts(target: SafFileTarget) {
+        val transactions = mutableMapOf<String, SafTransactionArtifacts>()
+        for (entry in target.parent.listFiles().filter { it.isFile }) {
+            val tempId = safArtifactId(entry.name, target.fileName, "temp")
+            if (tempId != null) {
+                transactions.getOrPut(tempId) { SafTransactionArtifacts(tempId) }.temp = entry
+            }
+            val backupId = safArtifactId(entry.name, target.fileName, "backup")
+            if (backupId != null) {
+                transactions.getOrPut(backupId) { SafTransactionArtifacts(backupId) }.backup = entry
+            }
+        }
+
+        val ordered = transactions.values.sortedBy { artifacts ->
+            maxOf(
+                artifacts.temp?.lastModified() ?: 0L,
+                artifacts.backup?.lastModified() ?: 0L,
+            )
+        }
+        for (artifacts in ordered) {
+            val temp = artifacts.temp
+            val backup = artifacts.backup
+            if (backup != null && temp != null) {
+                restoreSafBackupByRename(target, backup)
+                deleteQuietly(temp)
+                continue
+            }
+            if (backup != null) {
+                if (target.parent.findFile(target.fileName)?.isFile == true) {
+                    deleteQuietly(backup)
+                } else {
+                    restoreSafBackupByRename(target, backup)
+                }
+                continue
+            }
+            if (temp != null) {
+                deleteQuietly(temp)
+            }
+        }
+    }
+
+    private fun rollbackSafReplacement(
+        target: SafFileTarget,
+        backupName: String,
+        tempName: String,
+        originalError: Throwable,
+    ) {
+        try {
+            val backup = target.parent.findFile(backupName)?.takeIf { it.isFile }
+                ?: throw IllegalStateException("Cannot resolve backup for rollback: $backupName")
+            restoreSafBackupByRename(target, backup)
+            target.parent.findFile(tempName)?.let(::deleteQuietly)
+        } catch (rollbackError: Throwable) {
+            originalError.addSuppressed(rollbackError)
+        }
+    }
+
+    private fun restoreSafBackupByRename(
+        target: SafFileTarget,
+        backup: DocumentFile,
+    ): DocumentFile {
+        val backupName = backup.name
+            ?: throw IllegalStateException("Backup has no display name")
+        val current = target.parent.findFile(target.fileName)
+        if (current != null && !current.delete()) {
+            throw IllegalStateException(
+                "Cannot remove incomplete target during rollback: ${target.fileName}",
+            )
+        }
+        val resolvedBackup = target.parent.findFile(backupName)?.takeIf { it.isFile }
+            ?: throw IllegalStateException("Cannot resolve backup for rollback: $backupName")
+        if (!resolvedBackup.renameTo(target.fileName)) {
+            throw IllegalStateException("Cannot restore backup: ${target.fileName}")
+        }
+        return target.parent.findFile(target.fileName)?.takeIf { it.isFile }
+            ?: throw IllegalStateException(
+                "Restored file cannot be resolved: ${target.fileName}",
+            )
+    }
+
+    private fun createSafArtifact(
+        target: SafFileTarget,
+        mimeType: String,
+        role: String,
+        transactionId: String,
+    ): DocumentFile {
+        val name = safArtifactName(target.fileName, role, transactionId)
+        return target.parent.createFile(mimeType, name)
+            ?: throw IllegalStateException("Cannot create temporary file for ${target.fileName}")
+    }
+
+    private fun safArtifactName(
+        fileName: String,
+        role: String,
+        transactionId: String,
+    ): String {
+        val extensionIndex = fileName.lastIndexOf('.').takeIf { it > 0 }
+        val baseName = extensionIndex?.let { fileName.substring(0, it) } ?: fileName
+        val extension = extensionIndex?.let { fileName.substring(it) } ?: ""
+        return "${safArtifactPrefix(fileName, role)}$transactionId$extension"
+    }
+
+    private fun safArtifactPrefix(fileName: String, role: String): String {
+        val extensionIndex = fileName.lastIndexOf('.').takeIf { it > 0 }
+        val baseName = extensionIndex?.let { fileName.substring(0, it) } ?: fileName
+        return ".$baseName.liflow-$role-"
+    }
+
+    private fun safArtifactId(
+        artifactName: String?,
+        fileName: String,
+        role: String,
+    ): String? {
+        if (artifactName == null) return null
+        val prefix = safArtifactPrefix(fileName, role)
+        if (!artifactName.startsWith(prefix)) return null
+        return artifactName.substring(prefix.length).substringBefore('.').takeIf {
+            it.isNotBlank()
+        }
+    }
+
+    private fun openTruncatingOutput(file: DocumentFile): OutputStream {
+        var firstError: Throwable? = null
+        for (mode in listOf("rwt", "wt", "w")) {
+            try {
+                val stream = contentResolver.openOutputStream(file.uri, mode)
+                if (stream != null) return stream
+            } catch (error: Throwable) {
+                if (firstError == null) {
+                    firstError = error
+                } else {
+                    firstError.addSuppressed(error)
+                }
+            }
+        }
+        throw IllegalStateException(
+            "Cannot open output stream: ${file.name}",
+            firstError,
+        )
+    }
+
+    private fun deleteQuietly(file: DocumentFile) {
+        try {
+            file.delete()
+        } catch (_: Throwable) {
+        }
     }
 
     private fun resolveDirectory(
@@ -443,10 +852,7 @@ class MainActivity : FlutterActivity() {
     ): DocumentFile {
         val root = DocumentFile.fromTreeUri(this, treeUri)
             ?: throw IllegalStateException("Cannot access folder")
-        val segments = relativePath
-            .split("/")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
+        val segments = parseRelativeSegments(relativePath, allowEmpty = true)
 
         var current: DocumentFile = root
         for (segment in segments) {
@@ -469,6 +875,7 @@ class MainActivity : FlutterActivity() {
         rows: MutableList<Map<String, Any?>>,
     ) {
         for (child in dir.listFiles()) {
+            if (isSafArtifactName(child.name)) continue
             val childRelativePath = if (relativeDir.isBlank()) {
                 child.name ?: ""
             } else {
@@ -505,26 +912,36 @@ class MainActivity : FlutterActivity() {
         }
         val documentsDir = resolveDirectory(treeUri, targetPath, true)
         val targetName = uniqueFileName(documentsDir, sourceName)
-        val targetFile = documentsDir.createFile(mimeType, targetName)
-            ?: throw IllegalStateException("Cannot create document: $targetName")
-
-        val input = contentResolver.openInputStream(sourceUri)
-            ?: throw IllegalStateException("Cannot open picked document")
-        val output = contentResolver.openOutputStream(targetFile.uri, "w")
-            ?: throw IllegalStateException("Cannot open imported document")
-        input.use { source ->
-            output.use { target ->
+        val targetFile = replaceSafFile(
+            SafFileTarget(documentsDir, targetName),
+            mimeType,
+        ) { target ->
+            val input = contentResolver.openInputStream(sourceUri)
+                ?: throw IllegalStateException("Cannot open picked document")
+            input.use { source ->
                 source.copyTo(target)
             }
         }
+        val committedName = targetFile.name ?: targetName
+        val targetPrefix = targetPath.trim('/')
+        val relativePath = if (targetPrefix.isEmpty()) {
+            committedName
+        } else {
+            "$targetPrefix/$committedName"
+        }
 
         return mapOf(
-            "name" to targetFile.name,
-            "relativePath" to "${targetPath.trim('/')}/${targetFile.name}",
+            "name" to committedName,
+            "relativePath" to relativePath,
             "mimeType" to targetFile.type,
             "sizeBytes" to targetFile.length(),
             "updatedAt" to targetFile.lastModified(),
         )
+    }
+
+    private fun isSafArtifactName(name: String?): Boolean {
+        return name?.contains(".liflow-temp-") == true ||
+            name?.contains(".liflow-backup-") == true
     }
 
     private fun isMarkdownDocument(fileName: String, mimeType: String): Boolean {

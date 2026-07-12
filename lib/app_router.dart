@@ -19,7 +19,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      StatefulShellRoute.indexedStack(
+      StatefulShellRoute(
+        navigatorContainerBuilder: (context, navigationShell, children) {
+          return LiflowBranchNavigatorContainer(
+            navigationShell: navigationShell,
+            children: children,
+          );
+        },
         builder: (context, state, navigationShell) {
           return LiflowShell(navigationShell: navigationShell);
         },

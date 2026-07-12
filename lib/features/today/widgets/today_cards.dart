@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/database/repository_providers.dart';
-import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../today_providers.dart';
 
@@ -30,6 +29,7 @@ class DateHeaderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -50,9 +50,11 @@ class DateHeaderCard extends StatelessWidget {
             vertical: AppSpacing.xs,
           ),
           decoration: BoxDecoration(
-            color: AppColors.secondaryContainer.withAlpha(48),
+            color: colors.secondaryContainer.withAlpha(
+              theme.brightness == Brightness.dark ? 180 : 48,
+            ),
             borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-            border: Border.all(color: AppColors.secondaryContainer),
+            border: Border.all(color: colors.secondary.withAlpha(100)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -60,13 +62,13 @@ class DateHeaderCard extends StatelessWidget {
               Icon(
                 Icons.local_fire_department_rounded,
                 size: 18,
-                color: AppColors.secondary,
+                color: colors.onSecondaryContainer,
               ),
               const SizedBox(width: AppSpacing.xxs),
               Text(
                 '连续记录 4 天',
                 style: theme.textTheme.labelLarge?.copyWith(
-                  color: AppColors.secondary,
+                  color: colors.onSecondaryContainer,
                 ),
               ),
             ],
@@ -82,6 +84,7 @@ class StatsSummaryCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final colors = Theme.of(context).colorScheme;
     final recordCount = ref.watch(todayRecordCountProvider);
     final todoStats = ref.watch(todayTodoStatsProvider);
     final trackerCount = ref.watch(todayTrackerLogCountProvider);
@@ -104,7 +107,7 @@ class StatsSummaryCard extends ConsumerWidget {
           label: '待办进度',
           value: todoValue,
           helper: '已完成',
-          color: AppColors.muted,
+          color: colors.onSurfaceVariant,
         ),
         _MetricTile(
           icon: Icons.timer_rounded,
@@ -113,21 +116,21 @@ class StatsSummaryCard extends ConsumerWidget {
               ? '${focusMins.valueOrNull} 分钟'
               : '-',
           helper: '深度工作',
-          color: AppColors.primary,
+          color: colors.primary,
         ),
         _MetricTile(
           icon: Icons.sentiment_satisfied_alt_rounded,
           label: '当前心情',
           value: trackerCount.valueOrNull?.toString() ?? '-',
           helper: '今日打卡',
-          color: AppColors.secondaryContainer,
+          color: colors.secondary,
         ),
         _MetricTile(
           icon: Icons.bolt_rounded,
           label: '能量消耗',
           value: recordCount.valueOrNull?.toString() ?? '-',
           helper: '生活片段',
-          color: AppColors.accent,
+          color: colors.tertiary,
         ),
       ],
     );
@@ -152,6 +155,7 @@ class _MetricTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Card(
       child: Padding(
@@ -168,7 +172,7 @@ class _MetricTile extends StatelessWidget {
                   label,
                   style: theme.textTheme.bodySmall?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: AppColors.muted,
+                    color: colors.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -196,6 +200,7 @@ class ProgressCard extends StatelessWidget {
     final progress = (now.hour * 60 + now.minute) / (24 * 60);
     final pct = (progress * 100).round();
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Column(
       children: [
@@ -208,7 +213,7 @@ class ProgressCard extends StatelessWidget {
               Text(
                 '今天已过 $pct%',
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: AppColors.primary,
+                  color: colors.primary,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -223,10 +228,8 @@ class ProgressCard extends StatelessWidget {
           child: LinearProgressIndicator(
             value: progress,
             minHeight: 8,
-            backgroundColor: Theme.of(
-              context,
-            ).colorScheme.surfaceContainerHighest,
-            valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+            backgroundColor: colors.surfaceContainerHighest,
+            valueColor: AlwaysStoppedAnimation(colors.primary),
           ),
         ),
       ],
@@ -240,6 +243,7 @@ class StatusInsightCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Card(
       child: Padding(
@@ -256,7 +260,7 @@ class StatusInsightCard extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          const _TypeDot(color: AppColors.primary),
+                          _TypeDot(color: colors.primary),
                           const SizedBox(width: AppSpacing.xs),
                           Text('状态洞察', style: theme.textTheme.titleMedium),
                         ],
@@ -268,7 +272,7 @@ class StatusInsightCard extends StatelessWidget {
                           Text(
                             '92%',
                             style: theme.textTheme.displaySmall?.copyWith(
-                              color: AppColors.primary,
+                              color: colors.primary,
                               fontSize: 40,
                             ),
                           ),
@@ -300,7 +304,7 @@ class StatusInsightCard extends StatelessWidget {
                     Text(
                       '7h 45m',
                       style: theme.textTheme.headlineMedium?.copyWith(
-                        color: AppColors.ink,
+                        color: colors.onSurface,
                       ),
                     ),
                   ],
@@ -308,13 +312,13 @@ class StatusInsightCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
-            const Divider(height: 1, color: AppColors.border),
+            Divider(height: 1, color: colors.outlineVariant),
             const SizedBox(height: AppSpacing.md),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(AppSpacing.md),
               decoration: BoxDecoration(
-                color: AppColors.surfaceLow,
+                color: colors.surfaceContainerLow,
                 borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
               ),
               child: Row(
@@ -323,12 +327,12 @@ class StatusInsightCard extends StatelessWidget {
                     width: 36,
                     height: 36,
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withAlpha(18),
+                      color: colors.primary.withAlpha(18),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.auto_awesome_rounded,
-                      color: AppColors.primary,
+                      color: colors.primary,
                       size: 20,
                     ),
                   ),
@@ -441,9 +445,9 @@ class _TodayTodosCardState extends ConsumerState<TodayTodosCard> {
               children: [
                 Text(
                   '$openCount 个未完成 · 今天 $todayCount 个',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: AppColors.muted),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 for (final group in groups) ...[
@@ -461,9 +465,9 @@ class _TodayTodosCardState extends ConsumerState<TodayTodosCard> {
                   const SizedBox(height: AppSpacing.xxs),
                   Text(
                     '还有 $hiddenCount 个待办在完整列表里。',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.copyWith(color: AppColors.muted),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ],
@@ -532,7 +536,7 @@ class _TodoGroupLabel extends StatelessWidget {
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: AppColors.primary,
+          color: Theme.of(context).colorScheme.primary,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -578,18 +582,19 @@ class _TodoRowState extends ConsumerState<_TodoRow> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(
         _completed ? Icons.check_circle : Icons.radio_button_unchecked,
-        color: _completed ? const Color(0xFF4A90D9) : AppColors.muted,
+        color: _completed ? const Color(0xFF4A90D9) : colors.onSurfaceVariant,
       ),
       title: Text(
         widget.title,
         style: theme.textTheme.bodyLarge?.copyWith(
           decoration: _completed ? TextDecoration.lineThrough : null,
-          color: _completed ? AppColors.muted : null,
+          color: _completed ? colors.onSurfaceVariant : null,
         ),
       ),
       dense: true,
@@ -616,7 +621,9 @@ class _TodoRowState extends ConsumerState<_TodoRow> {
       ref.invalidate(todayTodoAgendaProvider);
       ref.invalidate(todayTodoListProvider);
       ref.invalidate(todayTodoStatsProvider);
-      ref.read(dataVersionProvider.notifier).increment();
+      ref
+          .read(dataVersionProvider.notifier)
+          .increment(domains: const {DataDomain.todos});
     } catch (_) {
       // Revert on failure
       if (mounted) {
@@ -674,8 +681,8 @@ class _RecentRecordRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _colorForType(type);
     final theme = Theme.of(context);
+    final color = _colorForType(type, theme.colorScheme);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.xs),
@@ -721,6 +728,7 @@ class _SectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Card(
       child: Padding(
@@ -730,7 +738,7 @@ class _SectionCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(icon, size: 20, color: AppColors.primary),
+                Icon(icon, size: 20, color: colors.primary),
                 const SizedBox(width: AppSpacing.xs),
                 Text(title, style: theme.textTheme.titleMedium),
               ],
@@ -766,13 +774,13 @@ IconData _iconForType(String type) => switch (type) {
   _ => Icons.edit_note_rounded,
 };
 
-Color _colorForType(String type) => switch (type) {
-  'memo' => AppColors.primary,
+Color _colorForType(String type, ColorScheme colors) => switch (type) {
+  'memo' => colors.primary,
   'todo' => const Color(0xFF4A90D9),
   'tracker' => const Color(0xFF7CB342),
   'focus' => const Color(0xFFE67E22),
   'expense' => const Color(0xFFE74C3C),
   'body' => const Color(0xFF9B59B6),
   'sleep' => const Color(0xFF5C6BC0),
-  _ => AppColors.muted,
+  _ => colors.onSurfaceVariant,
 };

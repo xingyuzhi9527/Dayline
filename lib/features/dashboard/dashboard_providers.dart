@@ -59,36 +59,46 @@ class DashboardSummary {
   bool get hasUnfinishedTodos => totalTodos > completedTodos;
 }
 
-final dashboardSummaryForDateProvider =
-    FutureProvider.family<DashboardSummary, DateTime>((ref, date) async {
-      ref.watch(dataVersionProvider);
-      final day = DateTime(date.year, date.month, date.day);
+/// Loads a dashboard for a canonical `yyyy-MM-dd` date key.
+///
+/// Keeping the family argument as a date-only string is intentional: using a
+/// `DateTime` here would create a distinct provider/cache entry for every
+/// timestamp passed by a caller, even when all those timestamps refer to the
+/// same calendar day.
+final dashboardSummaryForDateProvider = FutureProvider.autoDispose
+    .family<DashboardSummary, String>((ref, dateValue) async {
+      for (final domain in const [
+        DataDomain.records,
+        DataDomain.todos,
+        DataDomain.trackerLogs,
+        DataDomain.focus,
+        DataDomain.expenses,
+        DataDomain.bodyLogs,
+        DataDomain.reviews,
+      ]) {
+        ref.watch(dataDomainVersionProvider(domain));
+      }
+      final day = _dayFromDateKey(dateValue);
       final dateStr = dateKey(day);
+      // Capture dependencies before the first async gap. A one-shot read of
+      // an auto-disposed family may release its Ref while queries are pending.
+      final recordsRepository = ref.read(recordsRepositoryProvider);
+      final todosRepository = ref.read(todosRepositoryProvider);
+      final trackerLogsRepository = ref.read(trackerLogsRepositoryProvider);
+      final focusSessionsRepository = ref.read(focusSessionsRepositoryProvider);
+      final expensesRepository = ref.read(expensesRepositoryProvider);
+      final bodyLogsRepository = ref.read(bodyLogsRepositoryProvider);
+      final dailyReviewsRepository = ref.read(dailyReviewsRepositoryProvider);
 
-      final records = await ref.read(recordsRepositoryProvider).findByDate(day);
-      final todos = await ref.read(todosRepositoryProvider).findByDate(day);
-      final trackerLogs = await ref
-          .read(trackerLogsRepositoryProvider)
-          .findByDate(day);
-      final focusMinutes = await ref
-          .read(focusSessionsRepositoryProvider)
-          .sumMinutesByDate(day);
-      final expenses = await ref
-          .read(expensesRepositoryProvider)
-          .findByDate(day);
-      final expenseTotal = await ref
-          .read(expensesRepositoryProvider)
-          .sumAmountByDate(day);
-      final monthExpenseTotal = await ref
-          .read(expensesRepositoryProvider)
-          .sumAmountByMonth(day);
-      final bodyLogs = await ref
-          .read(bodyLogsRepositoryProvider)
-          .findByDate(day);
-
-      final review = await ref
-          .read(dailyReviewsRepositoryProvider)
-          .findByDate(dateStr);
+      final records = await recordsRepository.findByDate(day);
+      final todos = await todosRepository.findByDate(day);
+      final trackerLogs = await trackerLogsRepository.findByDate(day);
+      final focusMinutes = await focusSessionsRepository.sumMinutesByDate(day);
+      final expenses = await expensesRepository.findByDate(day);
+      final expenseTotal = await expensesRepository.sumAmountByDate(day);
+      final monthExpenseTotal = await expensesRepository.sumAmountByMonth(day);
+      final bodyLogs = await bodyLogsRepository.findByDate(day);
+      final review = await dailyReviewsRepository.findByDate(dateStr);
 
       final tagCounts = <String, int>{};
       for (final r in records) {
@@ -167,8 +177,12 @@ final dashboardSummaryForDateProvider =
       );
     });
 
-final dashboardSummaryProvider = FutureProvider<DashboardSummary>((ref) {
-  return ref.watch(dashboardSummaryForDateProvider(DateTime.now()).future);
+final dashboardSummaryProvider = FutureProvider.autoDispose<DashboardSummary>((
+  ref,
+) {
+  return ref.watch(
+    dashboardSummaryForDateProvider(dateKey(DateTime.now())).future,
+  );
 });
 
 String dashboardNarrativeDayLabel(DateTime date, {DateTime? today}) {
@@ -274,13 +288,24 @@ List<String> _parseTags(String raw) {
   }
 }
 
-final dashboardReviewForDateProvider =
-    FutureProvider.family<Map<String, Object?>?, DateTime>((ref, date) async {
-      ref.watch(dataVersionProvider);
-      final day = DateTime(date.year, date.month, date.day);
+final dashboardReviewForDateProvider = FutureProvider.autoDispose
+    .family<Map<String, Object?>?, String>((ref, dateValue) async {
+      ref.watch(dataDomainVersionProvider(DataDomain.reviews));
+      final day = _dayFromDateKey(dateValue);
       return ref.read(dailyReviewsRepositoryProvider).findByDate(dateKey(day));
     });
 
-final dashboardReviewProvider = FutureProvider<Map<String, Object?>?>((ref) {
-  return ref.watch(dashboardReviewForDateProvider(DateTime.now()).future);
-});
+final dashboardReviewProvider =
+    FutureProvider.autoDispose<Map<String, Object?>?>((ref) {
+      return ref.watch(
+        dashboardReviewForDateProvider(dateKey(DateTime.now())).future,
+      );
+    });
+
+DateTime _dayFromDateKey(String value) {
+  final parsed = DateTime.tryParse(value);
+  if (parsed == null) {
+    throw ArgumentError.value(value, 'value', 'Expected a yyyy-MM-dd date');
+  }
+  return DateTime(parsed.year, parsed.month, parsed.day);
+}

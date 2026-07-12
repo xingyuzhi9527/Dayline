@@ -8,6 +8,7 @@ import '../database/repositories.dart';
 import '../database/repository_providers.dart';
 import '../markdown/markdown_directory_service.dart';
 import '../markdown/markdown_filename.dart';
+import '../storage/recoverable_local_file_writer.dart';
 
 final photoMomentServiceProvider = Provider<PhotoMomentService>((ref) {
   final settings = ref.watch(appSettingsRepositoryProvider);
@@ -31,6 +32,7 @@ class PhotoMomentService {
   final RecordsRepository _recordsRepository;
   final MediaAttachmentsRepository _mediaAttachmentsRepository;
   final MarkdownDirectoryService _directoryService;
+  static const _localFileWriter = RecoverableLocalFileWriter();
 
   Future<int> createFromCameraCapture({
     required String sourceImagePath,
@@ -118,6 +120,7 @@ class PhotoMomentService {
     double? expenseAmount,
     List<int> expenseIds = const [],
     DateTime? createdAt,
+    String? operationId,
   }) async {
     final writtenAt = createdAt ?? DateTime.now();
     final cleanedName = expenseName.trim().isEmpty ? '消费' : expenseName.trim();
@@ -128,21 +131,24 @@ class PhotoMomentService {
       sourceImagePath,
       writtenAt,
       filenameLabel: filenameLabel,
+      operationId: operationId,
     );
 
-    final recordId = await _recordsRepository.create(
-      date: writtenAt,
-      type: 'moment_photo',
-      content: '消费凭证：$cleanedName',
-      tags: const ['消费', '报销'],
-      metadata: {
-        'source': 'expense_receipt',
-        if (expenseIds.isNotEmpty) 'linkedExpenseIds': expenseIds,
-      },
-      createdAt: writtenAt,
-    );
-
+    int? recordId;
     try {
+      recordId = await _recordsRepository.create(
+        date: writtenAt,
+        type: 'moment_photo',
+        content: '消费凭证：$cleanedName',
+        tags: const ['消费', '报销'],
+        metadata: {
+          'source': 'expense_receipt',
+          if (expenseIds.isNotEmpty) 'linkedExpenseIds': expenseIds,
+          if (operationId != null && operationId.trim().isNotEmpty)
+            'writeOperationId': operationId,
+        },
+        createdAt: writtenAt,
+      );
       await _mediaAttachmentsRepository.create(
         recordId: recordId,
         mediaType: 'image',
@@ -152,7 +158,10 @@ class PhotoMomentService {
         createdAt: writtenAt,
       );
     } catch (_) {
-      await _recordsRepository.permanentDelete(recordId);
+      if (recordId != null) {
+        await _recordsRepository.permanentDelete(recordId);
+      }
+      await _deleteFileIfExists(storedPath);
       rethrow;
     }
     return recordId;
@@ -215,7 +224,10 @@ class PhotoMomentService {
         : _buildNamedPhotoFilename(filenameLabel, writtenAt, safeExtension);
     final targetPath = p.join(photoDir, filename);
 
-    await sourceFile.copy(targetPath);
+    await _localFileWriter.copyFile(
+      sourcePath: sourceFile.path,
+      targetPath: targetPath,
+    );
     return targetPath;
   }
 
@@ -223,6 +235,7 @@ class PhotoMomentService {
     String sourceImagePath,
     DateTime writtenAt, {
     String? filenameLabel,
+    String? operationId,
   }) async {
     final sourceFile = File(sourceImagePath);
     if (!await sourceFile.exists()) {
@@ -236,10 +249,21 @@ class PhotoMomentService {
     final safeExtension = extension.isEmpty ? '.jpg' : extension;
     final filename = filenameLabel == null || filenameLabel.trim().isEmpty
         ? _buildPhotoFilename(writtenAt, safeExtension)
-        : _buildNamedPhotoFilename(filenameLabel, writtenAt, safeExtension);
-    final targetPath = p.join(receiptDir, filename);
+        : _buildNamedPhotoFilename(
+            filenameLabel,
+            writtenAt,
+            safeExtension,
+            uniqueSuffix: operationId,
+          );
+    final candidatePath = p.join(receiptDir, filename);
+    final targetPath = operationId == null || operationId.trim().isEmpty
+        ? await _availableTargetPath(candidatePath)
+        : candidatePath;
 
-    await sourceFile.copy(targetPath);
+    await _localFileWriter.copyFile(
+      sourcePath: sourceFile.path,
+      targetPath: targetPath,
+    );
     return targetPath;
   }
 
@@ -270,7 +294,10 @@ class PhotoMomentService {
 
       final basename = _uniqueBasename(p.basename(sourceImagePath), usedNames);
       final targetPath = p.join(targetDir.path, basename);
-      await sourceFile.copy(targetPath);
+      await _localFileWriter.copyFile(
+        sourcePath: sourceFile.path,
+        targetPath: targetPath,
+      );
       storedPaths.add(targetPath);
     }
     return storedPaths;
@@ -294,8 +321,9 @@ class PhotoMomentService {
   String _buildNamedPhotoFilename(
     String label,
     DateTime writtenAt,
-    String extension,
-  ) {
+    String extension, {
+    String? uniqueSuffix,
+  }) {
     final safeName = MarkdownFilename.sanitize(
       label,
     ).replaceAll(RegExp(r'\s+'), '_').trim();
@@ -310,7 +338,30 @@ class PhotoMomentService {
       writtenAt.second.toString().padLeft(2, '0'),
     ].join('');
     final name = safeName.isEmpty ? '消费' : safeName;
-    return '${name}_${date}_$time$extension';
+    final suffix = _safeFilenameSuffix(uniqueSuffix);
+    return '${name}_${date}_$time${suffix == null ? '' : '_$suffix'}$extension';
+  }
+
+  String? _safeFilenameSuffix(String? value) {
+    final sanitized = value?.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+    if (sanitized == null || sanitized.isEmpty) return null;
+    return sanitized.length <= 16
+        ? sanitized
+        : sanitized.substring(sanitized.length - 16);
+  }
+
+  Future<String> _availableTargetPath(String candidatePath) async {
+    if (!await File(candidatePath).exists()) return candidatePath;
+
+    final extension = p.extension(candidatePath);
+    final stem = p.basenameWithoutExtension(candidatePath);
+    final parent = p.dirname(candidatePath);
+    var index = 2;
+    while (true) {
+      final path = p.join(parent, '$stem-$index$extension');
+      if (!await File(path).exists()) return path;
+      index += 1;
+    }
   }
 
   String _uniqueBasename(String basename, Set<String> usedNames) {

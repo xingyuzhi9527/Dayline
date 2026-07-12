@@ -45,7 +45,7 @@ class MonthlyExpenseSummary {
 
 final monthlyExpenseSummaryProvider =
     FutureProvider.family<MonthlyExpenseSummary, DateTime>((ref, date) async {
-      ref.watch(dataVersionProvider);
+      ref.watch(dataDomainVersionProvider(DataDomain.expenses));
       final month = DateTime(date.year, date.month);
       final repo = ref.read(expensesRepositoryProvider);
       final expenses = await repo.findByMonth(month);

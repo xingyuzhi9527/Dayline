@@ -27,6 +27,36 @@ void main() {
     expect(cardShape.borderRadius, BorderRadius.circular(20));
   });
 
+  test('dark component colors come from the dark color scheme', () {
+    final theme = AppTheme.dark();
+    final colors = theme.colorScheme;
+    final cardShape = theme.cardTheme.shape as RoundedRectangleBorder;
+    final enabledInputBorder =
+        theme.inputDecorationTheme.enabledBorder as OutlineInputBorder;
+
+    expect(
+      theme.navigationBarTheme.backgroundColor,
+      colors.surface.withAlpha(242),
+    );
+    expect(theme.cardTheme.color, colors.surface);
+    expect(cardShape.side.color, colors.outlineVariant);
+    expect(enabledInputBorder.borderSide.color, colors.outlineVariant);
+    expect(
+      theme.filledButtonTheme.style?.backgroundColor?.resolve({}),
+      colors.primary,
+    );
+    expect(
+      theme.filledButtonTheme.style?.foregroundColor?.resolve({}),
+      colors.onPrimary,
+    );
+    expect(_contrastRatio(colors.secondary, colors.surface), greaterThan(4.5));
+    expect(_contrastRatio(colors.tertiary, colors.surface), greaterThan(4.5));
+    expect(
+      _contrastRatio(colors.onSecondaryContainer, colors.secondaryContainer),
+      greaterThan(4.5),
+    );
+  });
+
   test('primary navigation follows the app tab order', () {
     expect(AppRoute.values.map((route) => route.label), ['线', '记', '项', '盘']);
   });
@@ -111,6 +141,15 @@ void main() {
     // Timeline tab should be accessible
     expect(find.text('线'), findsOneWidget);
   });
+}
+
+double _contrastRatio(Color foreground, Color background) {
+  final lighter = foreground.computeLuminance() > background.computeLuminance()
+      ? foreground
+      : background;
+  final darker = identical(lighter, foreground) ? background : foreground;
+  return (lighter.computeLuminance() + 0.05) /
+      (darker.computeLuminance() + 0.05);
 }
 
 Widget _testApp({LocalDatabase? database, DashboardSummary? dashboardSummary}) {

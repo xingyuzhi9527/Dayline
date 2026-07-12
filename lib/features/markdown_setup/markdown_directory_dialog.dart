@@ -35,6 +35,7 @@ class _MarkdownDirectoryDialogState extends State<_MarkdownDirectoryDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final storageService = MarkdownStorageService(widget.dirService);
 
     return AlertDialog(
@@ -44,12 +45,12 @@ class _MarkdownDirectoryDialogState extends State<_MarkdownDirectoryDialog> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: AppColors.primary.withAlpha(25),
+              color: colors.primary.withAlpha(25),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.folder_special_rounded,
-              color: AppColors.primary,
+              color: colors.primary,
               size: 22,
             ),
           ),
@@ -58,7 +59,7 @@ class _MarkdownDirectoryDialogState extends State<_MarkdownDirectoryDialog> {
             child: Text(
               '设置 Liflow 笔记库',
               style: theme.textTheme.titleMedium?.copyWith(
-                color: AppColors.primary,
+                color: colors.primary,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -78,7 +79,7 @@ class _MarkdownDirectoryDialogState extends State<_MarkdownDirectoryDialog> {
               'Liflow/projects/项目-ID/notes/时间_标题.md\n'
               'Liflow/documents/导入的文档',
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: AppColors.ink,
+                color: colors.onSurface,
                 height: 1.55,
               ),
             ),
@@ -104,7 +105,7 @@ class _MarkdownDirectoryDialogState extends State<_MarkdownDirectoryDialog> {
                           ? '请在系统选择器里选中已有 Liflow 文件夹，或新建一个 Liflow 文件夹。选中后，应用会获得这个文件夹的读写授权。'
                           : '也可以先使用默认 Liflow 文件夹，之后在复盘页里重新设置存储位置。',
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppColors.ink,
+                        color: colors.onSurface,
                         height: 1.45,
                       ),
                     ),

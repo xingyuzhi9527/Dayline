@@ -44,6 +44,19 @@ String _formatTime(int ms) {
 bool _isSameDay(DateTime a, DateTime b) =>
     a.year == b.year && a.month == b.month && a.day == b.day;
 
+Set<DataDomain> _domainsForTimelineSource(TimelineEventSource source) =>
+    switch (source) {
+      TimelineEventSource.record => {DataDomain.records},
+      TimelineEventSource.todo => {DataDomain.todos},
+      TimelineEventSource.trackerLog => {
+        DataDomain.trackerLogs,
+        DataDomain.trackers,
+      },
+      TimelineEventSource.focusSession => {DataDomain.focus},
+      TimelineEventSource.expense => {DataDomain.expenses},
+      TimelineEventSource.bodyLog => {DataDomain.bodyLogs},
+    };
+
 class TimelineDateBar extends ConsumerWidget {
   const TimelineDateBar({super.key});
 
@@ -246,10 +259,10 @@ class _TimelineTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final color = _colorForType(event.type);
+    final theme = Theme.of(context);
+    final color = _colorForType(event.type, theme.colorScheme);
     final isRight =
         event.source == TimelineEventSource.todo || event.type == 'long_note';
-    final theme = Theme.of(context);
     final openDetails = event.type == 'long_note'
         ? () => _openReader(context, ref)
         : event.type == 'moment_photo'
@@ -466,7 +479,9 @@ class _TimelineTile extends ConsumerWidget {
       date: _dateFromKey(event.date),
       generatedAt: DateTime.now(),
     );
-    ref.read(dataVersionProvider.notifier).increment();
+    ref
+        .read(dataVersionProvider.notifier)
+        .increment(domains: {DataDomain.records, DataDomain.expenses});
     await ensureDailyDraftAfterActivity(ref, _dateFromKey(event.date));
     if (!context.mounted) return false;
     ref.invalidate(timelineEventsProvider);
@@ -499,7 +514,9 @@ class _TimelineTile extends ConsumerWidget {
           metadata: {...metadata, 'linkedTodoId': todoId},
         );
 
-    ref.read(dataVersionProvider.notifier).increment();
+    ref
+        .read(dataVersionProvider.notifier)
+        .increment(domains: {DataDomain.records, DataDomain.todos});
     await ensureDailyDraftAfterActivity(ref, _dateFromKey(event.date));
     if (!context.mounted) return false;
     ref.invalidate(timelineEventsProvider);
@@ -568,6 +585,7 @@ class _TimelineRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return SizedBox(
       width: 30,
       child: Stack(
@@ -581,7 +599,7 @@ class _TimelineRail extends StatelessWidget {
                 margin: const EdgeInsets.only(top: 14),
                 color: isLast
                     ? Colors.transparent
-                    : AppColors.muted.withAlpha(26),
+                    : colors.onSurfaceVariant.withAlpha(26),
               ),
             ),
           ),
@@ -620,6 +638,7 @@ class _TimelineGap extends StatelessWidget {
   Widget build(BuildContext context) {
     final height = _gapHeightForDuration(gap);
     if (height <= 0) return const SizedBox.shrink();
+    final colors = Theme.of(context).colorScheme;
 
     return SizedBox(
       height: height,
@@ -634,7 +653,7 @@ class _TimelineGap extends StatelessWidget {
                 Container(
                   width: 1.4,
                   height: height,
-                  color: AppColors.muted.withAlpha(18),
+                  color: colors.onSurfaceVariant.withAlpha(18),
                 ),
               ],
             ),
@@ -695,9 +714,9 @@ class _TimelineEventCard extends StatelessWidget {
           border: Border.all(
             color: theme.colorScheme.outlineVariant.withAlpha(70),
           ),
-          boxShadow: const [
+          boxShadow: [
             BoxShadow(
-              color: AppColors.softShadow,
+              color: theme.colorScheme.shadow.withAlpha(13),
               blurRadius: 16,
               offset: Offset(0, 8),
             ),
@@ -748,7 +767,7 @@ class _TimelineEventCard extends StatelessWidget {
                             icon: const Icon(Icons.edit_rounded),
                             iconSize: 15,
                             visualDensity: VisualDensity.compact,
-                            color: AppColors.muted,
+                            color: theme.colorScheme.onSurfaceVariant,
                             padding: EdgeInsets.zero,
                           ),
                         ),
@@ -773,12 +792,16 @@ class _TimelineEventCard extends StatelessWidget {
                                 cacheWidth: 720,
                                 errorBuilder: (context, error, stackTrace) {
                                   return Container(
-                                    color: AppColors.canvas,
+                                    color: theme.scaffoldBackgroundColor,
                                     alignment: Alignment.center,
                                     child: Text(
                                       '图片加载失败',
                                       style: theme.textTheme.bodySmall
-                                          ?.copyWith(color: AppColors.muted),
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
                                     ),
                                   );
                                 },
@@ -843,7 +866,7 @@ class _TimelineEventCard extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: AppColors.muted,
+                          color: theme.colorScheme.onSurfaceVariant,
                           fontSize: 12,
                           height: 1.3,
                         ),
@@ -1007,7 +1030,7 @@ class _RecordQuickActions extends StatelessWidget {
           Text(
             '已同步',
             style: theme.textTheme.labelSmall?.copyWith(
-              color: AppColors.muted.withAlpha(160),
+              color: theme.colorScheme.onSurfaceVariant.withAlpha(160),
               fontSize: 10,
             ),
           ),
@@ -1032,15 +1055,16 @@ class _QuickActionChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = onPressed != null;
+    final colors = Theme.of(context).colorScheme;
     return ActionChip(
       avatar: Icon(
         icon,
         size: 14,
-        color: enabled ? color : AppColors.muted.withAlpha(150),
+        color: enabled ? color : colors.onSurfaceVariant.withAlpha(150),
       ),
       label: Text(label),
       labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-        color: enabled ? color : AppColors.muted,
+        color: enabled ? color : colors.onSurfaceVariant,
         fontWeight: FontWeight.w700,
         fontSize: 10,
       ),
@@ -1400,7 +1424,9 @@ class _TimelineEventEditSheetState
         decoration: InputDecoration(labelText: label),
         child: Text(
           value,
-          style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ),
     );
@@ -1438,7 +1464,9 @@ class _TimelineEventEditSheetState
         case TimelineEventSource.bodyLog:
           throw StateError('This event type cannot be deleted here.');
       }
-      ref.read(dataVersionProvider.notifier).increment();
+      ref
+          .read(dataVersionProvider.notifier)
+          .increment(domains: _domainsForTimelineSource(widget.event.source));
       await ensureDailyDraftAfterActivity(ref, _dateFromKey(widget.event.date));
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -1480,6 +1508,7 @@ class _TimelineEventEditSheetState
     });
 
     try {
+      final domains = _domainsForTimelineSource(widget.event.source);
       switch (widget.event.source) {
         case TimelineEventSource.record:
           final content = _requiredText(_contentController, '内容');
@@ -1488,6 +1517,7 @@ class _TimelineEventEditSheetState
           var metadata = _decodeMetadata(widget.event.data['metadata']);
           final linkedExpenseId = _metadataInt(metadata['linkedExpenseId']);
           if (linkedExpenseId != null) {
+            domains.add(DataDomain.expenses);
             final amount =
                 (LuiLiteParser.parse(content).metadata['amount'] as num?)
                     ?.toDouble();
@@ -1504,6 +1534,9 @@ class _TimelineEventEditSheetState
                 metadata: metadata,
               );
           await _syncLinkedRecordTargets(content, tags, metadata);
+          if (_metadataInt(metadata['linkedTodoId']) != null) {
+            domains.add(DataDomain.todos);
+          }
 
         case TimelineEventSource.todo:
           final title = _requiredText(_contentController, '标题');
@@ -1586,7 +1619,7 @@ class _TimelineEventEditSheetState
               );
       }
 
-      ref.read(dataVersionProvider.notifier).increment();
+      ref.read(dataVersionProvider.notifier).increment(domains: domains);
       await ensureDailyDraftAfterActivity(ref, _dateFromKey(widget.event.date));
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -1730,13 +1763,13 @@ class _EmptyTimeline extends StatelessWidget {
             Icon(
               Icons.event_note_rounded,
               size: 64,
-              color: AppColors.muted.withAlpha(85),
+              color: theme.colorScheme.onSurfaceVariant.withAlpha(85),
             ),
             const SizedBox(height: AppSpacing.md),
             Text(
               isToday ? '今天还没有记录' : '这一天还没有记录',
               style: theme.textTheme.titleMedium?.copyWith(
-                color: AppColors.muted,
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: AppSpacing.xs),
@@ -1873,8 +1906,8 @@ String _labelForType(String type) => switch (type) {
   _ => type,
 };
 
-Color _colorForType(String type) => switch (type) {
-  'memo' => AppColors.primary,
+Color _colorForType(String type, ColorScheme colors) => switch (type) {
+  'memo' => colors.primary,
   'long_note' => const Color(0xFF2E7D32),
   'todo' => const Color(0xFF4A90D9),
   'tracker' => const Color(0xFF7CB342),
@@ -1885,7 +1918,7 @@ Color _colorForType(String type) => switch (type) {
   'mood' => const Color(0xFFD5952F),
   'moment_photo' => const Color(0xFF2F7D6A),
   'voice_memo' => const Color(0xFF5B7C99),
-  _ => AppColors.muted,
+  _ => colors.onSurfaceVariant,
 };
 
 class _TrashButton extends ConsumerWidget {
@@ -1908,7 +1941,7 @@ class _TrashButton extends ConsumerWidget {
             size: 22,
             color: count > 0
                 ? AppColors.accent.withAlpha(180)
-                : AppColors.muted.withAlpha(120),
+                : Theme.of(context).colorScheme.onSurfaceVariant.withAlpha(120),
           ),
           if (count > 0)
             Positioned(
@@ -1943,12 +1976,14 @@ class _TrashButton extends ConsumerWidget {
         return deletedAsync.when(
           data: (deleted) {
             if (deleted.isEmpty) {
-              return const SizedBox(
+              return SizedBox(
                 height: 120,
                 child: Center(
                   child: Text(
                     '回收站是空的',
-                    style: TextStyle(color: AppColors.muted),
+                    style: TextStyle(
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               );
@@ -2020,7 +2055,7 @@ class _TrashButton extends ConsumerWidget {
                                   ref.invalidate(timelineEventsProvider);
                                   ref
                                       .read(dataVersionProvider.notifier)
-                                      .increment();
+                                      .increment(domains: {DataDomain.records});
                                 },
                               ),
                               IconButton(
@@ -2048,7 +2083,12 @@ class _TrashButton extends ConsumerWidget {
                                   ref.invalidate(deletedRecordsProvider);
                                   ref
                                       .read(dataVersionProvider.notifier)
-                                      .increment();
+                                      .increment(
+                                        domains: {
+                                          DataDomain.records,
+                                          DataDomain.media,
+                                        },
+                                      );
                                 },
                               ),
                             ],

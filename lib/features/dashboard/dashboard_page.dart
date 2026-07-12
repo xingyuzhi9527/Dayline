@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import 'dashboard_providers.dart';
 import '../documents/document_library_page.dart';
@@ -27,6 +26,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final summaryAsync = ref.watch(dashboardSummaryProvider);
     final freshSummary = summaryAsync.valueOrNull;
     if (freshSummary != null) {
@@ -58,7 +58,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 error: (e, _) => Center(
                   child: Text(
                     '加载失败：$e',
-                    style: TextStyle(color: AppColors.muted),
+                    style: TextStyle(color: colors.onSurfaceVariant),
                   ),
                 ),
               ),
@@ -82,23 +82,24 @@ class _LibraryShortcut extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return SafeArea(
       child: Tooltip(
         message: '资料库',
         child: Material(
-          color: AppColors.surface.withAlpha(235),
+          color: colors.surface.withAlpha(235),
           shape: const CircleBorder(),
           elevation: 2,
-          shadowColor: AppColors.softShadow,
+          shadowColor: colors.shadow.withAlpha(20),
           child: InkWell(
             customBorder: const CircleBorder(),
             onTap: onTap,
-            child: const SizedBox(
+            child: SizedBox(
               width: 44,
               height: 44,
               child: Icon(
                 Icons.folder_special_rounded,
-                color: AppColors.primary,
+                color: colors.primary,
                 size: 22,
               ),
             ),
@@ -125,6 +126,7 @@ class _CollapsedView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final now = DateTime.now();
     final isEvening = now.hour >= 18;
 
@@ -158,7 +160,7 @@ class _CollapsedView extends StatelessWidget {
               statusText,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyLarge?.copyWith(
-                color: AppColors.ink,
+                color: colors.onSurface,
                 height: 1.6,
               ),
             ),
@@ -170,7 +172,7 @@ class _CollapsedView extends StatelessWidget {
                 child: Icon(
                   Icons.check_circle_rounded,
                   size: 18,
-                  color: AppColors.tracker.withAlpha(180),
+                  color: colors.tertiary.withAlpha(210),
                 ),
               ),
           ],
@@ -189,6 +191,7 @@ class _ReviewRhythmDots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final activeBuckets = <int>{};
     for (final timestamp in timestamps) {
       final time = DateTime.fromMillisecondsSinceEpoch(timestamp);
@@ -212,8 +215,8 @@ class _ReviewRhythmDots extends StatelessWidget {
               decoration: BoxDecoration(
                 color:
                     (activeBuckets.contains(i)
-                            ? AppColors.primary
-                            : AppColors.muted)
+                            ? colors.primary
+                            : colors.onSurfaceVariant)
                         .withAlpha(activeBuckets.contains(i) ? 150 : 80),
                 borderRadius: BorderRadius.circular(999),
               ),
@@ -231,6 +234,7 @@ class _OpenReviewPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Semantics(
       button: true,
       label: '打开复盘',
@@ -244,22 +248,22 @@ class _OpenReviewPill extends StatelessWidget {
             width: 120,
             height: 48,
             decoration: BoxDecoration(
-              color: AppColors.surface,
+              color: colors.surface,
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: AppColors.border.withAlpha(180)),
+              border: Border.all(color: colors.outlineVariant.withAlpha(180)),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.ink.withAlpha(12),
+                  color: colors.shadow.withAlpha(18),
                   blurRadius: 22,
                   offset: const Offset(0, 12),
                 ),
               ],
             ),
-            child: const Center(
+            child: Center(
               child: Icon(
                 Icons.visibility_rounded,
                 size: 26,
-                color: AppColors.primary,
+                color: colors.primary,
               ),
             ),
           ),

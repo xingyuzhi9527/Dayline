@@ -12,6 +12,17 @@ val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
+val releaseSigningPropertyNames = listOf(
+    "keyAlias",
+    "keyPassword",
+    "storeFile",
+    "storePassword",
+)
+val missingReleaseSigningProperties = releaseSigningPropertyNames.filter {
+    keystoreProperties.getProperty(it).isNullOrBlank()
+}
+val hasReleaseSigning =
+    keystorePropertiesFile.exists() && missingReleaseSigningProperties.isEmpty()
 
 android {
     namespace = "com.example.liflow_app"
@@ -39,24 +50,38 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            if (keystorePropertiesFile.exists()) {
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["keyPassword"] as String
-                storeFile = file(keystoreProperties["storeFile"] as String)
-                storePassword = keystoreProperties["storePassword"] as String
+        if (hasReleaseSigning) {
+            create("release") {
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
             }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
+    }
+}
+
+gradle.taskGraph.whenReady {
+    val releaseRequested = allTasks.any {
+        it.name.contains("release", ignoreCase = true)
+    }
+    if (releaseRequested && !hasReleaseSigning) {
+        val detail = if (!keystorePropertiesFile.exists()) {
+            "android/key.properties was not found"
+        } else {
+            "missing properties: ${missingReleaseSigningProperties.joinToString()}"
+        }
+        throw GradleException(
+            "Release build requires android/key.properties and a production keystore ($detail).",
+        )
     }
 }
 

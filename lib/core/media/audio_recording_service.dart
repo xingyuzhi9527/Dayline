@@ -8,6 +8,7 @@ import '../database/repository_providers.dart';
 import '../markdown/markdown_directory_service.dart';
 import '../markdown/markdown_filename.dart';
 import '../markdown/markdown_storage_service.dart';
+import '../storage/recoverable_local_file_writer.dart';
 import '../stt/stt_engine.dart';
 
 final audioRecordingServiceProvider = Provider<AudioRecordingService>((ref) {
@@ -37,6 +38,7 @@ class AudioRecordingService {
   final MediaAttachmentsRepository _mediaAttachmentsRepository;
   final MarkdownDirectoryService _directoryService;
   final MarkdownStorageService _storageService;
+  static const _localFileWriter = RecoverableLocalFileWriter();
 
   Future<int> createVoiceMemo({
     required SttRecordingDraft draft,
@@ -44,6 +46,7 @@ class AudioRecordingService {
     List<String> tags = const [],
     Map<String, Object?> metadata = const {},
     DateTime? createdAt,
+    bool deleteDraftAfterAttach = true,
   }) async {
     final writtenAt = createdAt ?? DateTime.now();
     final recordId = await _recordsRepository.create(
@@ -60,6 +63,7 @@ class AudioRecordingService {
         recordId: recordId,
         draft: draft,
         writtenAt: writtenAt,
+        deleteDraftAfterAttach: deleteDraftAfterAttach,
       );
     } catch (_) {
       await _recordsRepository.permanentDelete(recordId);
@@ -73,6 +77,7 @@ class AudioRecordingService {
     required int recordId,
     required SttRecordingDraft draft,
     DateTime? writtenAt,
+    bool deleteDraftAfterAttach = true,
   }) async {
     final storedPath = await _copyAudioToLibrary(
       draft.path,
@@ -89,7 +94,9 @@ class AudioRecordingService {
         sortOrder: 0,
         createdAt: writtenAt,
       );
-      await deleteDraftIfExists(draft);
+      if (deleteDraftAfterAttach) {
+        await deleteDraftIfExists(draft);
+      }
       return attachmentId;
     } catch (_) {
       await _deleteFileIfExists(storedPath);
@@ -130,7 +137,10 @@ class AudioRecordingService {
     final filename = _buildAudioFilename(writtenAt, safeExtension);
     final targetPath = p.join(audioDir, filename);
 
-    await sourceFile.copy(targetPath);
+    await _localFileWriter.copyFile(
+      sourcePath: sourceFile.path,
+      targetPath: targetPath,
+    );
     await _copyAudioToVisibleDocuments(targetPath, writtenAt);
     return targetPath;
   }

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/export/export_providers.dart';
-import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../review_providers.dart';
 
@@ -128,11 +127,12 @@ class _SummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Card(
       child: Container(
-        decoration: const BoxDecoration(
-          border: Border(left: BorderSide(color: AppColors.primary, width: 4)),
+        decoration: BoxDecoration(
+          border: Border(left: BorderSide(color: colors.primary, width: 4)),
           borderRadius: BorderRadius.all(Radius.circular(AppSpacing.radiusLg)),
         ),
         padding: const EdgeInsets.all(AppSpacing.md),
@@ -143,13 +143,10 @@ class _SummaryCard extends StatelessWidget {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: AppColors.primary.withAlpha(18),
+                color: colors.primary.withAlpha(18),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.auto_awesome_rounded,
-                color: AppColors.primary,
-              ),
+              child: Icon(Icons.auto_awesome_rounded, color: colors.primary),
             ),
             const SizedBox(width: AppSpacing.sm),
             Expanded(
@@ -162,7 +159,7 @@ class _SummaryCard extends StatelessWidget {
                     summary.summaryText,
                     style: theme.textTheme.bodyLarge?.copyWith(
                       height: 1.6,
-                      color: AppColors.muted,
+                      color: colors.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -238,6 +235,7 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Card(
       child: Padding(
@@ -255,7 +253,7 @@ class _StatCard extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                Icon(stat.icon, size: 18, color: AppColors.muted),
+                Icon(stat.icon, size: 18, color: colors.onSurfaceVariant),
               ],
             ),
             Column(
@@ -281,6 +279,7 @@ class _ActivityPulseCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final heights = [
       0.2,
       0.1,
@@ -316,7 +315,7 @@ class _ActivityPulseCard extends StatelessWidget {
                         alignment: Alignment.bottomCenter,
                         child: Container(
                           decoration: BoxDecoration(
-                            color: AppColors.primary.withAlpha(
+                            color: colors.primary.withAlpha(
                               (35 + h * 160).round(),
                             ),
                             borderRadius: const BorderRadius.vertical(
@@ -359,6 +358,7 @@ class _TopTagsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Card(
       child: Padding(
@@ -378,7 +378,7 @@ class _TopTagsCard extends StatelessWidget {
                       label: Text('#$tag'),
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
-                      backgroundColor: AppColors.primary.withAlpha(15),
+                      backgroundColor: colors.primary.withAlpha(15),
                     ),
                   )
                   .toList(),
@@ -466,6 +466,7 @@ class _EmptyReview extends StatelessWidget {
   Widget build(BuildContext context) {
     final isToday = _isSameDay(date, DateTime.now());
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Center(
       child: Padding(
@@ -476,13 +477,13 @@ class _EmptyReview extends StatelessWidget {
             Icon(
               Icons.assessment_rounded,
               size: 64,
-              color: AppColors.muted.withAlpha(85),
+              color: colors.onSurfaceVariant.withAlpha(85),
             ),
             const SizedBox(height: AppSpacing.md),
             Text(
               isToday ? '今天还没有数据' : '这一天还没有数据',
               style: theme.textTheme.titleMedium?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: AppSpacing.xs),

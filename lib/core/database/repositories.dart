@@ -19,12 +19,12 @@ abstract class Repository {
   final String tableName;
 
   Future<int> insert(DatabaseRow values) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.insert(tableName, values);
   }
 
   Future<DatabaseRow?> findById(int id) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final rows = await db.query(
       tableName,
       where: 'id = ?',
@@ -35,17 +35,17 @@ abstract class Repository {
   }
 
   Future<List<DatabaseRow>> findAll() async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(tableName, orderBy: 'id ASC');
   }
 
   Future<int> update(int id, DatabaseRow values) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.update(tableName, values, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<int> delete(int id) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.delete(tableName, where: 'id = ?', whereArgs: [id]);
   }
 
@@ -85,7 +85,7 @@ class RecordsRepository extends Repository {
   }
 
   Future<List<DatabaseRow>> findByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(
       tableName,
       where: 'date = ? AND is_deleted = 0',
@@ -95,7 +95,7 @@ class RecordsRepository extends Repository {
   }
 
   Future<int> countByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final rows = await db.rawQuery(
       'SELECT COUNT(*) AS cnt FROM records WHERE date = ? AND is_deleted = 0',
       [dateKey(date)],
@@ -118,7 +118,7 @@ class RecordsRepository extends Repository {
   }
 
   Future<List<DatabaseRow>> findDeleted({int limit = 50}) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(
       tableName,
       where: 'is_deleted = 1',
@@ -128,7 +128,7 @@ class RecordsRepository extends Repository {
   }
 
   Future<int> permanentDelete(int id) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.delete(tableName, where: 'id = ?', whereArgs: [id]);
   }
 
@@ -150,7 +150,7 @@ class RecordsRepository extends Repository {
   }
 
   Future<List<DatabaseRow>> findRecent({int limit = 3}) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(
       tableName,
       orderBy: 'created_at DESC, id DESC',
@@ -159,7 +159,7 @@ class RecordsRepository extends Repository {
   }
 
   Future<List<DatabaseRow>> findDocumentLibraryCandidates() async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(
       tableName,
       columns: const [
@@ -219,7 +219,7 @@ class MediaAttachmentsRepository extends Repository {
   }
 
   Future<List<DatabaseRow>> findByRecordId(int recordId) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(
       tableName,
       where: 'record_id = ?',
@@ -233,7 +233,7 @@ class MediaAttachmentsRepository extends Repository {
   ) async {
     if (recordIds.isEmpty) return const {};
 
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final placeholders = List.filled(recordIds.length, '?').join(', ');
     final rows = await db.query(
       tableName,
@@ -276,7 +276,7 @@ class TodosRepository extends Repository {
   }
 
   Future<List<DatabaseRow>> findByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(
       tableName,
       where: 'date = ?',
@@ -289,7 +289,7 @@ class TodosRepository extends Repository {
     required DateTime anchorDate,
     int futureDays = 7,
   }) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final today = dateKey(anchorDate);
     final future = dateKey(anchorDate.add(Duration(days: futureDays)));
     return db.query(
@@ -306,7 +306,7 @@ OR (is_completed = 0 AND date > ? AND date <= ?)
   }
 
   Future<int> countByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final rows = await db.rawQuery(
       'SELECT COUNT(*) AS cnt FROM todos WHERE date = ?',
       [dateKey(date)],
@@ -315,7 +315,7 @@ OR (is_completed = 0 AND date > ? AND date <= ?)
   }
 
   Future<int> countCompletedByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final rows = await db.rawQuery(
       'SELECT COUNT(*) AS cnt FROM todos WHERE date = ? AND is_completed = 1',
       [dateKey(date)],
@@ -395,7 +395,7 @@ class TrackersRepository extends Repository {
   }
 
   Future<List<DatabaseRow>> findActive() async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(
       tableName,
       where: 'is_archived = 0',
@@ -426,7 +426,7 @@ class TrackerLogsRepository extends Repository {
   }
 
   Future<List<DatabaseRow>> findByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(
       tableName,
       where: 'date = ?',
@@ -436,7 +436,7 @@ class TrackerLogsRepository extends Repository {
   }
 
   Future<int> countByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final rows = await db.rawQuery(
       'SELECT COUNT(*) AS cnt FROM tracker_logs WHERE date = ?',
       [dateKey(date)],
@@ -482,7 +482,7 @@ class FocusSessionsRepository extends Repository {
   }
 
   Future<int> sumMinutesByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final rows = await db.rawQuery(
       '''
 SELECT COALESCE(SUM(duration_minutes), 0) AS total
@@ -495,7 +495,7 @@ WHERE date = ?
   }
 
   Future<List<DatabaseRow>> findByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(
       tableName,
       where: 'date = ?',
@@ -542,7 +542,7 @@ class ExpensesRepository extends Repository {
   }
 
   Future<double> sumAmountByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final rows = await db.rawQuery(
       '''
 SELECT COALESCE(SUM(amount), 0) AS total
@@ -555,7 +555,7 @@ WHERE date = ?
   }
 
   Future<double> sumAmountByMonth(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final start = DateTime(date.year, date.month);
     final next = DateTime(date.year, date.month + 1);
     final rows = await db.rawQuery(
@@ -570,7 +570,7 @@ WHERE date >= ? AND date < ?
   }
 
   Future<List<DatabaseRow>> findByMonth(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final start = DateTime(date.year, date.month);
     final next = DateTime(date.year, date.month + 1);
     return db.query(
@@ -582,7 +582,7 @@ WHERE date >= ? AND date < ?
   }
 
   Future<Map<String, double>> sumAmountByCategoryForMonth(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final start = DateTime(date.year, date.month);
     final next = DateTime(date.year, date.month + 1);
     final rows = await db.rawQuery(
@@ -602,7 +602,7 @@ ORDER BY total DESC, category ASC
   }
 
   Future<Map<String, double>> sumAmountByDayForMonth(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final start = DateTime(date.year, date.month);
     final next = DateTime(date.year, date.month + 1);
     final rows = await db.rawQuery(
@@ -622,7 +622,7 @@ ORDER BY date ASC
   }
 
   Future<List<DatabaseRow>> findByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(
       tableName,
       where: 'date = ?',
@@ -673,7 +673,7 @@ class BodyLogsRepository extends Repository {
   }
 
   Future<List<DatabaseRow>> findByDate(DateTime date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query(
       tableName,
       where: 'date = ?',
@@ -710,7 +710,7 @@ class AppSettingsRepository {
     required String value,
     DateTime? updatedAt,
   }) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     await db.insert('app_settings', {
       'key': key,
       'value': value,
@@ -719,7 +719,7 @@ class AppSettingsRepository {
   }
 
   Future<DatabaseRow?> findByKey(String key) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final rows = await db.query(
       'app_settings',
       where: 'key = ?',
@@ -730,12 +730,12 @@ class AppSettingsRepository {
   }
 
   Future<List<DatabaseRow>> findAll() async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.query('app_settings', orderBy: 'key ASC');
   }
 
   Future<int> update(String key, String value, {DateTime? updatedAt}) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.update(
       'app_settings',
       {'value': value, 'updated_at': timestamp(updatedAt ?? DateTime.now())},
@@ -745,7 +745,7 @@ class AppSettingsRepository {
   }
 
   Future<int> delete(String key) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     return db.delete('app_settings', where: 'key = ?', whereArgs: [key]);
   }
 }
