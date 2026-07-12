@@ -148,20 +148,23 @@ class _ExpandedHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Row(
       children: [
         Text(
           '今日复盘',
           style: theme.textTheme.titleMedium?.copyWith(
-            color: AppColors.primary,
+            color: colors.primary,
             fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(width: AppSpacing.xs),
         Text(
           summary.date,
-          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colors.onSurfaceVariant,
+          ),
         ),
         const SizedBox(width: AppSpacing.sm),
         _CompactStreakBadge(recordCount: summary.recordCount),
@@ -170,13 +173,13 @@ class _ExpandedHeader extends StatelessWidget {
           onPressed: onOpenLibrary,
           icon: const Icon(Icons.folder_special_rounded),
           tooltip: '资料库',
-          color: AppColors.muted,
+          color: colors.onSurfaceVariant,
         ),
         IconButton(
           onPressed: onCollapse,
           icon: const Icon(Icons.close_rounded),
           tooltip: '收起',
-          color: AppColors.muted,
+          color: colors.onSurfaceVariant,
         ),
       ],
     );
@@ -229,6 +232,7 @@ class _EmptyExpanded extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = theme.colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.xl),
@@ -238,20 +242,20 @@ class _EmptyExpanded extends StatelessWidget {
             Icon(
               Icons.auto_awesome_rounded,
               size: 48,
-              color: AppColors.primary.withAlpha(80),
+              color: colors.primary.withAlpha(80),
             ),
             const SizedBox(height: AppSpacing.md),
             Text(
               '今天还没有内容',
               style: theme.textTheme.titleMedium?.copyWith(
-                color: AppColors.primary,
+                color: colors.primary,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
               '先去「记」里留下第一句话。',
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -273,6 +277,7 @@ class _TodayStatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Card(
       child: Padding(
@@ -283,7 +288,7 @@ class _TodayStatusCard extends StatelessWidget {
             Text(
               '今日状态',
               style: theme.textTheme.titleSmall?.copyWith(
-                color: AppColors.primary,
+                color: colors.primary,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -372,6 +377,7 @@ class _StatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(
@@ -379,23 +385,23 @@ class _StatTile extends StatelessWidget {
           horizontal: AppSpacing.sm,
         ),
         decoration: BoxDecoration(
-          color: AppColors.surfaceLow.withAlpha(120),
+          color: colors.surfaceContainerLow.withAlpha(120),
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         ),
         child: Column(
           children: [
-            Icon(icon, size: 18, color: AppColors.primary.withAlpha(180)),
+            Icon(icon, size: 18, color: colors.primary.withAlpha(180)),
             const SizedBox(height: AppSpacing.xxs),
             Text(
               value,
               style: theme.textTheme.labelLarge?.copyWith(
-                color: AppColors.primary,
+                color: colors.primary,
               ),
             ),
             Text(
               label,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
               ),
             ),
           ],
@@ -415,6 +421,7 @@ class _DayRhythmBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     final firstTime = summary.firstActivityTime != null
         ? _fmtMs(summary.firstActivityTime!)
@@ -433,12 +440,12 @@ class _DayRhythmBar extends StatelessWidget {
             Text(
               '今日节奏',
               style: theme.textTheme.titleSmall?.copyWith(
-                color: AppColors.primary,
+                color: colors.primary,
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
-            _buildBar(summary.allTimestamps),
+            _buildBar(summary.allTimestamps, colors),
             const SizedBox(height: AppSpacing.sm),
             Row(
               children: [
@@ -455,7 +462,7 @@ class _DayRhythmBar extends StatelessWidget {
     );
   }
 
-  Widget _buildBar(List<int> timestamps) {
+  Widget _buildBar(List<int> timestamps, ColorScheme colors) {
     final hourCounts = List.filled(24, 0);
     for (final ts in timestamps) {
       final hour = DateTime.fromMillisecondsSinceEpoch(ts).hour;
@@ -476,10 +483,10 @@ class _DayRhythmBar extends StatelessWidget {
               margin: const EdgeInsets.symmetric(horizontal: 1),
               decoration: BoxDecoration(
                 color: count > 0
-                    ? AppColors.primary.withAlpha(
+                    ? colors.primary.withAlpha(
                         (60 + (intensity * 195).round()).clamp(60, 255),
                       )
-                    : AppColors.border.withAlpha(100),
+                    : colors.outlineVariant.withAlpha(100),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -504,16 +511,19 @@ class _RhythmLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           label,
-          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colors.onSurfaceVariant,
+          ),
         ),
         Text(
           value,
-          style: theme.textTheme.labelLarge?.copyWith(color: AppColors.primary),
+          style: theme.textTheme.labelLarge?.copyWith(color: colors.primary),
         ),
       ],
     );
@@ -529,6 +539,7 @@ class _CompositionCapsules extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final entries = summary.categoryCounts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
@@ -536,7 +547,10 @@ class _CompositionCapsules extends StatelessWidget {
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
-          child: Text('暂无分类数据', style: TextStyle(color: AppColors.muted)),
+          child: Text(
+            '暂无分类数据',
+            style: TextStyle(color: colors.onSurfaceVariant),
+          ),
         ),
       );
     }
@@ -553,7 +567,7 @@ class _CompositionCapsules extends StatelessWidget {
                 label: Text('${entry.key} ${entry.value}'),
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 visualDensity: VisualDensity.compact,
-                backgroundColor: AppColors.primary.withAlpha(22),
+                backgroundColor: colors.primary.withAlpha(22),
                 side: BorderSide.none,
               ),
           ],
@@ -573,6 +587,7 @@ class _TodayInsights extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     if (summary.insights.isEmpty) {
       return Card(
@@ -580,7 +595,7 @@ class _TodayInsights extends StatelessWidget {
           padding: const EdgeInsets.all(AppSpacing.md),
           child: Text(
             '多记录几条，就能看到今日洞察。',
-            style: TextStyle(color: AppColors.muted),
+            style: TextStyle(color: colors.onSurfaceVariant),
           ),
         ),
       );
@@ -839,6 +854,7 @@ class _ReviewField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -871,22 +887,22 @@ class _ReviewField extends StatelessWidget {
                 decoration: InputDecoration(
                   hintText: hint,
                   hintStyle: TextStyle(
-                    color: AppColors.muted.withAlpha(140),
+                    color: colors.onSurfaceVariant.withAlpha(140),
                     fontSize: 12,
                   ),
                   isDense: true,
                   contentPadding: const EdgeInsets.all(AppSpacing.xs),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                    borderSide: BorderSide(color: AppColors.border),
+                    borderSide: BorderSide(color: colors.outlineVariant),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                    borderSide: BorderSide(color: AppColors.border),
+                    borderSide: BorderSide(color: colors.outlineVariant),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                    borderSide: const BorderSide(color: AppColors.primary),
+                    borderSide: BorderSide(color: colors.primary),
                   ),
                 ),
               ),
@@ -964,11 +980,12 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final selectedInfo = _infoFor(widget.selectedDate);
     final buttonLabel = _buttonLabel(selectedInfo);
     final pendingDraft = _pendingPastDraft();
     final reviewAsync = ref.watch(
-      dashboardReviewForDateProvider(widget.selectedDate),
+      dashboardReviewForDateProvider(dateKey(widget.selectedDate)),
     );
     final isReviewed = reviewAsync.maybeWhen(
       data: (review) => review != null,
@@ -990,7 +1007,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
                       Text(
                         '日记草稿',
                         style: theme.textTheme.titleSmall?.copyWith(
-                          color: AppColors.primary,
+                          color: colors.primary,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -1046,14 +1063,14 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
                       Icon(
                         _statusIcon(selectedInfo.status),
                         size: 16,
-                        color: AppColors.muted,
+                        color: colors.onSurfaceVariant,
                       ),
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
                           _statusText(selectedInfo.status),
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: AppColors.muted,
+                            color: colors.onSurfaceVariant,
                           ),
                         ),
                       ),
@@ -1067,12 +1084,12 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
                       child: FilledButton.icon(
                         onPressed: () => _handleNoteAction(context),
                         icon: _isGenerating
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 18,
                                 height: 18,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
+                                  color: colors.onPrimary,
                                 ),
                               )
                             : Icon(
@@ -1092,7 +1109,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
               Positioned.fill(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: Colors.black.withAlpha(78),
+                    color: colors.scrim.withAlpha(78),
                     borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                   ),
                 ),
@@ -1199,8 +1216,13 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
 
   Future<String> _exportDashboardMarkdown(DateTime date) async {
     final day = _dateOnly(date);
-    final summary = await ref.read(dashboardSummaryForDateProvider(day).future);
-    final review = await ref.read(dashboardReviewForDateProvider(day).future);
+    final dayKey = dateKey(day);
+    final summary = await ref.read(
+      dashboardSummaryForDateProvider(dayKey).future,
+    );
+    final review = await ref.read(
+      dashboardReviewForDateProvider(dayKey).future,
+    );
     final records = await ref.read(recordsRepositoryProvider).findByDate(day);
     final todos = await ref.read(todosRepositoryProvider).findByDate(day);
     final trackerLogs = await ref
@@ -1702,6 +1724,7 @@ class _NoteHintBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.sm,
@@ -1720,7 +1743,7 @@ class _NoteHintBanner extends StatelessWidget {
             child: Text(
               text,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.primary,
+                color: colors.onSurface,
               ),
             ),
           ),
@@ -1948,12 +1971,13 @@ class _DividerLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Row(
       children: [
         Text(
           label,
           style: theme.textTheme.titleSmall?.copyWith(
-            color: AppColors.primary,
+            color: colors.primary,
             fontWeight: FontWeight.w600,
           ),
         ),

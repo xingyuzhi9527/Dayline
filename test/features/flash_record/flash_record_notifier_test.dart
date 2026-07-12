@@ -21,25 +21,34 @@ void main() {
   sqfliteFfiInit();
 
   test(
-    'given notifier is created, when build completes, then STT initializes asynchronously',
+    'given notifier is created, when voice is first requested, then STT initializes lazily',
     () async {
-      final sttEngine = _FakeSttEngine();
+      final sttEngine = _FakeSttEngine(
+        availability: const SttAvailability.ready(),
+        session: _FakeSttSession(
+          transcript: const SttTranscript(text: '', isFinal: false),
+        ),
+      );
       final container = ProviderContainer(
         overrides: [sttEngineProvider.overrideWithValue(sttEngine)],
       );
       addTearDown(container.dispose);
 
       final state = container.read(flashRecordProvider);
-      expect(state.sttStatus, SttAvailabilityStatus.loading);
+      expect(state.sttStatus, SttAvailabilityStatus.idle);
       expect(sttEngine.initializeCount, 0);
 
       await Future<void>.delayed(Duration.zero);
+      expect(sttEngine.initializeCount, 0);
+
+      await container.read(flashRecordProvider.notifier).startListening();
 
       expect(sttEngine.initializeCount, 1);
       expect(
         container.read(flashRecordProvider).sttStatus,
-        SttAvailabilityStatus.unavailable,
+        SttAvailabilityStatus.ready,
       );
+      expect(container.read(flashRecordProvider).phase, FlashPhase.listening);
     },
   );
 
@@ -289,6 +298,80 @@ void main() {
   );
 
   test(
+    'given project JSON was updated before timeline insert fails, when retried, then the first attempt rolls back',
+    () async {
+      final database = LocalDatabase(
+        databaseFactory: databaseFactoryFfi,
+        databasePath: inMemoryDatabasePath,
+      );
+      final settings = AppSettingsRepository(database);
+      await settings.create(
+        key: projectsSettingsKey,
+        value: jsonEncode([
+          {
+            'id': 'project-rollback',
+            'name': '事务项目',
+            'status': '进行中',
+            'goal': '验证回滚',
+            'lastUpdate': '刚刚',
+            'todos': [],
+            'updates': [],
+          },
+        ]),
+      );
+      final recordsRepository = _FailOnceRecordsRepository(database);
+      final container = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          recordsRepositoryProvider.overrideWithValue(recordsRepository),
+          sttEngineProvider.overrideWithValue(_FakeSttEngine()),
+        ],
+      );
+      addTearDown(container.dispose);
+      addTearDown(database.close);
+
+      final notifier = container.read(flashRecordProvider.notifier);
+      notifier.updateParsedText('待办 修复事务问题');
+      notifier.selectProject('project-rollback');
+      await notifier.save();
+
+      var projectRow = await settings.findByKey(projectsSettingsKey);
+      var projects = jsonDecode(projectRow!['value'] as String) as List;
+      var project = projects.single as Map<String, Object?>;
+      expect(project['todos'], isEmpty);
+      expect(project['updates'], isEmpty);
+      expect(
+        await container
+            .read(recordsRepositoryProvider)
+            .findByDate(DateTime.now()),
+        isEmpty,
+      );
+      final pendingOperationId = container
+          .read(flashRecordProvider)
+          .saveOperationId;
+      expect(pendingOperationId, isNotNull);
+
+      await notifier.save();
+
+      projectRow = await settings.findByKey(projectsSettingsKey);
+      projects = jsonDecode(projectRow!['value'] as String) as List;
+      project = projects.single as Map<String, Object?>;
+      expect(project['todos'] as List, hasLength(1));
+      expect(project['updates'] as List, hasLength(1));
+      expect(
+        await container
+            .read(recordsRepositoryProvider)
+            .findByDate(DateTime.now()),
+        hasLength(1),
+      );
+      expect(
+        container.read(flashRecordProvider).saveOperationId,
+        pendingOperationId,
+      );
+    },
+  );
+
+  test(
     'given multiple expense items, when saving, then stores each item separately',
     () async {
       final database = LocalDatabase(
@@ -315,6 +398,96 @@ void main() {
       expect(expenses, hasLength(2));
       expect(expenses.map((row) => row['category']), ['午饭', '咖啡']);
       expect(expenses.map((row) => row['amount']), [35.0, 18.0]);
+    },
+  );
+
+  test(
+    'given the second expense insert fails, when retried, then no partial or duplicate expense remains',
+    () async {
+      final database = LocalDatabase(
+        databaseFactory: databaseFactoryFfi,
+        databasePath: inMemoryDatabasePath,
+      );
+      final expensesRepository = _FailSecondExpenseOnceRepository(database);
+      final container = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          expensesRepositoryProvider.overrideWithValue(expensesRepository),
+          sttEngineProvider.overrideWithValue(_FakeSttEngine()),
+        ],
+      );
+      addTearDown(container.dispose);
+      addTearDown(database.close);
+
+      final notifier = container.read(flashRecordProvider.notifier);
+      notifier.updateParsedText('午饭35元 咖啡18元');
+      await notifier.save();
+
+      expect(expensesRepository.createCount, 2);
+      expect(await expensesRepository.findByDate(DateTime.now()), isEmpty);
+      final pendingOperationId = container
+          .read(flashRecordProvider)
+          .saveOperationId;
+      expect(pendingOperationId, isNotNull);
+
+      await notifier.save();
+
+      final expenses = await expensesRepository.findByDate(DateTime.now());
+      expect(expenses, hasLength(2));
+      expect(expenses.map((row) => row['amount']), [35.0, 18.0]);
+      expect(
+        container.read(flashRecordProvider).saveOperationId,
+        pendingOperationId,
+      );
+    },
+  );
+
+  test(
+    'given a pending expense request survives notifier recreation, when retried with the same input, then it reuses the operation',
+    () async {
+      final database = LocalDatabase(
+        databaseFactory: databaseFactoryFfi,
+        databasePath: inMemoryDatabasePath,
+      );
+      final expensesRepository = _FailSecondExpenseOnceRepository(database);
+      final firstContainer = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          expensesRepositoryProvider.overrideWithValue(expensesRepository),
+          sttEngineProvider.overrideWithValue(_FakeSttEngine()),
+        ],
+      );
+      addTearDown(firstContainer.dispose);
+      addTearDown(database.close);
+
+      const input = '午饭35元 咖啡18元';
+      final firstNotifier = firstContainer.read(flashRecordProvider.notifier);
+      firstNotifier.updateParsedText(input);
+      await firstNotifier.save();
+      final pendingId = firstContainer
+          .read(flashRecordProvider)
+          .saveOperationId;
+      expect(pendingId, isNotNull);
+      expect(await expensesRepository.findByDate(DateTime.now()), isEmpty);
+
+      firstContainer.dispose();
+      final secondContainer = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          expensesRepositoryProvider.overrideWithValue(expensesRepository),
+          sttEngineProvider.overrideWithValue(_FakeSttEngine()),
+        ],
+      );
+      addTearDown(secondContainer.dispose);
+      final secondNotifier = secondContainer.read(flashRecordProvider.notifier);
+      secondNotifier.updateParsedText(input);
+      await secondNotifier.save();
+
+      expect(await expensesRepository.findByDate(DateTime.now()), hasLength(2));
+      expect(
+        secondContainer.read(flashRecordProvider).saveOperationId,
+        pendingId,
+      );
     },
   );
 
@@ -349,6 +522,226 @@ void main() {
       expect(expenses.single['amount'], 45.0);
     },
   );
+
+  test(
+    'given a save exceeds the UI timeout, when retried, then reuses the in-flight write',
+    () async {
+      final database = LocalDatabase(
+        databaseFactory: databaseFactoryFfi,
+        databasePath: inMemoryDatabasePath,
+      );
+      final releaseWrite = Completer<void>();
+      final recordsRepository = _DelayedRecordsRepository(
+        database,
+        releaseWrite.future,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          recordsRepositoryProvider.overrideWithValue(recordsRepository),
+          flashSaveTimeoutProvider.overrideWithValue(
+            const Duration(milliseconds: 5),
+          ),
+          sttEngineProvider.overrideWithValue(_FakeSttEngine()),
+        ],
+      );
+      addTearDown(container.dispose);
+      addTearDown(database.close);
+
+      final saved = Completer<void>();
+      final subscription = container.listen(flashRecordProvider, (_, next) {
+        if (next.savedSequence == 1 && !saved.isCompleted) {
+          saved.complete();
+        }
+      });
+      addTearDown(subscription.close);
+
+      final notifier = container.read(flashRecordProvider.notifier);
+      await notifier.saveAsText('08:05 出门');
+
+      await recordsRepository.createStarted.future.timeout(
+        const Duration(seconds: 1),
+      );
+      expect(recordsRepository.createCount, 1);
+      expect(container.read(flashRecordProvider).textSaving, isTrue);
+      expect(
+        container.read(flashRecordProvider).errorMessage,
+        contains('保存仍在处理'),
+      );
+
+      await notifier.saveAsText('08:05 出门');
+      expect(recordsRepository.createCount, 1);
+
+      releaseWrite.complete();
+      await saved.future.timeout(const Duration(seconds: 1));
+
+      final records = await recordsRepository.findByDate(DateTime.now());
+      expect(records, hasLength(1));
+      expect(container.read(flashRecordProvider).textSaving, isFalse);
+      expect(container.read(flashRecordProvider).savedSequence, 1);
+    },
+  );
+
+  test(
+    'given a completed request was not acknowledged, when notifier is recreated and retried, then it does not insert again',
+    () async {
+      final database = LocalDatabase(
+        databaseFactory: databaseFactoryFfi,
+        databasePath: inMemoryDatabasePath,
+      );
+      final firstContainer = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          sttEngineProvider.overrideWithValue(_FakeSttEngine()),
+        ],
+      );
+      addTearDown(firstContainer.dispose);
+      addTearDown(database.close);
+
+      const input = '今天天气很好';
+      var notifier = firstContainer.read(flashRecordProvider.notifier);
+      notifier.updateParsedText(input);
+      await notifier.save();
+
+      var records = await firstContainer
+          .read(recordsRepositoryProvider)
+          .findByDate(DateTime.now());
+      final firstOperationId = firstContainer
+          .read(flashRecordProvider)
+          .saveOperationId;
+      expect(records, hasLength(1));
+      expect(firstOperationId, isNotNull);
+
+      firstContainer.dispose();
+      final secondContainer = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          sttEngineProvider.overrideWithValue(_FakeSttEngine()),
+        ],
+      );
+      addTearDown(secondContainer.dispose);
+      notifier = secondContainer.read(flashRecordProvider.notifier);
+      notifier.updateParsedText(input);
+      await notifier.save();
+
+      records = await secondContainer
+          .read(recordsRepositoryProvider)
+          .findByDate(DateTime.now());
+      expect(records, hasLength(1));
+      expect(
+        secondContainer.read(flashRecordProvider).saveOperationId,
+        firstOperationId,
+      );
+
+      notifier.resetAfterSaved();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      notifier.updateParsedText(input);
+      await notifier.save();
+
+      records = await secondContainer
+          .read(recordsRepositoryProvider)
+          .findByDate(DateTime.now());
+      expect(records, hasLength(2));
+    },
+  );
+}
+
+class _DelayedRecordsRepository extends RecordsRepository {
+  _DelayedRecordsRepository(super.localDatabase, this._releaseWrite);
+
+  final Future<void> _releaseWrite;
+  final createStarted = Completer<void>();
+  var createCount = 0;
+
+  @override
+  Future<int> create({
+    required DateTime date,
+    required String type,
+    required String content,
+    String? time,
+    List<String> tags = const [],
+    Map<String, Object?> metadata = const {},
+    DateTime? createdAt,
+  }) async {
+    createCount += 1;
+    if (!createStarted.isCompleted) {
+      createStarted.complete();
+    }
+    await _releaseWrite;
+    return super.create(
+      date: date,
+      type: type,
+      content: content,
+      time: time,
+      tags: tags,
+      metadata: metadata,
+      createdAt: createdAt,
+    );
+  }
+}
+
+class _FailOnceRecordsRepository extends RecordsRepository {
+  _FailOnceRecordsRepository(super.localDatabase);
+
+  var _shouldFail = true;
+
+  @override
+  Future<int> create({
+    required DateTime date,
+    required String type,
+    required String content,
+    String? time,
+    List<String> tags = const [],
+    Map<String, Object?> metadata = const {},
+    DateTime? createdAt,
+  }) async {
+    final id = await super.create(
+      date: date,
+      type: type,
+      content: content,
+      time: time,
+      tags: tags,
+      metadata: metadata,
+      createdAt: createdAt,
+    );
+    if (_shouldFail) {
+      _shouldFail = false;
+      throw StateError('injected timeline failure');
+    }
+    return id;
+  }
+}
+
+class _FailSecondExpenseOnceRepository extends ExpensesRepository {
+  _FailSecondExpenseOnceRepository(super.localDatabase);
+
+  var createCount = 0;
+  var _shouldFail = true;
+
+  @override
+  Future<int> create({
+    required DateTime date,
+    required double amount,
+    required String category,
+    String? note,
+    String currency = 'CNY',
+    DateTime? createdAt,
+  }) async {
+    createCount += 1;
+    final id = await super.create(
+      date: date,
+      amount: amount,
+      category: category,
+      note: note,
+      currency: currency,
+      createdAt: createdAt,
+    );
+    if (_shouldFail && createCount == 2) {
+      _shouldFail = false;
+      throw StateError('injected second expense failure');
+    }
+    return id;
+  }
 }
 
 class _FakeSttEngine implements SttEngine {

@@ -3,14 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
-import '../../../core/theme/app_colors.dart';
-
 class AudioWaveform extends StatefulWidget {
-  const AudioWaveform({
-    required this.level,
-    required this.active,
-    super.key,
-  });
+  const AudioWaveform({required this.level, required this.active, super.key});
 
   final double level;
   final bool active;
@@ -70,6 +64,7 @@ class _AudioWaveformState extends State<AudioWaveform>
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
       width: 220,
       height: 36,
@@ -78,6 +73,8 @@ class _AudioWaveformState extends State<AudioWaveform>
           painter: _AudioWaveformPainter(
             level: _smoothLevel.clamp(0.0, 1.0).toDouble(),
             active: _active,
+            activeColor: colorScheme.primary,
+            inactiveColor: colorScheme.onSurfaceVariant,
           ),
         ),
       ),
@@ -89,15 +86,19 @@ class _AudioWaveformPainter extends CustomPainter {
   const _AudioWaveformPainter({
     required this.level,
     required this.active,
+    required this.activeColor,
+    required this.inactiveColor,
   });
 
   final double level;
   final bool active;
+  final Color activeColor;
+  final Color inactiveColor;
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = (active ? AppColors.primary : AppColors.muted).withAlpha(
+      ..color = (active ? activeColor : inactiveColor).withAlpha(
         active ? 190 : 90,
       )
       ..strokeWidth = 3
@@ -124,6 +125,9 @@ class _AudioWaveformPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _AudioWaveformPainter oldDelegate) {
-    return oldDelegate.level != level || oldDelegate.active != active;
+    return oldDelegate.level != level ||
+        oldDelegate.active != active ||
+        oldDelegate.activeColor != activeColor ||
+        oldDelegate.inactiveColor != inactiveColor;
   }
 }

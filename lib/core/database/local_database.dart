@@ -16,7 +16,8 @@ final localDatabaseProvider = Provider<LocalDatabase>((ref) {
 
 class LocalDatabase {
   static const _databaseName = 'liflow.db';
-  static const _databaseVersion = 4;
+  static const _databaseVersion = 5;
+  static final _transactionExecutorKey = Object();
 
   LocalDatabase({
     sqflite.DatabaseFactory? databaseFactory,
@@ -29,6 +30,9 @@ class LocalDatabase {
 
   sqflite.Database? _database;
 
+  sqflite.DatabaseExecutor? get _transactionExecutor =>
+      Zone.current[_transactionExecutorKey] as sqflite.DatabaseExecutor?;
+
   Future<sqflite.Database> get database async {
     final openedDatabase = _database;
     if (openedDatabase != null && openedDatabase.isOpen) {
@@ -38,6 +42,24 @@ class LocalDatabase {
     final nextDatabase = await _open();
     _database = nextDatabase;
     return nextDatabase;
+  }
+
+  /// Returns the active transaction executor when called from [transaction].
+  ///
+  /// Repositories use this instead of opening their own executor so an entire
+  /// cross-repository write can be committed or rolled back as one unit.
+  Future<sqflite.DatabaseExecutor> get executor async =>
+      _transactionExecutor ?? await database;
+
+  Future<T> transaction<T>(Future<T> Function() action) async {
+    if (_transactionExecutor != null) {
+      return action();
+    }
+
+    final db = await database;
+    return db.transaction(
+      (txn) => runZoned(action, zoneValues: {_transactionExecutorKey: txn}),
+    );
   }
 
   Future<void> close() async {
@@ -225,9 +247,15 @@ CREATE TABLE media_attachments (
     await db.execute(
       'CREATE INDEX idx_media_attachments_record_id ON media_attachments (record_id)',
     );
+
+    await _createWriteOperationsSchema(db);
   }
 
-  Future<void> _upgradeSchema(sqflite.Database db, int oldVersion, int newVersion) async {
+  Future<void> _upgradeSchema(
+    sqflite.Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
     if (oldVersion < 2) {
       await db.execute('''
 CREATE TABLE daily_reviews (
@@ -271,5 +299,26 @@ CREATE TABLE media_attachments (
         'CREATE INDEX idx_media_attachments_record_id ON media_attachments (record_id)',
       );
     }
+    if (oldVersion < 5) {
+      await _createWriteOperationsSchema(db);
+    }
+  }
+
+  Future<void> _createWriteOperationsSchema(sqflite.DatabaseExecutor db) async {
+    await db.execute('''
+CREATE TABLE write_operations (
+  operation_id TEXT PRIMARY KEY NOT NULL,
+  operation_type TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'committed', 'completed')),
+  result_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (operation_type, fingerprint)
+)
+''');
+    await db.execute(
+      'CREATE INDEX idx_write_operations_status ON write_operations (status, updated_at)',
+    );
   }
 }

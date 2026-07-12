@@ -91,7 +91,13 @@ class LongNoteNotifier extends Notifier<LongNoteState> {
         );
       }
 
-      ref.read(dataVersionProvider.notifier).increment();
+      ref
+          .read(dataVersionProvider.notifier)
+          .increment(
+            domains: project == null
+                ? const {DataDomain.records}
+                : const {DataDomain.projects, DataDomain.records},
+          );
 
       state = state.copyWith(isSaving: false, savedPath: path);
       return true;

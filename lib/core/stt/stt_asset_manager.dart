@@ -34,9 +34,13 @@ class SttAssetManager {
     this.bundledArchiveSha256,
     Future<Directory> Function()? documentsDirectoryProvider,
     Future<List<int>> Function(String assetPath)? assetBytesLoader,
+    Future<void> Function(String assetPath, File outputFile)? assetFileWriter,
   }) : _documentsDirectoryProvider =
            documentsDirectoryProvider ?? getApplicationDocumentsDirectory,
-       _assetBytesLoader = assetBytesLoader ?? _loadAssetBytes;
+       _assetBytesLoader = assetBytesLoader,
+       _assetFileWriter =
+           assetFileWriter ??
+           (assetBytesLoader == null ? _copyBundledAssetToFile : null);
 
   final String directoryName;
   final String archiveUrl;
@@ -44,50 +48,159 @@ class SttAssetManager {
   final String bundledArchiveAssetPath;
   final String? bundledArchiveSha256;
   final Future<Directory> Function() _documentsDirectoryProvider;
-  final Future<List<int>> Function(String assetPath) _assetBytesLoader;
+  final Future<List<int>> Function(String assetPath)? _assetBytesLoader;
+  final Future<void> Function(String assetPath, File outputFile)?
+  _assetFileWriter;
+  Future<SttAssetPaths>? _ensureReadyInFlight;
 
-  Future<SttAssetPaths> ensureReady() async {
+  Future<SttAssetPaths> ensureReady() {
+    final inFlight = _ensureReadyInFlight;
+    if (inFlight != null) return inFlight;
+
+    late final Future<SttAssetPaths> future;
+    future = _ensureReadyInternal().whenComplete(() {
+      if (identical(_ensureReadyInFlight, future)) {
+        _ensureReadyInFlight = null;
+      }
+    });
+    _ensureReadyInFlight = future;
+    return future;
+  }
+
+  Future<SttAssetPaths> _ensureReadyInternal() async {
     final documentsDir = await _documentsDirectoryProvider();
-    final outputDir = Directory(
-      p.join(documentsDir.path, 'stt_models', directoryName),
-    );
+    final modelsDir = Directory(p.join(documentsDir.path, 'stt_models'));
+    await modelsDir.create(recursive: true);
+    final outputDir = Directory(p.join(modelsDir.path, directoryName));
 
+    await _recoverInterruptedInstall(modelsDir, outputDir);
+    await SttAssetExtractor.repairLegacyInstall(outputDir);
     if (await SttAssetExtractor.isValid(outputDir)) {
       return SttAssetPaths(outputDir);
     }
 
-    if (await outputDir.exists()) {
-      await outputDir.delete(recursive: true);
+    final stagingDir = Directory(
+      '${outputDir.path}.installing-${DateTime.now().microsecondsSinceEpoch}',
+    );
+
+    try {
+      await stagingDir.create(recursive: true);
+      final installSource =
+          await _installBundledArchive(stagingDir) ??
+          await _downloadArchive(stagingDir);
+
+      await _writeInstallMetadata(stagingDir, installSource: installSource);
+
+      if (!await SttAssetExtractor.isValid(stagingDir)) {
+        throw StateError('SenseVoice 模型文件校验失败。');
+      }
+
+      await _publishInstall(stagingDir, outputDir);
+      return SttAssetPaths(outputDir);
+    } finally {
+      if (await stagingDir.exists()) {
+        await stagingDir.delete(recursive: true);
+      }
     }
-    await outputDir.create(recursive: true);
+  }
 
-    final installSource =
-        await _installBundledArchive(outputDir) ??
-        await _downloadArchive(outputDir);
+  Future<void> _recoverInterruptedInstall(
+    Directory modelsDir,
+    Directory outputDir,
+  ) async {
+    final backupDir = Directory('${outputDir.path}.backup');
+    final stagingDirs = <Directory>[];
+    await for (final entity in modelsDir.list()) {
+      if (entity is! Directory) continue;
+      final name = p.basename(entity.path);
+      if (name.startsWith('${p.basename(outputDir.path)}.installing-')) {
+        stagingDirs.add(entity);
+      }
+    }
 
-    await _writeInstallMetadata(outputDir, installSource: installSource);
+    await SttAssetExtractor.repairLegacyInstall(backupDir);
+    final outputValid = await SttAssetExtractor.isValid(outputDir);
+    if (!outputValid && await SttAssetExtractor.isValid(backupDir)) {
+      if (await outputDir.exists()) {
+        await outputDir.delete(recursive: true);
+      }
+      await backupDir.rename(outputDir.path);
+    } else if (outputValid && await backupDir.exists()) {
+      await backupDir.delete(recursive: true);
+    }
 
     if (!await SttAssetExtractor.isValid(outputDir)) {
-      throw StateError('SenseVoice 模型文件校验失败。');
+      for (final stagingDir in stagingDirs) {
+        if (await SttAssetExtractor.isValid(stagingDir)) {
+          if (await outputDir.exists()) {
+            await outputDir.delete(recursive: true);
+          }
+          await stagingDir.rename(outputDir.path);
+          break;
+        }
+      }
     }
 
-    return SttAssetPaths(outputDir);
+    for (final stagingDir in stagingDirs) {
+      if (await stagingDir.exists()) {
+        await stagingDir.delete(recursive: true);
+      }
+    }
+  }
+
+  Future<void> _publishInstall(
+    Directory stagingDir,
+    Directory outputDir,
+  ) async {
+    final backupDir = Directory('${outputDir.path}.backup');
+    if (await backupDir.exists()) {
+      await backupDir.delete(recursive: true);
+    }
+
+    var movedPrevious = false;
+    try {
+      if (await outputDir.exists()) {
+        await outputDir.rename(backupDir.path);
+        movedPrevious = true;
+      }
+      await stagingDir.rename(outputDir.path);
+      if (movedPrevious && await backupDir.exists()) {
+        await backupDir.delete(recursive: true);
+      }
+    } catch (_) {
+      if (!await outputDir.exists() &&
+          movedPrevious &&
+          await backupDir.exists()) {
+        await backupDir.rename(outputDir.path);
+      }
+      rethrow;
+    }
   }
 
   Future<String?> _installBundledArchive(Directory outputDir) async {
     final tempDir = await Directory.systemTemp.createTemp('liflow-stt-asset-');
     try {
-      final bytes = await _assetBytesLoader(bundledArchiveAssetPath);
-      final sha256Hex = sha256.convert(bytes).toString();
+      final archiveFile = File(
+        p.join(tempDir.path, p.basename(bundledArchiveAssetPath)),
+      );
+      final fileWriter = _assetFileWriter;
+      if (fileWriter != null) {
+        await fileWriter(bundledArchiveAssetPath, archiveFile);
+      } else {
+        final bytesLoader = _assetBytesLoader;
+        if (bytesLoader == null) {
+          throw StateError('SenseVoice 预置模型包读取器未配置。');
+        }
+        final bytes = await bytesLoader(bundledArchiveAssetPath);
+        await archiveFile.writeAsBytes(bytes, flush: true);
+      }
+
+      final sha256Hex = await _sha256File(archiveFile);
       final expectedBundledSha256 = bundledArchiveSha256;
       if (expectedBundledSha256 != null &&
           sha256Hex.toLowerCase() != expectedBundledSha256.toLowerCase()) {
         throw StateError('SenseVoice 预置模型包 SHA256 校验失败。');
       }
-      final archiveFile = File(
-        p.join(tempDir.path, p.basename(bundledArchiveAssetPath)),
-      );
-      await archiveFile.writeAsBytes(bytes, flush: true);
       await _extractArchiveFile(archiveFile, outputDir);
       return 'bundled-asset';
     } on FlutterError catch (error) {
@@ -173,18 +286,18 @@ class SttModelDownloader {
       }
 
       await outputFile.parent.create(recursive: true);
-      final sink = outputFile.openWrite();
+      final output = await outputFile.open(mode: FileMode.write);
 
       try {
         await for (final chunk in response) {
-          sink.add(chunk);
+          await output.writeFrom(chunk);
         }
+        await output.flush();
       } finally {
-        await sink.close();
+        await output.close();
       }
 
-      final actualSha256 = (await sha256.bind(outputFile.openRead()).first)
-          .toString();
+      final actualSha256 = await _sha256File(outputFile);
       if (expectedSha256 != null &&
           actualSha256.toLowerCase() != expectedSha256.toLowerCase()) {
         await outputFile.delete().catchError((_) => outputFile);
@@ -211,71 +324,204 @@ Future<void> _extractSenseVoiceArchiveInBackground(_SttAssetExtractionJob job) {
   );
 }
 
-Future<List<int>> _loadAssetBytes(String assetPath) async {
+Future<void> _copyBundledAssetToFile(String assetPath, File outputFile) async {
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    try {
+      await _sttAssetChannel.invokeMethod<void>('copyAssetToFile', {
+        'assetPath': assetPath,
+        'outputPath': outputFile.path,
+      });
+      return;
+    } on MissingPluginException {
+      // Desktop tests and older Android shells use the AssetBundle fallback.
+    }
+  }
+
+  // AssetBundle exposes the bundled file as ByteData. Keep the existing
+  // loader contract, but stream bounded views to disk so later hashing and
+  // extraction never create another full-size copy.
   final byteData = await rootBundle.load(assetPath);
-  return byteData.buffer.asUint8List(
+  final bytes = byteData.buffer.asUint8List(
     byteData.offsetInBytes,
     byteData.lengthInBytes,
   );
+  final handle = await outputFile.open(mode: FileMode.write);
+  try {
+    const chunkSize = 1024 * 1024;
+    for (var offset = 0; offset < bytes.length; offset += chunkSize) {
+      final end = (offset + chunkSize).clamp(0, bytes.length).toInt();
+      // Await each write so IOSink-style buffering cannot retain a second
+      // full archive while the asset is being copied.
+      await handle.writeFrom(bytes, offset, end);
+    }
+    await handle.flush();
+  } finally {
+    await handle.close();
+  }
+}
+
+const _sttAssetChannel = MethodChannel('liflow/stt_assets');
+
+Future<String> _sha256File(File file) async {
+  return (await sha256.bind(file.openRead()).first).toString();
 }
 
 class SttAssetExtractor {
   static const modelFileName = 'model.int8.onnx';
   static const tokensFileName = 'tokens.txt';
+  static const integrityFileName = 'integrity.json';
   static const _requiredFiles = {modelFileName, tokensFileName};
 
   static Future<void> extractTarBz2File(
     File archiveFile,
     Directory outputDir,
   ) async {
-    final compressed = await archiveFile.readAsBytes();
-    return extractTarBz2Bytes(compressed, outputDir);
+    final tarFile = File('${archiveFile.path}.tar');
+    try {
+      await _decodeBzip2ToTar(InputFileStream(archiveFile.path), tarFile);
+      await _extractTarFile(tarFile, outputDir);
+    } finally {
+      if (await tarFile.exists()) {
+        await tarFile.delete();
+      }
+    }
   }
 
   static Future<void> extractTarBz2Bytes(
     List<int> bytes,
     Directory outputDir,
   ) async {
-    final tarBytes = BZip2Decoder().decodeBytes(bytes);
-    final archive = TarDecoder().decodeBytes(tarBytes);
+    final tempDir = await Directory.systemTemp.createTemp('liflow-stt-tar-');
+    final tarFile = File(p.join(tempDir.path, 'model.tar'));
+    try {
+      await _decodeBzip2ToTar(InputMemoryStream(bytes), tarFile);
+      await _extractTarFile(tarFile, outputDir);
+    } finally {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    }
+  }
+
+  static Future<void> _decodeBzip2ToTar(InputStream input, File tarFile) async {
+    final output = OutputFileStream(tarFile.path);
+    try {
+      final decoded = BZip2Decoder().decodeStream(input, output, verify: true);
+      if (!decoded) {
+        throw StateError('无法解压 SenseVoice 模型包。');
+      }
+    } finally {
+      input.closeSync();
+      output.closeSync();
+    }
+  }
+
+  static Future<void> _extractTarFile(File tarFile, Directory outputDir) async {
     await outputDir.create(recursive: true);
+    final integrityFile = File(p.join(outputDir.path, integrityFileName));
+    if (await integrityFile.exists()) {
+      await integrityFile.delete();
+    }
 
     final extracted = <String>{};
-    for (final entry in archive) {
-      if (!entry.isFile) continue;
+    final expectedSizes = <String, int>{};
+    final input = InputFileStream(tarFile.path);
+    try {
+      TarDecoder().decodeStream(
+        input,
+        // Keep archive entries as file-backed streams. Calling readBytes here
+        // would materialize the 160MB model in the isolate heap again.
+        storeData: true,
+        callback: (entry) {
+          if (!entry.isFile) return;
 
-      final fileName = p.basename(entry.name);
-      if (!_requiredFiles.contains(fileName)) continue;
+          final fileName = p.basename(entry.name);
+          if (!_requiredFiles.contains(fileName)) return;
 
-      final safePath = _safeOutputPath(outputDir, fileName);
-      if (safePath == null) continue;
+          final safePath = _safeOutputPath(outputDir, fileName);
+          if (safePath == null) return;
 
-      final bytes = entry.readBytes();
-      if (bytes == null || bytes.isEmpty) {
-        throw StateError('无法读取 SenseVoice 模型包内的 ${entry.name}');
-      }
+          final file = File(safePath);
+          final output = OutputFileStream(safePath);
+          try {
+            entry.writeContent(output, freeMemory: true);
+          } finally {
+            output.closeSync();
+          }
 
-      final file = File(safePath);
-      await file.writeAsBytes(bytes, flush: true);
-      extracted.add(fileName);
+          if (file.lengthSync() == 0) {
+            throw StateError('无法读取 SenseVoice 模型包内的 ${entry.name}');
+          }
+          extracted.add(fileName);
+          expectedSizes[fileName] = entry.size;
+          if (file.lengthSync() != entry.size) {
+            throw StateError('SenseVoice 模型文件 ${entry.name} 长度校验失败。');
+          }
+        },
+      );
+    } finally {
+      input.closeSync();
     }
 
     if (!extracted.containsAll(_requiredFiles)) {
       throw StateError('SenseVoice 模型包缺少 model.int8.onnx 或 tokens.txt。');
     }
+
+    await integrityFile.writeAsString(
+      const JsonEncoder.withIndent('  ').convert({'files': expectedSizes}),
+      flush: true,
+    );
   }
 
   static Future<bool> isValid(Directory outputDir) async {
+    final integrityFile = File(p.join(outputDir.path, integrityFileName));
+    if (!await integrityFile.exists()) return false;
+
+    Map<String, dynamic> manifest;
+    try {
+      manifest =
+          jsonDecode(await integrityFile.readAsString())
+              as Map<String, dynamic>;
+    } catch (_) {
+      return false;
+    }
+    final expectedSizes = manifest['files'];
+    if (expectedSizes is! Map) return false;
+
     for (final fileName in _requiredFiles) {
       final safePath = _safeOutputPath(outputDir, fileName);
       if (safePath == null) return false;
 
       final file = File(safePath);
       if (!await file.exists()) return false;
-      if (await file.length() == 0) return false;
+      final expectedSize = expectedSizes[fileName];
+      if (expectedSize is! num || expectedSize <= 0) return false;
+      if (await file.length() != expectedSize) return false;
     }
 
     return true;
+  }
+
+  static Future<void> repairLegacyInstall(Directory outputDir) async {
+    final integrityFile = File(p.join(outputDir.path, integrityFileName));
+    if (await integrityFile.exists()) return;
+
+    final expectedSizes = <String, int>{};
+    for (final fileName in _requiredFiles) {
+      final safePath = _safeOutputPath(outputDir, fileName);
+      if (safePath == null) return;
+      final file = File(safePath);
+      if (!await file.exists()) return;
+      final length = await file.length();
+      if (length <= 0) return;
+      expectedSizes[fileName] = length;
+    }
+
+    await outputDir.create(recursive: true);
+    await integrityFile.writeAsString(
+      const JsonEncoder.withIndent('  ').convert({'files': expectedSizes}),
+      flush: true,
+    );
   }
 
   static String? _safeOutputPath(Directory outputDir, String relativePath) {

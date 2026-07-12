@@ -23,7 +23,7 @@ class DailyReviewsRepository extends Repository {
   }
 
   Future<DatabaseRow?> findByDate(String date) async {
-    final db = await localDatabase.database;
+    final db = await localDatabase.executor;
     final rows = await db.query(
       tableName,
       where: 'date = ?',
@@ -41,7 +41,7 @@ class DailyReviewsRepository extends Repository {
     DateTime? updatedAt,
   }) {
     final now = updatedAt ?? DateTime.now();
-    return localDatabase.database.then(
+    return localDatabase.executor.then(
       (db) => db.update(
         tableName,
         {
@@ -64,8 +64,18 @@ class DailyReviewsRepository extends Repository {
   }) async {
     final existing = await findByDate(date);
     if (existing != null) {
-      return updateReview(date, kept: kept, adjust: adjust, nextAction: nextAction);
+      return updateReview(
+        date,
+        kept: kept,
+        adjust: adjust,
+        nextAction: nextAction,
+      );
     }
-    return create(date: date, kept: kept, adjust: adjust, nextAction: nextAction);
+    return create(
+      date: date,
+      kept: kept,
+      adjust: adjust,
+      nextAction: nextAction,
+    );
   }
 }

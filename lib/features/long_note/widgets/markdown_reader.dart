@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 
 class MarkdownReader extends StatelessWidget {
@@ -24,6 +23,7 @@ class MarkdownReader extends StatelessWidget {
 
   Widget _renderBlock(BuildContext context, _MdBlock block) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     switch (block.type) {
       case _MdType.h1:
@@ -37,7 +37,7 @@ class MarkdownReader extends StatelessWidget {
             block.content,
             baseStyle: theme.textTheme.headlineMedium?.copyWith(
               fontWeight: FontWeight.w700,
-              color: AppColors.primary,
+              color: colors.primary,
             ),
           ),
         );
@@ -75,17 +75,14 @@ class MarkdownReader extends StatelessWidget {
           padding: const EdgeInsets.only(left: AppSpacing.sm),
           decoration: BoxDecoration(
             border: Border(
-              left: BorderSide(
-                color: AppColors.primary.withAlpha(100),
-                width: 3,
-              ),
+              left: BorderSide(color: colors.primary.withAlpha(100), width: 3),
             ),
           ),
           child: _renderInline(
             context,
             block.content,
             baseStyle: theme.textTheme.bodyMedium?.copyWith(
-              color: AppColors.muted,
+              color: colors.onSurfaceVariant,
               fontStyle: FontStyle.italic,
             ),
           ),
@@ -96,7 +93,7 @@ class MarkdownReader extends StatelessWidget {
           margin: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
           padding: const EdgeInsets.all(AppSpacing.sm),
           decoration: BoxDecoration(
-            color: AppColors.surfaceLow,
+            color: colors.surfaceContainerLow,
             borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
           ),
           child: Column(
@@ -108,7 +105,7 @@ class MarkdownReader extends StatelessWidget {
                   child: Text(
                     block.meta!,
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: AppColors.muted,
+                      color: colors.onSurfaceVariant,
                       fontFamily: 'monospace',
                     ),
                   ),
@@ -145,7 +142,7 @@ class MarkdownReader extends StatelessWidget {
           leading: Icon(
             checked ? Icons.check_box_rounded : Icons.check_box_outline_blank,
             size: 18,
-            color: checked ? AppColors.primary : AppColors.muted,
+            color: checked ? colors.primary : colors.onSurfaceVariant,
           ),
           child: _renderInline(
             context,
@@ -153,7 +150,7 @@ class MarkdownReader extends StatelessWidget {
             baseStyle: theme.textTheme.bodyLarge?.copyWith(
               height: 1.7,
               decoration: checked ? TextDecoration.lineThrough : null,
-              color: checked ? AppColors.muted : null,
+              color: checked ? colors.onSurfaceVariant : null,
             ),
           ),
         );
@@ -178,11 +175,14 @@ class MarkdownReader extends StatelessWidget {
     TextStyle? baseStyle,
   }) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final effectiveStyle =
         baseStyle ?? theme.textTheme.bodyLarge?.copyWith(height: 1.7);
     final spans = _MarkdownInlineParser(
       text,
       effectiveStyle ?? const TextStyle(),
+      linkColor: colors.primary,
+      inlineCodeBackground: colors.surfaceContainerLow,
     ).parse();
 
     return SelectableText.rich(
@@ -195,14 +195,15 @@ class MarkdownReader extends StatelessWidget {
     if (rows.isEmpty) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       decoration: BoxDecoration(
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: colors.outlineVariant),
         borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
       ),
       child: Table(
-        border: TableBorder.all(color: AppColors.border.withAlpha(80)),
+        border: TableBorder.all(color: colors.outlineVariant.withAlpha(80)),
         columnWidths: {
           for (var i = 0; i < rows.first.length; i++)
             i: const FlexColumnWidth(),
@@ -211,7 +212,9 @@ class MarkdownReader extends StatelessWidget {
           final isHeader = entry.key == 0;
           return TableRow(
             decoration: isHeader
-                ? BoxDecoration(color: AppColors.surfaceLow.withAlpha(120))
+                ? BoxDecoration(
+                    color: colors.surfaceContainerLow.withAlpha(120),
+                  )
                 : null,
             children: entry.value.map((cell) {
               return Padding(
@@ -402,10 +405,17 @@ class _MarkdownBlockParser {
 }
 
 class _MarkdownInlineParser {
-  _MarkdownInlineParser(this.text, this.baseStyle);
+  _MarkdownInlineParser(
+    this.text,
+    this.baseStyle, {
+    required this.linkColor,
+    required this.inlineCodeBackground,
+  });
 
   final String text;
   final TextStyle baseStyle;
+  final Color linkColor;
+  final Color inlineCodeBackground;
 
   List<InlineSpan> parse() {
     final spans = <InlineSpan>[];
@@ -422,7 +432,7 @@ class _MarkdownInlineParser {
           TextSpan(
             text: linkMatch.group(1),
             style: baseStyle.copyWith(
-              color: AppColors.primary,
+              color: linkColor,
               decoration: TextDecoration.underline,
             ),
           ),
@@ -450,7 +460,7 @@ class _MarkdownInlineParser {
             text: inlineCodeMatch.group(1),
             style: baseStyle.copyWith(
               fontFamily: 'monospace',
-              backgroundColor: AppColors.surfaceLow,
+              backgroundColor: inlineCodeBackground,
             ),
           ),
         );

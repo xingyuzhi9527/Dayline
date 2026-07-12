@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/database/local_database.dart';
+import '../../core/database/repository_providers.dart';
 import '../../core/documents/document_library_service.dart';
+import '../../core/markdown/markdown_directory_service.dart';
 import '../../core/markdown/markdown_document_parser.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../long_note/widgets/markdown_reader.dart';
+import '../restore/markdown_restore_dialog.dart';
+import '../restore/markdown_restore_service.dart';
 
 enum _LibraryView { notes, documents, favorites, folders }
 
@@ -24,6 +29,7 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
   var _view = _LibraryView.notes;
   var _importing = false;
   var _addingFolder = false;
+  var _restoring = false;
 
   @override
   void initState() {
@@ -44,12 +50,24 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
         title: Text('资料库', style: theme.textTheme.titleMedium),
         centerTitle: true,
         actions: [
+          IconButton(
+            tooltip: '恢复资料',
+            onPressed: _restoring ? null : _restoreFromCurrentFolder,
+            icon: _restoring
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.restore_rounded),
+          ),
           IconButton(
             tooltip: '收藏文件夹',
             onPressed: _addingFolder ? null : _addFavoriteFolder,
@@ -112,7 +130,7 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall?.copyWith(
-                                color: AppColors.muted,
+                                color: colors.onSurfaceVariant,
                               ),
                             ),
                           ),
@@ -402,6 +420,63 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
     }
   }
 
+  Future<void> _restoreFromCurrentFolder() async {
+    if (_restoring) return;
+    setState(() => _restoring = true);
+    try {
+      final settings = ref.read(appSettingsRepositoryProvider);
+      final directoryService = MarkdownDirectoryService(settings);
+      final restoreService = MarkdownRestoreService(
+        source: StorageMarkdownRestoreSource(
+          directoryService: directoryService,
+        ),
+        database: ref.read(localDatabaseProvider),
+        recordsRepository: ref.read(recordsRepositoryProvider),
+        settingsRepository: settings,
+      );
+      final preview = await restoreService.preview();
+      if (!mounted) return;
+      if (preview.isEmpty) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('当前资料夹没有可恢复的备份'),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 1),
+            ),
+          );
+        return;
+      }
+      final restored = await showMarkdownRestoreDialog(
+        context: context,
+        restoreService: restoreService,
+        preview: preview,
+      );
+      if (!mounted) return;
+      if (restored) {
+        ref
+            .read(dataVersionProvider.notifier)
+            .increment(domains: DataDomain.values.toSet());
+        setState(() {
+          _snapshotFuture = _load();
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('恢复失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _restoring = false);
+    }
+  }
+
   Future<void> _openItem(DocumentLibraryItem item) async {
     try {
       if (item.isMarkdown) {
@@ -592,16 +667,17 @@ class _NoteArchiveTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.md,
         vertical: AppSpacing.xxs,
       ),
       leading: CircleAvatar(
-        backgroundColor: AppColors.muted.withAlpha(20),
-        child: const Icon(
+        backgroundColor: colors.onSurfaceVariant.withAlpha(20),
+        child: Icon(
           Icons.inventory_2_outlined,
-          color: AppColors.muted,
+          color: colors.onSurfaceVariant,
           size: 20,
         ),
       ),
@@ -611,9 +687,14 @@ class _NoteArchiveTile extends StatelessWidget {
       ),
       subtitle: Text(
         '$count 条较早笔记',
-        style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: colors.onSurfaceVariant,
+        ),
       ),
-      trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+      trailing: Icon(
+        Icons.chevron_right_rounded,
+        color: colors.onSurfaceVariant,
+      ),
       onTap: onTap,
     );
   }
@@ -628,6 +709,7 @@ class _FavoriteRecordTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.md,
@@ -651,9 +733,14 @@ class _FavoriteRecordTile extends StatelessWidget {
         _favoriteRecordSubtitle(record),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: colors.onSurfaceVariant,
+        ),
       ),
-      trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+      trailing: Icon(
+        Icons.chevron_right_rounded,
+        color: colors.onSurfaceVariant,
+      ),
       onTap: onTap,
     );
   }
@@ -667,6 +754,7 @@ class _FavoriteRecordSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
@@ -689,7 +777,7 @@ class _FavoriteRecordSheet extends StatelessWidget {
             Text(
               _formatRecordDate(record.createdAt),
               style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: AppSpacing.md),
@@ -838,16 +926,17 @@ class _FavoriteFolderTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.md,
         vertical: AppSpacing.xxs,
       ),
       leading: CircleAvatar(
-        backgroundColor: AppColors.primary.withAlpha(22),
-        child: const Icon(
+        backgroundColor: colors.primary.withAlpha(22),
+        child: Icon(
           Icons.folder_special_rounded,
-          color: AppColors.primary,
+          color: colors.primary,
           size: 20,
         ),
       ),
@@ -859,7 +948,9 @@ class _FavoriteFolderTile extends StatelessWidget {
       ),
       subtitle: Text(
         '文件夹收藏',
-        style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: colors.onSurfaceVariant,
+        ),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -870,7 +961,7 @@ class _FavoriteFolderTile extends StatelessWidget {
             onPressed: onRemove,
             icon: const Icon(Icons.bookmark_remove_outlined, size: 20),
           ),
-          const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+          Icon(Icons.chevron_right_rounded, color: colors.onSurfaceVariant),
         ],
       ),
       onTap: onTap,
@@ -1005,7 +1096,8 @@ class _LibraryItemTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = item.isMarkdown ? AppColors.primary : AppColors.secondary;
+    final colors = theme.colorScheme;
+    final color = item.isMarkdown ? colors.primary : AppColors.secondary;
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(
@@ -1026,7 +1118,9 @@ class _LibraryItemTile extends StatelessWidget {
         _subtitleForItem(item),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: colors.onSurfaceVariant,
+        ),
       ),
       trailing: item.isMarkdown
           ? Row(
@@ -1044,7 +1138,10 @@ class _LibraryItemTile extends StatelessWidget {
                     color: item.isFavorite ? AppColors.focus : null,
                   ),
                 ),
-                const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: colors.onSurfaceVariant,
+                ),
               ],
             )
           : Row(
@@ -1056,7 +1153,7 @@ class _LibraryItemTile extends StatelessWidget {
                   onPressed: onDelete,
                   icon: const Icon(Icons.delete_outline_rounded, size: 20),
                 ),
-                const Icon(Icons.open_in_new_rounded, color: AppColors.muted),
+                Icon(Icons.open_in_new_rounded, color: colors.onSurfaceVariant),
               ],
             ),
       onTap: onTap,
@@ -1118,19 +1215,20 @@ class _LibraryMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 54, color: AppColors.muted.withAlpha(90)),
+            Icon(icon, size: 54, color: colors.onSurfaceVariant.withAlpha(90)),
             const SizedBox(height: AppSpacing.md),
             Text(
               title,
               textAlign: TextAlign.center,
               style: theme.textTheme.titleMedium?.copyWith(
-                color: AppColors.primary,
+                color: colors.primary,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -1139,7 +1237,7 @@ class _LibraryMessage extends StatelessWidget {
               message,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
                 height: 1.45,
               ),
             ),

@@ -121,14 +121,13 @@ flutter pub get
 
 ### STT 语音模型
 
-离线语音识别依赖 `assets/stt/` 下的两个模型文件：
+离线语音识别依赖 `assets/stt/` 下的 SenseVoice 模型文件：
 
 | 文件 | 大小 | 模型 |
 |------|------|------|
 | `sense_voice_small_zh.tar.bz2` | ~163 MB | SenseVoice 中文 |
-| `dayline-stt-v2.zip` | ~56 MB | Zipformer 多中文方言 |
 
-这两个是标准的 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 模型。没有它们 App 也能正常编译运行，语音录制不受影响，只是离线识别功能不可用。
+这是标准的 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 模型。没有它 App 也能正常编译运行，语音录制不受影响，只是离线识别功能不可用。
 
 ### 日常命令
 
@@ -151,7 +150,7 @@ flutter test --plain-name "restore"
 flutter build apk --release
 ```
 
-Release 签名需要本地提供 `android/key.properties`（已加入 .gitignore，不会进入版本库）。如果该文件不存在，构建会自动降级为 debug 签名：
+Release 签名需要本地提供 `android/key.properties`（已加入 .gitignore，不会进入版本库）。如果该文件不存在或字段不完整，release 构建会直接失败；debug 构建不受影响：
 
 ```properties
 storePassword=<你的密钥库密码>
@@ -161,6 +160,29 @@ storeFile=<你的密钥库路径>
 ```
 
 产物路径：`build/app/outputs/flutter-apk/app-release.apk`
+
+### 发布包体与 ABI
+
+面向 Google Play 或其他支持 AAB 的商店，优先构建 AAB，让商店按设备 ABI
+下发所需的 native 库：
+
+```bash
+flutter build appbundle --release
+```
+
+直接分发 APK 时使用 ABI 拆分，避免把 arm64、armeabi-v7a 和 x86_64 的
+native 库全部装进同一个文件：
+
+```bash
+flutter build apk --release --split-per-abi
+```
+
+输出文件位于 `build/app/outputs/flutter-apk/`，名称会带有
+`arm64-v8a`、`armeabi-v7a` 或 `x86_64`。当前 SenseVoice 模型约 163 MB，
+仍是包体的主要来源；删除未使用的 Zipformer 压缩包后，仓库不再重复打包
+那份约 56 MB 的模型。
+
+Release 构建没有生产密钥时会直接失败，不会回退到 debug 签名。
 
 ## 版本
 

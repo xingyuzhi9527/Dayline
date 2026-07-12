@@ -86,6 +86,7 @@ class _PhotoMomentEditorPageState extends ConsumerState<PhotoMomentEditorPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -115,7 +116,7 @@ class _PhotoMomentEditorPageState extends ConsumerState<PhotoMomentEditorPage> {
                     Text(
                       _formatCapturedAt(widget.capturedAt!),
                       style: theme.textTheme.labelMedium?.copyWith(
-                        color: AppColors.muted,
+                        color: colors.onSurfaceVariant,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -144,7 +145,7 @@ class _PhotoMomentEditorPageState extends ConsumerState<PhotoMomentEditorPage> {
                   Text(
                     '图片会复制到 Liflow 根目录下的 attachments/photos 文件夹，不依赖系统相册原路径。',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: AppColors.muted,
+                      color: colors.onSurfaceVariant,
                       height: 1.4,
                     ),
                   ),
@@ -235,9 +236,9 @@ class _PhotoMomentEditorPageState extends ConsumerState<PhotoMomentEditorPage> {
       decoration: BoxDecoration(
         color: Colors.black,
         borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
-            color: AppColors.softShadow,
+            color: Theme.of(context).colorScheme.shadow.withAlpha(32),
             blurRadius: 18,
             offset: Offset(0, 10),
           ),
@@ -352,7 +353,13 @@ class _PhotoMomentEditorPageState extends ConsumerState<PhotoMomentEditorPage> {
         }
       }
 
-      ref.read(dataVersionProvider.notifier).increment();
+      ref
+          .read(dataVersionProvider.notifier)
+          .increment(
+            domains: widget.isEditing
+                ? const {DataDomain.records}
+                : const {DataDomain.records, DataDomain.media},
+          );
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
@@ -394,7 +401,9 @@ class _PhotoMomentEditorPageState extends ConsumerState<PhotoMomentEditorPage> {
       await ref
           .read(photoMomentServiceProvider)
           .softDeletePhotoMoment(widget.recordId!);
-      ref.read(dataVersionProvider.notifier).increment();
+      ref
+          .read(dataVersionProvider.notifier)
+          .increment(domains: const {DataDomain.records, DataDomain.media});
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {

@@ -78,7 +78,10 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     });
   }
 
-  Future<void> _saveProjects(List<_ProjectInfo> projects) async {
+  Future<void> _saveProjects(
+    List<_ProjectInfo> projects, {
+    Set<DataDomain> domains = const {DataDomain.projects},
+  }) async {
     setState(() => _saving = true);
     try {
       final settings = ref.read(appSettingsRepositoryProvider);
@@ -91,7 +94,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       } else {
         await settings.update(projectsSettingsKey, value);
       }
-      ref.read(dataVersionProvider.notifier).increment();
+      ref.read(dataVersionProvider.notifier).increment(domains: domains);
     } finally {
       if (mounted) {
         setState(() => _saving = false);
@@ -255,7 +258,10 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       entryType: 'todo',
       createdAt: now,
     );
-    await _saveProjects(nextProjects);
+    await _saveProjects(
+      nextProjects,
+      domains: {DataDomain.projects, DataDomain.records},
+    );
     await _syncProjectArchive(
       _projectById(project.id) ?? project,
       entry: ProjectArchiveEntry(
@@ -298,7 +304,10 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       entryType: 'todo',
       createdAt: now,
     );
-    await _saveProjects(nextProjects);
+    await _saveProjects(
+      nextProjects,
+      domains: {DataDomain.projects, DataDomain.records},
+    );
     await _syncProjectArchive(
       _projectById(project.id) ?? project,
       entry: ProjectArchiveEntry(
@@ -343,7 +352,10 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       entryType: 'todo',
       createdAt: now,
     );
-    await _saveProjects(nextProjects);
+    await _saveProjects(
+      nextProjects,
+      domains: {DataDomain.projects, DataDomain.records},
+    );
     await _syncProjectArchive(
       _projectById(project.id) ?? project,
       entry: ProjectArchiveEntry(
@@ -387,7 +399,10 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       entryType: 'update',
       createdAt: now,
     );
-    await _saveProjects(nextProjects);
+    await _saveProjects(
+      nextProjects,
+      domains: {DataDomain.projects, DataDomain.records},
+    );
     await _syncProjectArchive(
       _projectById(project.id) ?? project,
       entry: ProjectArchiveEntry(
@@ -955,7 +970,6 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     final completedProjects = _completedProjects;
 
     return Scaffold(
-      backgroundColor: AppColors.canvas,
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -1063,6 +1077,7 @@ class _ProjectsHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -1080,15 +1095,15 @@ class _ProjectsHeader extends StatelessWidget {
               icon: const Icon(Icons.menu_rounded),
               tooltip: '项目总览',
               color: onOpenAllProjects == null
-                  ? AppColors.muted.withAlpha(110)
-                  : AppColors.ink,
+                  ? colors.onSurfaceVariant.withAlpha(110)
+                  : colors.onSurface,
             ),
             Expanded(
               child: Text(
                 saving ? '项目 · 保存中' : '项目',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.titleMedium?.copyWith(
-                  color: AppColors.ink,
+                  color: colors.onSurface,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -1097,7 +1112,7 @@ class _ProjectsHeader extends StatelessWidget {
               onPressed: onAddProject,
               icon: const Icon(Icons.add_rounded),
               tooltip: '添加项目',
-              color: AppColors.ink,
+              color: colors.onSurface,
             ),
           ],
         ),
@@ -1114,6 +1129,7 @@ class _EmptyProjects extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.containerMargin),
@@ -1124,20 +1140,16 @@ class _EmptyProjects extends StatelessWidget {
             width: 72,
             height: 72,
             decoration: BoxDecoration(
-              color: AppColors.primary.withAlpha(18),
+              color: colors.primary.withAlpha(18),
               shape: BoxShape.circle,
             ),
-            child: const Icon(
-              Icons.flag_rounded,
-              color: AppColors.primary,
-              size: 34,
-            ),
+            child: Icon(Icons.flag_rounded, color: colors.primary, size: 34),
           ),
           const SizedBox(height: AppSpacing.lg),
           Text(
             '先放一个想慢慢推进的事',
             style: theme.textTheme.titleMedium?.copyWith(
-              color: AppColors.ink,
+              color: colors.onSurface,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -1145,7 +1157,9 @@ class _EmptyProjects extends StatelessWidget {
           Text(
             '之后每天的记录、待办和专注，都可以慢慢归到项目下面。',
             textAlign: TextAlign.center,
-            style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: colors.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: AppSpacing.lg),
           FilledButton.icon(
@@ -1297,6 +1311,7 @@ class _ProjectReorderHandle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Tooltip(
       message: '拖动排序',
       child: SizedBox.square(
@@ -1305,7 +1320,7 @@ class _ProjectReorderHandle extends StatelessWidget {
           child: Icon(
             Icons.drag_indicator_rounded,
             size: 18,
-            color: AppColors.muted.withAlpha(150),
+            color: colors.onSurfaceVariant.withAlpha(150),
           ),
         ),
       ),
@@ -1331,6 +1346,7 @@ class _ProjectCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Semantics(
       button: true,
@@ -1346,17 +1362,17 @@ class _ProjectCard extends StatelessWidget {
             width: selected ? 216 : 190,
             padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
-              color: selected ? AppColors.surface : AppColors.surfaceLow,
+              color: selected ? colors.surface : colors.surfaceContainerLow,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: selected
-                    ? AppColors.primary.withAlpha(130)
-                    : AppColors.border,
+                    ? colors.primary.withAlpha(130)
+                    : colors.outlineVariant,
               ),
               boxShadow: [
                 if (selected)
                   BoxShadow(
-                    color: AppColors.primary.withAlpha(18),
+                    color: colors.primary.withAlpha(18),
                     blurRadius: 18,
                     offset: const Offset(0, 8),
                   ),
@@ -1373,7 +1389,7 @@ class _ProjectCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleMedium?.copyWith(
-                          color: AppColors.ink,
+                          color: colors.onSurface,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -1390,7 +1406,7 @@ class _ProjectCard extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: AppColors.muted,
+                    color: colors.onSurfaceVariant,
                     height: 1.5,
                   ),
                 ),
@@ -1400,7 +1416,7 @@ class _ProjectCard extends StatelessWidget {
                     Icon(
                       Icons.schedule_rounded,
                       size: 14,
-                      color: AppColors.primary.withAlpha(150),
+                      color: colors.primary.withAlpha(150),
                     ),
                     const SizedBox(width: AppSpacing.xxs),
                     Expanded(
@@ -1409,7 +1425,7 @@ class _ProjectCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: AppColors.primary,
+                          color: colors.primary,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -1441,6 +1457,7 @@ class _CompletedProjectsStack extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final topProject = projects.first;
 
     return Semantics(
@@ -1468,9 +1485,9 @@ class _CompletedProjectsStack extends StatelessWidget {
             ),
             Positioned.fill(
               child: Material(
-                color: AppColors.surface,
+                color: colors.surface,
                 elevation: 2,
-                shadowColor: AppColors.softShadow,
+                shadowColor: colors.shadow.withAlpha(13),
                 borderRadius: BorderRadius.circular(12),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
@@ -1495,7 +1512,7 @@ class _CompletedProjectsStack extends StatelessWidget {
                         Text(
                           expanded ? '收起完成' : '已完成',
                           style: theme.textTheme.titleMedium?.copyWith(
-                            color: AppColors.ink,
+                            color: colors.onSurface,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -1503,7 +1520,7 @@ class _CompletedProjectsStack extends StatelessWidget {
                         Text(
                           expanded ? '放回纸堆' : '${projects.length} 个项目',
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: AppColors.muted,
+                            color: colors.onSurfaceVariant,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -1513,7 +1530,7 @@ class _CompletedProjectsStack extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: AppColors.primary,
+                            color: colors.primary,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -1537,11 +1554,12 @@ class _StackPaperLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: AppColors.surfaceLow.withAlpha(alpha),
+        color: colors.surfaceContainerLow.withAlpha(alpha),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border.withAlpha(180)),
+        border: Border.all(color: colors.outlineVariant.withAlpha(180)),
       ),
     );
   }
@@ -1555,14 +1573,15 @@ class _CurrentProjectHint extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Row(
       children: [
         Container(
           width: 8,
           height: 8,
-          decoration: const BoxDecoration(
-            color: AppColors.primary,
+          decoration: BoxDecoration(
+            color: colors.primary,
             shape: BoxShape.circle,
           ),
         ),
@@ -1570,7 +1589,7 @@ class _CurrentProjectHint extends StatelessWidget {
         Text(
           '当前查看：${project.name}',
           style: theme.textTheme.bodySmall?.copyWith(
-            color: AppColors.muted,
+            color: colors.onSurfaceVariant,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -1588,6 +1607,7 @@ class _ArchivedProjectNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return _SectionCard(
       title: '归档项目',
@@ -1598,7 +1618,7 @@ class _ArchivedProjectNotice extends StatelessWidget {
           Text(
             '${project.name} 已收进归档，日常项目区不会再显示它。',
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: AppColors.muted,
+              color: colors.onSurfaceVariant,
               height: 1.45,
             ),
           ),
@@ -1714,9 +1734,10 @@ class _ArchiveBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Material(
-      color: AppColors.surfaceLow,
+      color: colors.surfaceContainerLow,
       borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
@@ -1728,14 +1749,14 @@ class _ArchiveBox extends StatelessWidget {
           ),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            border: Border.all(color: AppColors.border),
+            border: Border.all(color: colors.outlineVariant),
           ),
           child: Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.inventory_2_outlined,
                 size: 18,
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
               ),
               const SizedBox(width: AppSpacing.xs),
               Expanded(
@@ -1745,7 +1766,7 @@ class _ArchiveBox extends StatelessWidget {
                     Text(
                       title,
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        color: AppColors.ink,
+                        color: colors.onSurface,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -1754,7 +1775,7 @@ class _ArchiveBox extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppColors.muted,
+                        color: colors.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -1765,7 +1786,7 @@ class _ArchiveBox extends StatelessWidget {
                     ? Icons.keyboard_arrow_up_rounded
                     : Icons.keyboard_arrow_down_rounded,
                 size: 20,
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
               ),
             ],
           ),
@@ -1835,6 +1856,7 @@ class _ExpandableTodoRowState extends State<_ExpandableTodoRow> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final canToggleText = widget.todo.title.runes.length > _longTextThreshold;
     final done = _displayDone;
 
@@ -1857,20 +1879,18 @@ class _ExpandableTodoRowState extends State<_ExpandableTodoRow> {
                   margin: const EdgeInsets.only(top: 1),
                   decoration: BoxDecoration(
                     color: done
-                        ? AppColors.primary.withAlpha(24)
+                        ? colors.primary.withAlpha(24)
                         : Colors.transparent,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: done
-                          ? AppColors.primary
-                          : AppColors.outlineVariant,
+                      color: done ? colors.primary : colors.outlineVariant,
                     ),
                   ),
                   child: done
-                      ? const Icon(
+                      ? Icon(
                           Icons.check_rounded,
                           size: 15,
-                          color: AppColors.primary,
+                          color: colors.primary,
                         )
                       : null,
                 ),
@@ -1886,10 +1906,12 @@ class _ExpandableTodoRowState extends State<_ExpandableTodoRow> {
                             ? TextOverflow.visible
                             : TextOverflow.ellipsis,
                         style: theme.textTheme.bodyLarge?.copyWith(
-                          color: done ? AppColors.muted : AppColors.ink,
+                          color: done
+                              ? colors.onSurfaceVariant
+                              : colors.onSurface,
                           height: 1.45,
                           decoration: done ? TextDecoration.lineThrough : null,
-                          decorationColor: AppColors.muted,
+                          decorationColor: colors.onSurfaceVariant,
                         ),
                       ),
                       if (canToggleText) ...[
@@ -1920,7 +1942,7 @@ class _ExpandableTodoRowState extends State<_ExpandableTodoRow> {
                   icon: const Icon(Icons.edit_rounded),
                   iconSize: 18,
                   visualDensity: VisualDensity.compact,
-                  color: AppColors.muted,
+                  color: colors.onSurfaceVariant,
                 ),
               ],
             ),
@@ -1981,13 +2003,16 @@ class _EmptyTodoPrompt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           '这里放这个项目自己的下一步。',
-          style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: colors.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: AppSpacing.sm),
         OutlinedButton.icon(
@@ -2014,6 +2039,7 @@ class _TodoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -2034,20 +2060,18 @@ class _TodoRow extends StatelessWidget {
                   margin: const EdgeInsets.only(top: 1),
                   decoration: BoxDecoration(
                     color: todo.done
-                        ? AppColors.primary.withAlpha(24)
+                        ? colors.primary.withAlpha(24)
                         : Colors.transparent,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: todo.done
-                          ? AppColors.primary
-                          : AppColors.outlineVariant,
+                      color: todo.done ? colors.primary : colors.outlineVariant,
                     ),
                   ),
                   child: todo.done
-                      ? const Icon(
+                      ? Icon(
                           Icons.check_rounded,
                           size: 15,
-                          color: AppColors.primary,
+                          color: colors.primary,
                         )
                       : null,
                 ),
@@ -2056,10 +2080,12 @@ class _TodoRow extends StatelessWidget {
                   child: Text(
                     todo.title,
                     style: theme.textTheme.bodyLarge?.copyWith(
-                      color: todo.done ? AppColors.muted : AppColors.ink,
+                      color: todo.done
+                          ? colors.onSurfaceVariant
+                          : colors.onSurface,
                       height: 1.45,
                       decoration: todo.done ? TextDecoration.lineThrough : null,
-                      decorationColor: AppColors.muted,
+                      decorationColor: colors.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -2069,7 +2095,7 @@ class _TodoRow extends StatelessWidget {
                   icon: const Icon(Icons.edit_rounded),
                   iconSize: 18,
                   visualDensity: VisualDensity.compact,
-                  color: AppColors.muted,
+                  color: colors.onSurfaceVariant,
                 ),
               ],
             ),
@@ -2122,6 +2148,7 @@ class _ProjectFavoritesSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final visibleFavorites = favorites.take(_visibleFavoriteCount).toList();
     final hiddenCount = favorites.length - visibleFavorites.length;
 
@@ -2133,7 +2160,7 @@ class _ProjectFavoritesSection extends StatelessWidget {
               '还没有收藏。',
               style: Theme.of(
                 context,
-              ).textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+              ).textTheme.bodyLarge?.copyWith(color: colors.onSurfaceVariant),
             )
           : Column(
               children: [
@@ -2166,6 +2193,7 @@ class _FavoriteRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final icon = favorite.type == _ProjectFavoriteType.markdownFile
         ? Icons.description_outlined
         : Icons.notes_rounded;
@@ -2174,7 +2202,7 @@ class _FavoriteRow extends StatelessWidget {
       padding: EdgeInsets.only(bottom: isLast ? 0 : AppSpacing.xs),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: AppColors.primary),
+          Icon(icon, size: 20, color: colors.primary),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: InkWell(
@@ -2187,7 +2215,7 @@ class _FavoriteRow extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyLarge?.copyWith(
-                    color: AppColors.primary,
+                    color: colors.primary,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -2200,7 +2228,7 @@ class _FavoriteRow extends StatelessWidget {
             icon: const Icon(Icons.delete_outline_rounded),
             iconSize: 19,
             visualDensity: VisualDensity.compact,
-            color: AppColors.muted,
+            color: colors.onSurfaceVariant,
           ),
         ],
       ),
@@ -2216,6 +2244,7 @@ class _FavoriteTextSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
@@ -2231,7 +2260,7 @@ class _FavoriteTextSheet extends StatelessWidget {
             Text(
               favorite.title,
               style: theme.textTheme.titleLarge?.copyWith(
-                color: AppColors.ink,
+                color: colors.onSurface,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -2487,13 +2516,16 @@ class _EmptyUpdatePrompt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           '项目推进的片刻会出现在这里。',
-          style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: colors.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: AppSpacing.sm),
         OutlinedButton.icon(
@@ -2524,12 +2556,13 @@ class _UpdateRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final color = Color(update.colorValue);
 
     final text = Text(
       update.text,
       style: theme.textTheme.bodyLarge?.copyWith(
-        color: onTap == null ? AppColors.ink : AppColors.primary,
+        color: onTap == null ? colors.onSurface : colors.primary,
         height: 1.45,
         fontWeight: onTap == null ? null : FontWeight.w700,
       ),
@@ -2552,7 +2585,7 @@ class _UpdateRow extends StatelessWidget {
                   child: Container(
                     width: 1,
                     margin: const EdgeInsets.symmetric(vertical: 5),
-                    color: AppColors.border,
+                    color: colors.outlineVariant,
                   ),
                 ),
             ],
@@ -2572,7 +2605,7 @@ class _UpdateRow extends StatelessWidget {
                         child: Text(
                           update.time,
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: AppColors.muted,
+                            color: colors.onSurfaceVariant,
                           ),
                         ),
                       ),
@@ -2587,7 +2620,9 @@ class _UpdateRow extends StatelessWidget {
                           ),
                           iconSize: 19,
                           visualDensity: VisualDensity.compact,
-                          color: isFavorite ? AppColors.focus : AppColors.muted,
+                          color: isFavorite
+                              ? colors.primary
+                              : colors.onSurfaceVariant,
                         ),
                     ],
                   ),
@@ -2607,7 +2642,7 @@ class _UpdateRow extends StatelessWidget {
                             Icon(
                               Icons.open_in_new_rounded,
                               size: 16,
-                              color: AppColors.primary.withAlpha(180),
+                              color: colors.primary.withAlpha(180),
                             ),
                           ],
                         ),
@@ -2682,18 +2717,19 @@ class _ProjectImagePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return ClipRRect(
       borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       child: Container(
         width: 104,
         height: 76,
-        color: AppColors.canvas,
+        color: colors.surfaceContainerLow,
         child: Image.file(
           File(path),
           fit: BoxFit.cover,
           errorBuilder: (_, _, _) => Icon(
             Icons.image_not_supported_rounded,
-            color: AppColors.muted.withAlpha(170),
+            color: colors.onSurfaceVariant.withAlpha(170),
           ),
         ),
       ),
@@ -2808,6 +2844,7 @@ class _HeatmapSectionState extends State<_HeatmapSection> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final today = _dateOnly(DateTime.now());
     final startDate = _heatmapStartDate(today);
     final dayEntries = _buildDayEntries(
@@ -2829,7 +2866,9 @@ class _HeatmapSectionState extends State<_HeatmapSection> {
         children: [
           Text(
             '项目更新、待办变化和归属项目的记录都会点亮这里。',
-            style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colors.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: AppSpacing.md),
           _ContributionCalendar(
@@ -2851,7 +2890,7 @@ class _HeatmapSectionState extends State<_HeatmapSection> {
                   height: 10,
                   margin: const EdgeInsets.only(left: 3),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withAlpha(alpha),
+                    color: colors.primary.withAlpha(alpha),
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
@@ -2889,6 +2928,7 @@ class _ContributionCalendar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final columns = List.generate(12, (week) {
       return List.generate(7, (weekday) {
         return startDate.add(Duration(days: week * 7 + weekday));
@@ -2918,7 +2958,7 @@ class _ContributionCalendar extends StatelessWidget {
                   child: Text(
                     monthLabels[column] ?? '',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.muted,
+                      color: colors.onSurfaceVariant,
                       fontSize: 10,
                     ),
                   ),
@@ -2965,13 +3005,14 @@ class _SelectedDayProjectEntries extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final label = '${date.month}月${date.day}日';
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.sm),
       decoration: BoxDecoration(
-        color: AppColors.surfaceLow.withAlpha(120),
+        color: colors.surfaceContainerLow.withAlpha(120),
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       ),
       child: Column(
@@ -2981,9 +3022,7 @@ class _SelectedDayProjectEntries extends StatelessWidget {
             entries.isEmpty
                 ? '$label · 暂无项目推进'
                 : '$label · ${entries.length} 条项目推进',
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: AppColors.primary,
-            ),
+            style: theme.textTheme.labelLarge?.copyWith(color: colors.primary),
           ),
           if (entries.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.xs),
@@ -2995,7 +3034,7 @@ class _SelectedDayProjectEntries extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: AppColors.ink,
+                    color: colors.onSurface,
                   ),
                 ),
               ),
@@ -3087,6 +3126,7 @@ class _HeatmapCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final alpha = switch (count) {
       0 => 26,
       1 => 62,
@@ -3106,10 +3146,10 @@ class _HeatmapCell extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 5),
           decoration: BoxDecoration(
             color: enabled
-                ? AppColors.primary.withAlpha(alpha)
-                : AppColors.border.withAlpha(90),
+                ? colors.primary.withAlpha(alpha)
+                : colors.outlineVariant.withAlpha(90),
             borderRadius: BorderRadius.circular(3),
-            border: selected ? Border.all(color: AppColors.primary) : null,
+            border: selected ? Border.all(color: colors.primary) : null,
           ),
         ),
       ),
@@ -3133,12 +3173,13 @@ class _SectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Card(
-      color: AppColors.surface,
+      color: colors.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: AppColors.border),
+        side: BorderSide(color: colors.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.md),
@@ -3150,7 +3191,7 @@ class _SectionCard extends StatelessWidget {
                 Text(
                   title,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    color: AppColors.ink,
+                    color: colors.onSurface,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -3161,7 +3202,7 @@ class _SectionCard extends StatelessWidget {
                       trailing!,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppColors.muted,
+                        color: colors.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -3189,11 +3230,12 @@ class _SoftEmptyText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Text(
       text,
       style: Theme.of(
         context,
-      ).textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+      ).textTheme.bodyLarge?.copyWith(color: colors.onSurfaceVariant),
     );
   }
 }
@@ -3214,6 +3256,7 @@ class _AllProjectsPageState extends State<_AllProjectsPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final visibleProjects = widget.projects.where((project) {
       if (_filter == '全部项目') return !project.isArchived;
       if (_filter == '归档') return project.isArchived;
@@ -3221,7 +3264,6 @@ class _AllProjectsPageState extends State<_AllProjectsPage> {
     }).toList();
 
     return Scaffold(
-      backgroundColor: AppColors.canvas,
       appBar: AppBar(
         title: const Text('所有项目'),
         leading: IconButton(
@@ -3243,7 +3285,7 @@ class _AllProjectsPageState extends State<_AllProjectsPage> {
             Text(
               '把暂时不推进的项目收进归档，记录不会丢失。',
               style: theme.textTheme.bodyLarge?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
                 height: 1.55,
               ),
             ),
@@ -3291,14 +3333,17 @@ class _AllProjectRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(bottom: AppSpacing.sm),
       decoration: BoxDecoration(
-        color: selected ? AppColors.primary.withAlpha(18) : AppColors.surface,
+        color: selected ? colors.primary.withAlpha(18) : colors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: selected ? AppColors.primary.withAlpha(90) : AppColors.border,
+          color: selected
+              ? colors.primary.withAlpha(90)
+              : colors.outlineVariant,
         ),
       ),
       child: ListTile(
@@ -3311,7 +3356,7 @@ class _AllProjectRow extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleMedium?.copyWith(
-                  color: AppColors.ink,
+                  color: colors.onSurface,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -3324,11 +3369,13 @@ class _AllProjectRow extends StatelessWidget {
           project.goal,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colors.onSurfaceVariant,
+          ),
         ),
         trailing: selected
-            ? const Icon(Icons.check_circle_rounded, color: AppColors.primary)
-            : const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+            ? Icon(Icons.check_circle_rounded, color: colors.primary)
+            : Icon(Icons.chevron_right_rounded, color: colors.onSurfaceVariant),
       ),
     );
   }
@@ -3392,6 +3439,7 @@ class _ProjectTextEntrySheetState extends State<_ProjectTextEntrySheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
 
     return SafeArea(
@@ -3410,7 +3458,7 @@ class _ProjectTextEntrySheetState extends State<_ProjectTextEntrySheet> {
             Text(
               widget.title,
               style: theme.textTheme.titleMedium?.copyWith(
-                color: AppColors.ink,
+                color: colors.onSurface,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -3418,7 +3466,7 @@ class _ProjectTextEntrySheetState extends State<_ProjectTextEntrySheet> {
             Text(
               widget.subtitle,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: AppSpacing.md),
@@ -3435,9 +3483,7 @@ class _ProjectTextEntrySheetState extends State<_ProjectTextEntrySheet> {
               const SizedBox(height: AppSpacing.sm),
               Text(
                 _errorText!,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: AppColors.accent,
-                ),
+                style: theme.textTheme.bodySmall?.copyWith(color: colors.error),
               ),
             ],
             const SizedBox(height: AppSpacing.lg),
@@ -3506,6 +3552,7 @@ class _EditProjectSheetState extends State<_EditProjectSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
 
     return SafeArea(
@@ -3524,7 +3571,7 @@ class _EditProjectSheetState extends State<_EditProjectSheet> {
             Text(
               '编辑项目',
               style: theme.textTheme.titleMedium?.copyWith(
-                color: AppColors.ink,
+                color: colors.onSurface,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -3534,7 +3581,7 @@ class _EditProjectSheetState extends State<_EditProjectSheet> {
                   ? '保存后会从归档恢复到日常项目。'
                   : '名称和状态会同步到项目总览与 Markdown 档案。',
               style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: AppSpacing.md),
@@ -3546,7 +3593,9 @@ class _EditProjectSheetState extends State<_EditProjectSheet> {
             const SizedBox(height: AppSpacing.md),
             Text(
               '当前状态',
-              style: theme.textTheme.labelLarge?.copyWith(color: AppColors.ink),
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.onSurface,
+              ),
             ),
             const SizedBox(height: AppSpacing.xs),
             Wrap(
@@ -3565,9 +3614,7 @@ class _EditProjectSheetState extends State<_EditProjectSheet> {
               const SizedBox(height: AppSpacing.sm),
               Text(
                 _errorText!,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: AppColors.accent,
-                ),
+                style: theme.textTheme.bodySmall?.copyWith(color: colors.error),
               ),
             ],
             const SizedBox(height: AppSpacing.lg),
@@ -3634,9 +3681,9 @@ class _AddProjectPageState extends State<_AddProjectPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: AppColors.canvas,
       appBar: AppBar(title: const Text('添加项目')),
       body: SafeArea(
         top: false,
@@ -3651,7 +3698,7 @@ class _AddProjectPageState extends State<_AddProjectPage> {
             Text(
               '先写下一个想慢慢推进的事，之后每天的记录都可以归到这里。',
               style: theme.textTheme.bodyLarge?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
                 height: 1.55,
               ),
             ),
@@ -3671,7 +3718,9 @@ class _AddProjectPageState extends State<_AddProjectPage> {
             const SizedBox(height: AppSpacing.md),
             Text(
               '当前状态',
-              style: theme.textTheme.labelLarge?.copyWith(color: AppColors.ink),
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.onSurface,
+              ),
             ),
             const SizedBox(height: AppSpacing.xs),
             Wrap(
@@ -3695,9 +3744,7 @@ class _AddProjectPageState extends State<_AddProjectPage> {
               const SizedBox(height: AppSpacing.sm),
               Text(
                 _errorText!,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: AppColors.accent,
-                ),
+                style: theme.textTheme.bodySmall?.copyWith(color: colors.error),
               ),
             ],
             const SizedBox(height: AppSpacing.xl),
@@ -3711,7 +3758,7 @@ class _AddProjectPageState extends State<_AddProjectPage> {
               '稍后再补充也可以',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
               ),
             ),
           ],
@@ -3737,13 +3784,14 @@ class _ProjectTextField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           label,
-          style: theme.textTheme.labelLarge?.copyWith(color: AppColors.ink),
+          style: theme.textTheme.labelLarge?.copyWith(color: colors.onSurface),
         ),
         const SizedBox(height: AppSpacing.xs),
         TextField(
@@ -3763,7 +3811,7 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _statusColor(status);
+    final color = _statusColor(status, Theme.of(context).colorScheme);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
@@ -3791,7 +3839,7 @@ class _StatusEditPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _statusColor(status);
+    final color = _statusColor(status, Theme.of(context).colorScheme);
 
     return Material(
       color: color.withAlpha(20),
@@ -3822,14 +3870,14 @@ class _StatusEditPill extends StatelessWidget {
   }
 }
 
-Color _statusColor(String status) {
+Color _statusColor(String status, ColorScheme colors) {
   return switch (status) {
-    '进行中' => AppColors.primary,
-    '暂停' => AppColors.secondary,
+    '进行中' => colors.primary,
+    '暂停' => colors.secondary,
     '完成' => AppColors.tracker,
     '未开始' => AppColors.focus,
-    '归档' => AppColors.muted,
-    _ => AppColors.muted,
+    '归档' => colors.onSurfaceVariant,
+    _ => colors.onSurfaceVariant,
   };
 }
 

@@ -84,7 +84,9 @@ class _FocusSessionPageState extends ConsumerState<FocusSessionPage>
             note: note.isEmpty ? null : note,
             createdAt: now,
           );
-      ref.read(dataVersionProvider.notifier).increment();
+      ref
+          .read(dataVersionProvider.notifier)
+          .increment(domains: const {DataDomain.focus});
       if (!mounted) return;
       Navigator.of(context).pop(true);
       ScaffoldMessenger.of(context)

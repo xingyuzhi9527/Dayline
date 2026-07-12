@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/database/local_database.dart';
 import '../../core/database/repository_providers.dart';
 import '../../core/parser/expense_line_item.dart';
 import '../../core/parser/lui_lite_parser.dart';
@@ -45,9 +46,14 @@ class RecordNotifier extends Notifier<RecordState> {
     );
 
     try {
-      await _persist(parsed, asMemo: asMemo);
+      await ref
+          .read(localDatabaseProvider)
+          .transaction(() => _persist(parsed, asMemo: asMemo));
       await ensureDailyDraftAfterActivity(ref, DateTime.now());
-      ref.read(dataVersionProvider.notifier).increment();
+      await _refreshMonthlyReportIfNeeded(parsed, asMemo: asMemo);
+      ref
+          .read(dataVersionProvider.notifier)
+          .increment(domains: _domainsForParsedInput(parsed, asMemo: asMemo));
       state = const RecordState();
       return true;
     } catch (e) {
@@ -106,9 +112,14 @@ class RecordNotifier extends Notifier<RecordState> {
     state = state.copyWith(isSaving: true, errorMessage: null);
 
     try {
-      await _persist(parsed, asMemo: asMemo);
+      await ref
+          .read(localDatabaseProvider)
+          .transaction(() => _persist(parsed, asMemo: asMemo));
       await ensureDailyDraftAfterActivity(ref, DateTime.now());
-      ref.read(dataVersionProvider.notifier).increment();
+      await _refreshMonthlyReportIfNeeded(parsed, asMemo: asMemo);
+      ref
+          .read(dataVersionProvider.notifier)
+          .increment(domains: _domainsForParsedInput(parsed, asMemo: asMemo));
       state = const RecordState();
     } catch (e) {
       state = state.copyWith(isSaving: false, errorMessage: e.toString());
@@ -191,13 +202,6 @@ class RecordNotifier extends Notifier<RecordState> {
                 createdAt: createdAt,
               );
         }
-        await syncMonthlyExpenseReportForDate(
-          settingsRepository: ref.read(appSettingsRepositoryProvider),
-          expensesRepository: ref.read(expensesRepositoryProvider),
-          date: now,
-          generatedAt: now,
-        );
-
       case ParsedInputType.body:
         final value = (parsed.metadata['value'] as num?)?.toDouble() ?? 0.0;
         final metric = (parsed.metadata['metric'] as String?) ?? 'weight';
@@ -240,6 +244,44 @@ class RecordNotifier extends Notifier<RecordState> {
       case ParsedInputType.tracker:
         await _saveTrackerLog(parsed, now, createdAt);
     }
+  }
+
+  Future<void> _refreshMonthlyReportIfNeeded(
+    ParsedInput parsed, {
+    required bool asMemo,
+  }) async {
+    if (asMemo || parsed.type != ParsedInputType.expense) return;
+    try {
+      await syncMonthlyExpenseReportForDate(
+        settingsRepository: ref.read(appSettingsRepositoryProvider),
+        expensesRepository: ref.read(expensesRepositoryProvider),
+        date: DateTime.now(),
+        generatedAt: DateTime.now(),
+      );
+    } catch (_) {
+      // The expense rows are authoritative; Markdown is a derived view.
+    }
+  }
+
+  Set<DataDomain> _domainsForParsedInput(
+    ParsedInput parsed, {
+    required bool asMemo,
+  }) {
+    if (asMemo) return const {DataDomain.records};
+
+    return switch (parsed.type) {
+      ParsedInputType.memo ||
+      ParsedInputType.sleep ||
+      ParsedInputType.mood => const {DataDomain.records},
+      ParsedInputType.todo => const {DataDomain.todos},
+      ParsedInputType.focus => const {DataDomain.focus},
+      ParsedInputType.expense => const {DataDomain.expenses},
+      ParsedInputType.body => const {DataDomain.bodyLogs},
+      ParsedInputType.tracker => const {
+        DataDomain.trackerLogs,
+        DataDomain.trackers,
+      },
+    };
   }
 
   Future<void> _saveTrackerLog(

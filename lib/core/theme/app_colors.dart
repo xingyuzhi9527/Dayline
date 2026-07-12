@@ -10,8 +10,12 @@ abstract final class AppColors {
   static const Color primaryFixed = Color(0xFFAEEEF2);
   static const Color secondary = Color(0xFF7D5700);
   static const Color secondaryContainer = Color(0xFFFEC252);
+  static const Color secondaryDark = Color(0xFFFFC252);
+  static const Color secondaryContainerDark = Color(0xFF5C4300);
   static const Color accent = Color(0xFFA34B3B);
   static const Color tertiary = Color(0xFF843426);
+  static const Color tertiaryDark = Color(0xFFFFB4A8);
+  static const Color tertiaryContainerDark = Color(0xFF7F2F23);
 
   static const Color ink = Color(0xFF1C2526);
   static const Color muted = Color(0xFF667679);

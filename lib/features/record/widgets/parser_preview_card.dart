@@ -83,6 +83,7 @@ class _OriginalRecordCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return SizedBox(
       width: double.infinity,
@@ -95,7 +96,7 @@ class _OriginalRecordCard extends StatelessWidget {
               Text(
                 '原始记录',
                 style: theme.textTheme.labelLarge?.copyWith(
-                  color: AppColors.muted,
+                  color: colors.onSurfaceVariant,
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
@@ -187,6 +188,7 @@ class _ParsedBentoGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final duration = parsed.metadata['durationMinutes'];
     final amount = parsed.metadata['amount'];
     final value = parsed.metadata['value'];
@@ -225,7 +227,7 @@ class _ParsedBentoGrid extends StatelessWidget {
           icon: Icons.schedule_rounded,
           label: '时间',
           value: parsed.time ?? '现在',
-          color: AppColors.secondaryContainer,
+          color: colors.secondaryContainer,
         ),
         _ParsedTile(
           icon: duration != null
@@ -235,12 +237,12 @@ class _ParsedBentoGrid extends StatelessWidget {
               : Icons.monitor_weight_rounded,
           label: detailsLabel,
           value: detailsValue,
-          color: AppColors.accent,
+          color: colors.tertiary,
         ),
         _ParsedTile(
           icon: Icons.tag_rounded,
           label: '标签',
-          color: AppColors.primary,
+          color: colors.primary,
           child: parsed.tags.isEmpty
               ? Text('无标签', style: Theme.of(context).textTheme.titleMedium)
               : Wrap(
@@ -275,6 +277,7 @@ class _ParsedTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Card(
       child: Padding(
@@ -295,7 +298,7 @@ class _ParsedTile extends StatelessWidget {
             Text(
               label,
               style: theme.textTheme.labelLarge?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: AppSpacing.xs),
@@ -304,7 +307,7 @@ class _ParsedTile extends StatelessWidget {
                   value ?? '',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.headlineMedium?.copyWith(
-                    color: AppColors.ink,
+                    color: colors.onSurface,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -322,19 +325,20 @@ class _TagPreviewChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.xs,
         vertical: AppSpacing.xxs,
       ),
       decoration: BoxDecoration(
-        color: AppColors.primary.withAlpha(20),
+        color: colors.primary.withAlpha(20),
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       ),
       child: Text(
         '#$tag',
         style: Theme.of(context).textTheme.titleMedium?.copyWith(
-          color: AppColors.primary,
+          color: colors.primary,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -356,6 +360,7 @@ class _TypeMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selectedMeta = _TypeMeta.from(selectedType);
+    final colors = Theme.of(context).colorScheme;
 
     return PopupMenuButton<ParsedInputType>(
       enabled: enabled,
@@ -388,7 +393,9 @@ class _TypeMenu extends StatelessWidget {
           Icon(
             Icons.expand_more_rounded,
             size: 18,
-            color: enabled ? AppColors.muted : Theme.of(context).disabledColor,
+            color: enabled
+                ? colors.onSurfaceVariant
+                : colors.onSurface.withAlpha(120),
           ),
         ],
       ),

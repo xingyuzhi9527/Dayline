@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/database/repository_providers.dart';
 import '../../core/theme/app_spacing.dart';
 import '../record/widgets/quick_input_bar.dart';
+import 'today_providers.dart';
 import 'widgets/today_cards.dart';
 
 class TodayPage extends ConsumerWidget {
@@ -11,7 +11,9 @@ class TodayPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    ref.watch(dataVersionProvider);
+    // Rebuild the page header when the calendar day rolls over. Individual
+    // cards subscribe to the narrower async providers they actually render.
+    ref.watch(todayDateKeyProvider);
 
     return SafeArea(
       child: ListView(

@@ -17,8 +17,8 @@ class FlashRecordState {
     this.parsedInput,
     this.errorMessage,
     this.source = 'voice',
-    this.sttStatus = SttAvailabilityStatus.loading,
-    this.sttStatusMessage = '正在唤醒离线大脑...',
+    this.sttStatus = SttAvailabilityStatus.idle,
+    this.sttStatusMessage = '按下后准备离线语音',
     this.partialText = '',
     this.audioLevel = 0,
     this.transcriptFinal = false,
@@ -29,6 +29,7 @@ class FlashRecordState {
     this.savedSequence = 0,
     this.selectedProjectId,
     this.expenseReceiptImagePath,
+    this.saveOperationId,
   });
 
   final FlashPhase phase;
@@ -48,11 +49,13 @@ class FlashRecordState {
   final int savedSequence;
   final String? selectedProjectId;
   final String? expenseReceiptImagePath;
+  final String? saveOperationId;
 
   bool get hasResult => parsedInput != null;
   bool get isInputActive =>
       phase == FlashPhase.idle || phase == FlashPhase.listening;
   bool get sttReady => sttStatus == SttAvailabilityStatus.ready;
+  bool get sttIdle => sttStatus == SttAvailabilityStatus.idle;
   bool get sttLoading => sttStatus == SttAvailabilityStatus.loading;
 
   FlashRecordState copyWith({
@@ -73,6 +76,7 @@ class FlashRecordState {
     int? savedSequence,
     Object? selectedProjectId = _unchanged,
     Object? expenseReceiptImagePath = _unchanged,
+    Object? saveOperationId = _unchanged,
   }) {
     return FlashRecordState(
       phase: phase ?? this.phase,
@@ -104,6 +108,9 @@ class FlashRecordState {
       expenseReceiptImagePath: identical(expenseReceiptImagePath, _unchanged)
           ? this.expenseReceiptImagePath
           : expenseReceiptImagePath as String?,
+      saveOperationId: identical(saveOperationId, _unchanged)
+          ? this.saveOperationId
+          : saveOperationId as String?,
     );
   }
 }

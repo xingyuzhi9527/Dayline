@@ -4,11 +4,13 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../database/repositories.dart';
+import '../storage/recoverable_local_file_writer.dart';
 
 class ExportService {
   const ExportService._();
 
   static const _weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  static const _fileWriter = RecoverableLocalFileWriter();
 
   static String _formatDate(DateTime date) {
     return '${date.year}年${date.month}月${date.day}日 ${_weekdays[date.weekday - 1]}';
@@ -233,7 +235,7 @@ class ExportService {
     String directory,
   ) async {
     final file = File(p.join(directory, filename));
-    await file.writeAsString(content);
+    await _fileWriter.writeText(file.path, content);
     return file.path;
   }
 }

@@ -7,7 +7,6 @@ import '../../core/database/repository_providers.dart';
 import '../../core/markdown/markdown_directory_service.dart';
 import '../../core/markdown/markdown_filename.dart';
 import '../../core/markdown/markdown_storage_service.dart';
-import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../projects/project_store.dart';
 import 'long_note_notifier.dart';
@@ -123,7 +122,13 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
               updatedAt: now,
             );
           }
-          ref.read(dataVersionProvider.notifier).increment();
+          ref
+              .read(dataVersionProvider.notifier)
+              .increment(
+                domains: projectId == null
+                    ? const {DataDomain.records}
+                    : const {DataDomain.projects, DataDomain.records},
+              );
         }
         if (!mounted) return;
         ScaffoldMessenger.of(context)
@@ -229,6 +234,7 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
   @override
   Widget build(BuildContext context) {
     final projects = ref.watch(projectOptionsProvider);
+    final colors = Theme.of(context).colorScheme;
 
     return PopScope(
       canPop: false,
@@ -343,22 +349,22 @@ class _LongNoteEditorPageState extends ConsumerState<LongNoteEditorPage> {
                 horizontal: AppSpacing.md,
                 vertical: AppSpacing.xs,
               ),
-              decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: AppColors.border)),
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: colors.outlineVariant)),
               ),
               child: Row(
                 children: [
                   Text(
                     '${_bodyController.text.length} 字',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.copyWith(color: AppColors.muted),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
                   ),
                   const Spacer(),
                   Text(
                     _filenamePreview(),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.muted,
+                      color: colors.onSurfaceVariant,
                       fontFamily: 'monospace',
                       fontSize: 11,
                     ),

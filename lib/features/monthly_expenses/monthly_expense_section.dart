@@ -35,6 +35,7 @@ class _MonthlyExpenseSectionState extends ConsumerState<MonthlyExpenseSection> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final summaryAsync = ref.watch(
       monthlyExpenseSummaryProvider(_selectedMonth),
     );
@@ -63,7 +64,7 @@ class _MonthlyExpenseSectionState extends ConsumerState<MonthlyExpenseSection> {
               ),
               error: (error, _) => Text(
                 '月账单加载失败：$error',
-                style: TextStyle(color: AppColors.muted),
+                style: TextStyle(color: colors.onSurfaceVariant),
               ),
             ),
           ],
@@ -149,32 +150,35 @@ class _MonthlyExpenseHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Row(
       children: [
         Text(
           '月账单',
           style: theme.textTheme.titleSmall?.copyWith(
-            color: AppColors.primary,
+            color: colors.primary,
             fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(width: AppSpacing.xs),
         Text(
           monthlyExpenseMonthKey(month),
-          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colors.onSurfaceVariant,
+          ),
         ),
         const Spacer(),
         IconButton(
           onPressed: onPrevious,
           icon: const Icon(Icons.chevron_left_rounded),
           tooltip: '上个月',
-          color: AppColors.muted,
+          color: colors.onSurfaceVariant,
         ),
         IconButton(
           onPressed: onNext,
           icon: const Icon(Icons.chevron_right_rounded),
           tooltip: '下个月',
-          color: AppColors.muted,
+          color: colors.onSurfaceVariant,
         ),
       ],
     );
@@ -195,6 +199,7 @@ class _MonthlyExpenseContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     if (!summary.hasData) {
       return Column(
@@ -204,7 +209,7 @@ class _MonthlyExpenseContent extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
             child: Text(
               '这个月还没有消费记录。',
-              style: TextStyle(color: AppColors.muted),
+              style: TextStyle(color: colors.onSurfaceVariant),
             ),
           ),
           _MonthlyExpenseReportButton(
@@ -249,7 +254,7 @@ class _MonthlyExpenseContent extends StatelessWidget {
                 child: Text(
                   '最高消费日 ${summary.highestDay!.date.substring(5)}，${_money(summary.highestDay!.amount)}',
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: AppColors.muted,
+                    color: colors.onSurfaceVariant,
                   ),
                 ),
               ),
@@ -259,7 +264,9 @@ class _MonthlyExpenseContent extends StatelessWidget {
         const SizedBox(height: AppSpacing.md),
         Text(
           '详细消费记录已归档到月消费 Markdown。',
-          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colors.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: AppSpacing.xs),
         _MonthlyExpenseReportButton(
@@ -285,12 +292,13 @@ class _BillMetric extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Expanded(
       child: Container(
         constraints: const BoxConstraints(minHeight: 68),
         padding: const EdgeInsets.all(AppSpacing.xs),
         decoration: BoxDecoration(
-          color: AppColors.surfaceLow.withAlpha(120),
+          color: colors.surfaceContainerLow.withAlpha(120),
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         ),
         child: Column(
@@ -303,13 +311,13 @@ class _BillMetric extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelLarge?.copyWith(
-                color: AppColors.primary,
+                color: colors.primary,
               ),
             ),
             Text(
               label,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.muted,
+                color: colors.onSurfaceVariant,
               ),
             ),
           ],

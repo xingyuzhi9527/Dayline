@@ -54,7 +54,11 @@ class FlashCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final typeMeta = _TypeMeta.from(parsedInput.type);
+    final colorScheme = theme.colorScheme;
+    final typeMeta = _TypeMeta.from(
+      parsedInput.type,
+      primary: colorScheme.primary,
+    );
     final durationMinutes = parsedInput.metadata['durationMinutes'] as int?;
     final amount = parsedInput.metadata['amount'] as num?;
     final isExpense = parsedInput.type == ParsedInputType.expense;
@@ -99,7 +103,7 @@ class FlashCard extends StatelessWidget {
                   Text(
                     '语音输入',
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: AppColors.muted,
+                      color: colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -112,7 +116,7 @@ class FlashCard extends StatelessWidget {
                   Text(
                     '类型',
                     style: theme.textTheme.labelLarge?.copyWith(
-                      color: AppColors.muted,
+                      color: colorScheme.onSurfaceVariant,
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
@@ -243,7 +247,8 @@ class _TypeMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selectedMeta = _TypeMeta.from(selectedType);
+    final primary = Theme.of(context).colorScheme.primary;
+    final selectedMeta = _TypeMeta.from(selectedType, primary: primary);
     return PopupMenuButton<ParsedInputType>(
       initialValue: selectedType,
       tooltip: '修改类型',
@@ -255,9 +260,9 @@ class _TypeMenu extends StatelessWidget {
               value: type,
               child: Row(
                 children: [
-                  Icon(_TypeMeta.from(type).icon, size: 18),
+                  Icon(_TypeMeta.from(type, primary: primary).icon, size: 18),
                   const SizedBox(width: AppSpacing.xs),
-                  Text(_TypeMeta.from(type).label),
+                  Text(_TypeMeta.from(type, primary: primary).label),
                 ],
               ),
             ),
@@ -291,6 +296,7 @@ class _ProjectMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     ProjectOption? selectedProject;
     for (final project in projects) {
       if (project.id == selectedProjectId) {
@@ -300,7 +306,9 @@ class _ProjectMenu extends StatelessWidget {
     }
     final enabled = projects.isNotEmpty;
     final label = selectedProject?.name ?? '项目';
-    final tint = selectedProject == null ? AppColors.muted : AppColors.primary;
+    final tint = selectedProject == null
+        ? colorScheme.onSurfaceVariant
+        : colorScheme.primary;
 
     return PopupMenuButton<String?>(
       enabled: enabled,
@@ -330,7 +338,7 @@ class _ProjectMenu extends StatelessWidget {
                         : Icons.flag_outlined,
                     size: 18,
                     color: project.id == selectedProjectId
-                        ? AppColors.primary
+                        ? colorScheme.primary
                         : null,
                   ),
                   const SizedBox(width: AppSpacing.xs),
@@ -681,10 +689,11 @@ class _ReceiptImagePicker extends StatelessWidget {
     }
 
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Container(
       padding: const EdgeInsets.all(AppSpacing.xs),
       decoration: BoxDecoration(
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       ),
       child: Row(
@@ -700,7 +709,7 @@ class _ReceiptImagePicker extends StatelessWidget {
                 return Container(
                   width: 48,
                   height: 48,
-                  color: AppColors.canvas,
+                  color: colorScheme.surfaceContainer,
                   alignment: Alignment.center,
                   child: const Icon(Icons.broken_image_outlined, size: 20),
                 );
@@ -786,7 +795,7 @@ class _InfoRow extends StatelessWidget {
             child: Text(
               label,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.muted,
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
           ),
@@ -804,46 +813,47 @@ class _TypeMeta {
   final IconData icon;
   final Color color;
 
-  static _TypeMeta from(ParsedInputType type) => switch (type) {
-    ParsedInputType.memo => const _TypeMeta(
-      '备忘',
-      Icons.edit_note_rounded,
-      AppColors.primary,
-    ),
-    ParsedInputType.todo => const _TypeMeta(
-      '待办',
-      Icons.check_circle_outline,
-      Color(0xFF4A90D9),
-    ),
-    ParsedInputType.tracker => const _TypeMeta(
-      '打卡',
-      Icons.directions_run_rounded,
-      Color(0xFF7CB342),
-    ),
-    ParsedInputType.focus => const _TypeMeta(
-      '专注',
-      Icons.timer_rounded,
-      Color(0xFFE67E22),
-    ),
-    ParsedInputType.expense => const _TypeMeta(
-      '消费',
-      Icons.payments_rounded,
-      Color(0xFFE74C3C),
-    ),
-    ParsedInputType.body => const _TypeMeta(
-      '身体',
-      Icons.monitor_heart_outlined,
-      Color(0xFF9B59B6),
-    ),
-    ParsedInputType.sleep => const _TypeMeta(
-      '睡眠',
-      Icons.bedtime_rounded,
-      Color(0xFF5C6BC0),
-    ),
-    ParsedInputType.mood => const _TypeMeta(
-      '情绪',
-      Icons.emoji_emotions_outlined,
-      Color(0xFF9B59B6),
-    ),
-  };
+  static _TypeMeta from(ParsedInputType type, {Color? primary}) =>
+      switch (type) {
+        ParsedInputType.memo => _TypeMeta(
+          '备忘',
+          Icons.edit_note_rounded,
+          primary ?? AppColors.primary,
+        ),
+        ParsedInputType.todo => const _TypeMeta(
+          '待办',
+          Icons.check_circle_outline,
+          Color(0xFF4A90D9),
+        ),
+        ParsedInputType.tracker => const _TypeMeta(
+          '打卡',
+          Icons.directions_run_rounded,
+          Color(0xFF7CB342),
+        ),
+        ParsedInputType.focus => const _TypeMeta(
+          '专注',
+          Icons.timer_rounded,
+          Color(0xFFE67E22),
+        ),
+        ParsedInputType.expense => const _TypeMeta(
+          '消费',
+          Icons.payments_rounded,
+          Color(0xFFE74C3C),
+        ),
+        ParsedInputType.body => const _TypeMeta(
+          '身体',
+          Icons.monitor_heart_outlined,
+          Color(0xFF9B59B6),
+        ),
+        ParsedInputType.sleep => const _TypeMeta(
+          '睡眠',
+          Icons.bedtime_rounded,
+          Color(0xFF5C6BC0),
+        ),
+        ParsedInputType.mood => const _TypeMeta(
+          '情绪',
+          Icons.emoji_emotions_outlined,
+          Color(0xFF9B59B6),
+        ),
+      };
 }

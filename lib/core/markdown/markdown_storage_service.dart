@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import '../storage/recoverable_local_file_writer.dart';
 import 'markdown_directory_service.dart';
 
 enum MarkdownStorageKind { localPath, documentTree }
@@ -77,6 +78,8 @@ class MarkdownStorageService {
   static const _channel = MethodChannel('liflow/markdown_storage');
 
   final MarkdownDirectoryService _directoryService;
+  final RecoverableLocalFileWriter _localFileWriter =
+      const RecoverableLocalFileWriter();
 
   Future<MarkdownDirectoryPick?> pickDirectory() async {
     if (!Platform.isAndroid) return null;
@@ -132,7 +135,7 @@ class MarkdownStorageService {
 
   Future<void> ensureCoreDirectories() async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri != null && treeUri.isNotEmpty) {
+    if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
       await ensureTreeRootSubdir();
       await _channel.invokeMethod<void>('ensureDirectories', {
         'treeUri': treeUri,
@@ -271,22 +274,25 @@ class MarkdownStorageService {
     }
 
     final root = await _directoryService.ensureRoot();
-    final file = File(_joinLocal(root, relativePath));
-    await file.parent.create(recursive: true);
-    await File(sourcePath).copy(file.path);
+    await _localFileWriter.copyFile(
+      sourcePath: sourcePath,
+      targetPath: _joinLocal(root, relativePath),
+    );
   }
 
   Future<String> writeRelativeTextFile({
     required String relativePath,
     required String content,
+    String? mimeType,
   }) async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri != null && treeUri.isNotEmpty) {
+    if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
       await ensureTreeRootSubdir();
       await _channel.invokeMethod<void>('writeTextFile', {
         'treeUri': treeUri,
         'relativePath': await _treePath(relativePath),
         'content': content,
+        if (mimeType != null && mimeType.isNotEmpty) 'mimeType': mimeType,
       });
       return MarkdownStorageLocation.documentTree(
         treeUri: treeUri,
@@ -295,13 +301,16 @@ class MarkdownStorageService {
     }
 
     final root = await _directoryService.ensureRoot();
-    final file = File(_joinLocal(root, relativePath));
-    await file.parent.create(recursive: true);
-    await file.writeAsString(content);
-    return MarkdownStorageLocation.local(file.path).serialize();
+    final path = _joinLocal(root, relativePath);
+    await _localFileWriter.writeText(path, content);
+    return MarkdownStorageLocation.local(path).serialize();
   }
 
-  Future<void> writeTextFileLocation(String location, String content) async {
+  Future<void> writeTextFileLocation(
+    String location,
+    String content, {
+    String? mimeType,
+  }) async {
     final parsed = MarkdownStorageLocation.parse(location);
     switch (parsed.kind) {
       case MarkdownStorageKind.localPath:
@@ -310,18 +319,21 @@ class MarkdownStorageService {
           await writeRelativeTextFile(
             relativePath: localPath,
             content: content,
+            mimeType: mimeType,
           );
           return;
         }
-        final file = File(localPath);
-        await file.parent.create(recursive: true);
-        await file.writeAsString(content);
+        await _localFileWriter.writeText(localPath, content);
       case MarkdownStorageKind.documentTree:
+        if (!Platform.isAndroid) {
+          throw StateError('Document tree storage is not available.');
+        }
         await ensureTreeRootSubdir();
         await _channel.invokeMethod<void>('writeTextFile', {
           'treeUri': parsed.treeUri,
           'relativePath': await _treePath(parsed.relativePath!),
           'content': content,
+          if (mimeType != null && mimeType.isNotEmpty) 'mimeType': mimeType,
         });
     }
   }
@@ -334,8 +346,12 @@ class MarkdownStorageService {
         if (_isRelativeLocalPath(localPath)) {
           return readRelativeTextFile(localPath);
         }
+        await _localFileWriter.recover(localPath);
         return File(localPath).readAsString();
       case MarkdownStorageKind.documentTree:
+        if (!Platform.isAndroid) {
+          throw StateError('Document tree storage is not available.');
+        }
         await ensureTreeRootSubdir();
         return await _channel
             .invokeMethod<String>('readTextFile', {
@@ -353,7 +369,7 @@ class MarkdownStorageService {
 
   Future<String> locationForRelativePath(String relativePath) async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri != null && treeUri.isNotEmpty) {
+    if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
       return MarkdownStorageLocation.documentTree(
         treeUri: treeUri,
         relativePath: relativePath,

@@ -40,7 +40,10 @@ Future<DailyReviewSaveResult> saveDailyReviewForDate(
   } catch (e) {
     syncError = e;
   }
-  _read(ref, dataVersionProvider.notifier).increment();
+  _read(
+    ref,
+    dataVersionProvider.notifier,
+  ).increment(domains: {DataDomain.reviews});
   return DailyReviewSaveResult(syncedNote: syncedNote, syncError: syncError);
 }
 

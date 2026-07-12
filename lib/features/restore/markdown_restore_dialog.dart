@@ -7,16 +7,17 @@ import 'markdown_restore_service.dart';
 Future<bool> showMarkdownRestoreDialog({
   required BuildContext context,
   required MarkdownRestoreService restoreService,
+  RestorePreview? preview,
 }) async {
-  final preview = await restoreService.preview();
-  if (!context.mounted || preview.isEmpty) return false;
+  final resolvedPreview = preview ?? await restoreService.preview();
+  if (!context.mounted || resolvedPreview.isEmpty) return false;
 
   final result = await showDialog<bool>(
     context: context,
     barrierDismissible: false,
     builder: (context) => _MarkdownRestoreDialog(
       restoreService: restoreService,
-      preview: preview,
+      preview: resolvedPreview,
     ),
   );
   return result ?? false;
@@ -42,9 +43,10 @@ class _MarkdownRestoreDialogState extends State<_MarkdownRestoreDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final sourceLabel = widget.preview.fromSnapshot ? '结构化备份快照' : 'Markdown 资料';
     final description = widget.preview.fromSnapshot
-        ? '这个文件夹里有 Liflow 的完整备份快照，可以优先恢复记录、待办、项目和设置。恢复前不会改动原文件夹。'
+        ? '这个文件夹里有 Liflow 的完整备份快照，可以优先恢复记录、待办、项目、设置及其他结构化数据。恢复前不会改动原文件夹。'
         : '这个文件夹里有 Liflow 以前写下的 Markdown，可以先恢复到本机数据库。恢复前不会改动原文件。';
 
     return AlertDialog(
@@ -54,21 +56,17 @@ class _MarkdownRestoreDialogState extends State<_MarkdownRestoreDialog> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: AppColors.primary.withAlpha(25),
+              color: colors.primary.withAlpha(25),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(
-              Icons.restore_rounded,
-              color: AppColors.primary,
-              size: 22,
-            ),
+            child: Icon(Icons.restore_rounded, color: colors.primary, size: 22),
           ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               '发现$sourceLabel',
               style: theme.textTheme.titleMedium?.copyWith(
-                color: AppColors.primary,
+                color: colors.primary,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -84,7 +82,7 @@ class _MarkdownRestoreDialogState extends State<_MarkdownRestoreDialog> {
             Text(
               description,
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: AppColors.ink,
+                color: colors.onSurface,
                 height: 1.5,
               ),
             ),
@@ -94,8 +92,24 @@ class _MarkdownRestoreDialogState extends State<_MarkdownRestoreDialog> {
               _PreviewRow(label: '长笔记', value: widget.preview.longNotes),
             _PreviewRow(label: '待办', value: widget.preview.todos),
             _PreviewRow(label: '项目档案', value: widget.preview.projects),
+            if (widget.preview.projectFiles > 0)
+              _PreviewRow(label: '项目文件', value: widget.preview.projectFiles),
             if (widget.preview.fromSnapshot)
               _PreviewRow(label: '设置', value: widget.preview.settings),
+            if (widget.preview.structuredData > 0)
+              _PreviewRow(
+                label: '其他结构化数据',
+                value: widget.preview.structuredData,
+              ),
+            if (widget.preview.mediaAttachmentsUnavailable > 0 ||
+                widget.preview.projectFilesUnavailable > 0)
+              Text(
+                '有部分文件无法自动恢复，可稍后从原资料夹重新导入。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                  height: 1.4,
+                ),
+              ),
             if (_errorText != null) ...[
               const SizedBox(height: AppSpacing.sm),
               Text(
@@ -138,11 +152,18 @@ class _MarkdownRestoreDialogState extends State<_MarkdownRestoreDialog> {
       final result = await widget.restoreService.restore();
       if (!mounted) return;
       final sourceLabel = result.fromSnapshot ? '快照' : 'Markdown';
+      final structuredText = result.structuredDataRestored > 0
+          ? '，其他结构化数据 ${result.structuredDataRestored} 条'
+          : '';
+      final unavailable =
+          result.mediaAttachmentsUnavailable + result.projectFilesUnavailable;
+      final unavailableText = unavailable > 0 ? '，$unavailable 个文件需手动补回' : '';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             '已从$sourceLabel恢复 ${result.recordsRestored} 条记录、'
-            '${result.todosRestored} 个待办、${result.projectsRestored} 个项目',
+            '${result.todosRestored} 个待办、${result.projectsRestored} 个项目'
+            '$structuredText$unavailableText',
           ),
           behavior: SnackBarBehavior.floating,
         ),
@@ -174,13 +195,15 @@ class _PreviewRow extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.ink),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
             ),
           ),
           Text(
             '$value',
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: AppColors.primary,
+              color: theme.colorScheme.primary,
               fontWeight: FontWeight.w700,
             ),
           ),

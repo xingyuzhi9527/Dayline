@@ -101,6 +101,17 @@ void main() {
   });
 
   group('Dashboard providers', () {
+    test('family uses a stable date-only cache key', () {
+      final firstKey = ['2024', '01', '02'].join('-');
+      final secondKey = String.fromCharCodes(firstKey.codeUnits);
+
+      expect(identical(firstKey, secondKey), isFalse);
+      expect(
+        dashboardSummaryForDateProvider(firstKey),
+        dashboardSummaryForDateProvider(secondKey),
+      );
+    });
+
     test(
       'dashboardSummaryProvider returns empty summary when no data',
       () async {
@@ -183,7 +194,7 @@ void main() {
         }
 
         final summary = await container.read(
-          dashboardSummaryForDateProvider(yesterday).future,
+          dashboardSummaryForDateProvider(dateKey(yesterday)).future,
         );
 
         expect(summary.date, dateKey(yesterday));
