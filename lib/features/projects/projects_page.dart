@@ -1213,7 +1213,6 @@ class _ProjectCardCarousel extends StatelessWidget {
       final nextCards = [...cards];
       final moved = nextCards.removeAt(oldIndex);
       var insertionIndex = newIndex;
-      if (insertionIndex > oldIndex) insertionIndex -= 1;
       final stackOffset =
           nextCards.isNotEmpty && nextCards.last is _ProjectShelfStack ? 1 : 0;
       final maxInsertionIndex = nextCards.length - stackOffset;
@@ -1251,7 +1250,7 @@ class _ProjectCardCarousel extends StatelessWidget {
         },
         scrollDirection: Axis.horizontal,
         itemCount: cards.length,
-        onReorder: handleReorder,
+        onReorderItem: handleReorder,
         itemBuilder: (context, index) {
           final item = cards[index];
           if (item is _ProjectShelfStack) {
