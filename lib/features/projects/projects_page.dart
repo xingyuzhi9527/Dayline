@@ -1250,7 +1250,7 @@ class _ProjectCardCarousel extends StatelessWidget {
         },
         scrollDirection: Axis.horizontal,
         itemCount: cards.length,
-        onReorderItem: handleReorder,
+        onReorder: handleReorder,
         itemBuilder: (context, index) {
           final item = cards[index];
           if (item is _ProjectShelfStack) {

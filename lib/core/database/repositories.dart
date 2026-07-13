@@ -504,6 +504,15 @@ WHERE date = ?
     );
   }
 
+  Future<int> countByDate(DateTime date) async {
+    final db = await localDatabase.executor;
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM focus_sessions WHERE date = ?',
+      [dateKey(date)],
+    );
+    return (rows.single['cnt'] as int);
+  }
+
   Future<int> updateDetails(
     int id, {
     required int durationMinutes,
@@ -631,6 +640,15 @@ ORDER BY date ASC
     );
   }
 
+  Future<int> countByDate(DateTime date) async {
+    final db = await localDatabase.executor;
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM expenses WHERE date = ?',
+      [dateKey(date)],
+    );
+    return (rows.single['cnt'] as int);
+  }
+
   Future<int> updateDetails(
     int id, {
     required double amount,
@@ -682,6 +700,15 @@ class BodyLogsRepository extends Repository {
     );
   }
 
+  Future<int> countByDate(DateTime date) async {
+    final db = await localDatabase.executor;
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM body_logs WHERE date = ?',
+      [dateKey(date)],
+    );
+    return (rows.single['cnt'] as int);
+  }
+
   Future<int> updateDetails(
     int id, {
     required String metric,
@@ -697,6 +724,148 @@ class BodyLogsRepository extends Repository {
       'note': note,
       'updated_at': timestamp(updatedAt ?? DateTime.now()),
     });
+  }
+}
+
+class LibraryItemsRepository {
+  LibraryItemsRepository(this.localDatabase);
+
+  final LocalDatabase localDatabase;
+
+  Future<List<DatabaseRow>> findAll() async {
+    final db = await localDatabase.executor;
+    return db.query(
+      'library_items',
+      orderBy: 'kind ASC, updated_at DESC, name ASC, item_key ASC',
+    );
+  }
+
+  Future<void> replaceAll(List<DatabaseRow> rows) async {
+    await localDatabase.transaction(() async {
+      final db = await localDatabase.executor;
+      await db.delete('library_items');
+      for (final row in rows) {
+        await db.insert('library_items', row);
+      }
+    });
+  }
+
+  Future<void> upsert(DatabaseRow row) async {
+    final db = await localDatabase.executor;
+    final itemKey = row['item_key'] as String;
+    await db.delete(
+      'library_items',
+      where: 'item_key = ?',
+      whereArgs: [itemKey],
+    );
+    await db.insert('library_items', row);
+  }
+
+  Future<int> deleteByKey(String itemKey) async {
+    final db = await localDatabase.executor;
+    return db.delete(
+      'library_items',
+      where: 'item_key = ?',
+      whereArgs: [itemKey],
+    );
+  }
+}
+
+class DashboardDayBundle {
+  const DashboardDayBundle({
+    required this.activityRows,
+    required this.monthExpenseTotal,
+    required this.review,
+  });
+
+  final List<DatabaseRow> activityRows;
+  final double monthExpenseTotal;
+  final DatabaseRow? review;
+}
+
+class DashboardRepository {
+  DashboardRepository(this.localDatabase);
+
+  final LocalDatabase localDatabase;
+
+  Future<DashboardDayBundle> loadDayBundle(DateTime date) async {
+    final activityRowsFuture = _loadDailyActivityRows(date);
+    final monthExpenseTotalFuture = _sumAmountByMonth(date);
+    final reviewFuture = _findReviewByDate(dateKey(date));
+
+    final results = await Future.wait([
+      activityRowsFuture,
+      monthExpenseTotalFuture,
+      reviewFuture,
+    ]);
+
+    return DashboardDayBundle(
+      activityRows: results[0] as List<DatabaseRow>,
+      monthExpenseTotal: results[1] as double,
+      review: results[2] as DatabaseRow?,
+    );
+  }
+
+  Future<List<DatabaseRow>> _loadDailyActivityRows(DateTime date) async {
+    final db = await localDatabase.executor;
+    final day = dateKey(date);
+    return db.rawQuery(
+      '''
+SELECT * FROM (
+  SELECT 'record' AS kind, id AS source_id, created_at, NULL AS started_at, NULL AS completed_at, NULL AS duration_minutes, NULL AS amount, NULL AS category, tags, NULL AS is_completed, content, type, NULL AS title, NULL AS note, NULL AS due_time, NULL AS priority, NULL AS tracker_id, NULL AS value, NULL AS currency, NULL AS metric, NULL AS unit
+  FROM records
+  WHERE date = ? AND is_deleted = 0
+  UNION ALL
+  SELECT 'todo' AS kind, id AS source_id, created_at, NULL AS started_at, completed_at, NULL AS duration_minutes, NULL AS amount, NULL AS category, NULL AS tags, is_completed, NULL AS content, NULL AS type, title, note, due_time, priority, NULL AS tracker_id, NULL AS value, NULL AS currency, NULL AS metric, NULL AS unit
+  FROM todos
+  WHERE date = ?
+  UNION ALL
+  SELECT 'tracker' AS kind, id AS source_id, created_at, NULL AS started_at, NULL AS completed_at, NULL AS duration_minutes, NULL AS amount, NULL AS category, NULL AS tags, NULL AS is_completed, NULL AS content, NULL AS type, NULL AS title, note, NULL AS due_time, NULL AS priority, tracker_id, value, NULL AS currency, NULL AS metric, NULL AS unit
+  FROM tracker_logs
+  WHERE date = ?
+  UNION ALL
+  SELECT 'focus' AS kind, id AS source_id, created_at, started_at, NULL AS completed_at, duration_minutes, NULL AS amount, NULL AS category, NULL AS tags, NULL AS is_completed, NULL AS content, NULL AS type, NULL AS title, note, NULL AS due_time, NULL AS priority, NULL AS tracker_id, NULL AS value, NULL AS currency, NULL AS metric, NULL AS unit
+  FROM focus_sessions
+  WHERE date = ?
+  UNION ALL
+  SELECT 'expense' AS kind, id AS source_id, created_at, NULL AS started_at, NULL AS completed_at, NULL AS duration_minutes, amount, category, NULL AS tags, NULL AS is_completed, NULL AS content, NULL AS type, NULL AS title, note, NULL AS due_time, NULL AS priority, NULL AS tracker_id, NULL AS value, currency, NULL AS metric, NULL AS unit
+  FROM expenses
+  WHERE date = ?
+  UNION ALL
+  SELECT 'body' AS kind, id AS source_id, created_at, NULL AS started_at, NULL AS completed_at, NULL AS duration_minutes, NULL AS amount, NULL AS category, NULL AS tags, NULL AS is_completed, NULL AS content, NULL AS type, NULL AS title, note, NULL AS due_time, NULL AS priority, NULL AS tracker_id, NULL AS value, NULL AS currency, metric, unit
+  FROM body_logs
+  WHERE date = ?
+)
+ORDER BY created_at ASC, kind ASC, source_id ASC
+''',
+      [day, day, day, day, day, day],
+    );
+  }
+
+  Future<double> _sumAmountByMonth(DateTime date) async {
+    final db = await localDatabase.executor;
+    final start = DateTime(date.year, date.month);
+    final next = DateTime(date.year, date.month + 1);
+    final rows = await db.rawQuery(
+      '''
+SELECT COALESCE(SUM(amount), 0) AS total
+FROM expenses
+WHERE date >= ? AND date < ?
+''',
+      [dateKey(start), dateKey(next)],
+    );
+    return (rows.single['total'] as num).toDouble();
+  }
+
+  Future<DatabaseRow?> _findReviewByDate(String date) async {
+    final db = await localDatabase.executor;
+    final rows = await db.query(
+      'daily_reviews',
+      where: 'date = ?',
+      whereArgs: [date],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.single;
   }
 }
 

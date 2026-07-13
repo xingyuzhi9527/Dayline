@@ -1,10 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repository_providers.dart';
 import '../../core/markdown/markdown_directory_service.dart';
 import '../../core/markdown/markdown_document_parser.dart';
-import '../../core/markdown/markdown_storage_service.dart';
+import '../../core/performance/perf_trace.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../long_note/long_note_reader_page.dart';
@@ -94,19 +96,25 @@ class _MonthlyExpenseSectionState extends ConsumerState<MonthlyExpenseSection> {
     }
 
     setState(() => _openingReport = true);
+    final trace = PerfTrace.start(
+      'monthly_expense.open_report ${summary.monthKey}',
+    );
     try {
       final service = MonthlyExpenseMarkdownService(
         expensesRepository: ref.read(expensesRepositoryProvider),
         directoryService: dirService,
       );
-      final location = await service.exportMonth(summary.month);
-      final storage = MarkdownStorageService(dirService);
-      final raw = await storage.readTextFileLocation(location);
+      final raw = service.buildReportFromSummary(
+        summary,
+        generatedAt: DateTime.now(),
+      );
+      final location = await service.locationForMonth(summary.month);
       final document = parseMarkdownDocument(
         raw,
         fallbackTitle: '${summary.monthKey} 月消费账单',
       );
       if (!mounted) return;
+      unawaited(_exportMonthReportInBackground(service, summary));
       await Navigator.of(context).push<void>(
         MaterialPageRoute(
           builder: (_) => LongNoteReaderPage(
@@ -129,9 +137,29 @@ class _MonthlyExpenseSectionState extends ConsumerState<MonthlyExpenseSection> {
           ),
         );
     } finally {
+      trace.finish();
       if (mounted) {
         setState(() => _openingReport = false);
       }
+    }
+  }
+
+  Future<void> _exportMonthReportInBackground(
+    MonthlyExpenseMarkdownService service,
+    MonthlyExpenseSummary summary,
+  ) async {
+    try {
+      await service.exportSummary(summary);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('月账单已打开，Markdown 同步稍后可重试：$error'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
     }
   }
 }

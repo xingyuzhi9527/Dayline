@@ -23,14 +23,24 @@ class MonthlyExpenseMarkdownService {
 
   Future<String> exportMonth(DateTime date, {DateTime? generatedAt}) async {
     final month = DateTime(date.year, date.month);
-    final monthKey = monthlyExpenseMonthKey(month);
     final now = generatedAt ?? DateTime.now();
     await _ensureLedgerProject(now);
     final content = await _buildReport(month, generatedAt: now);
-    return _storage.writeRelativeTextFile(
-      relativePath: p.posix.join(_ledgerFolder, 'months', '$monthKey.md'),
-      content: content,
-    );
+    return _writeMonthReport(month, content);
+  }
+
+  Future<String> exportSummary(
+    MonthlyExpenseSummary summary, {
+    DateTime? generatedAt,
+  }) async {
+    final now = generatedAt ?? DateTime.now();
+    await _ensureLedgerProject(now);
+    final content = buildReportFromSummary(summary, generatedAt: now);
+    return _writeMonthReport(summary.month, content);
+  }
+
+  Future<String> locationForMonth(DateTime date) {
+    return _storage.locationForRelativePath(_relativeReportPath(date));
   }
 
   Future<String?> refreshMonthIfConfigured(
@@ -68,6 +78,11 @@ tags: [账本, 消费]
     DateTime month, {
     required DateTime generatedAt,
   }) async {
+    final summary = await _summaryForMonth(month);
+    return buildReportFromSummary(summary, generatedAt: generatedAt);
+  }
+
+  Future<MonthlyExpenseSummary> _summaryForMonth(DateTime month) async {
     final monthKey = monthlyExpenseMonthKey(month);
     final expenses = await _expensesRepository.findByMonth(month);
     final categoryTotals = await _expensesRepository
@@ -75,17 +90,50 @@ tags: [账本, 消费]
     final dailyTotals = await _expensesRepository.sumAmountByDayForMonth(month);
     final total = await _expensesRepository.sumAmountByMonth(month);
     final dayCount = DateTime(month.year, month.month + 1, 0).day;
-    final dailyAverage = dayCount == 0 ? 0 : total / dayCount;
+    final dailyAverage = dayCount == 0 ? 0.0 : total / dayCount;
     final highestDay = _highestDay(dailyTotals);
 
+    return MonthlyExpenseSummary(
+      month: month,
+      monthKey: monthKey,
+      total: total,
+      count: expenses.length,
+      dailyAverage: dailyAverage,
+      categoryTotals: categoryTotals.entries
+          .map(
+            (entry) =>
+                MonthlyExpenseBucket(label: entry.key, amount: entry.value),
+          )
+          .toList(),
+      dailyTotals: dailyTotals.entries
+          .map(
+            (entry) =>
+                MonthlyExpenseDayTotal(date: entry.key, amount: entry.value),
+          )
+          .toList(),
+      highestDay: highestDay == null
+          ? null
+          : MonthlyExpenseDayTotal(
+              date: highestDay.key,
+              amount: highestDay.value,
+            ),
+      expenses: expenses,
+    );
+  }
+
+  String buildReportFromSummary(
+    MonthlyExpenseSummary summary, {
+    required DateTime generatedAt,
+  }) {
+    final monthKey = summary.monthKey;
     final buf = StringBuffer();
     buf.writeln('---');
     buf.writeln('type: monthly_expense_report');
     buf.writeln('source: liflow');
     buf.writeln('month: $monthKey');
     buf.writeln('generated_at: ${generatedAt.toIso8601String()}');
-    buf.writeln('total: ${total.toStringAsFixed(2)}');
-    buf.writeln('count: ${expenses.length}');
+    buf.writeln('total: ${summary.total.toStringAsFixed(2)}');
+    buf.writeln('count: ${summary.count}');
     buf.writeln('currency: CNY');
     buf.writeln('---');
     buf.writeln();
@@ -93,35 +141,36 @@ tags: [账本, 消费]
     buf.writeln();
     buf.writeln('## 概览');
     buf.writeln();
-    buf.writeln('- 总消费：¥${total.toStringAsFixed(2)}');
-    buf.writeln('- 消费次数：${expenses.length}');
-    buf.writeln('- 日均消费：¥${dailyAverage.toStringAsFixed(2)}');
+    buf.writeln('- 总消费：¥${summary.total.toStringAsFixed(2)}');
+    buf.writeln('- 消费次数：${summary.count}');
+    buf.writeln('- 日均消费：¥${summary.dailyAverage.toStringAsFixed(2)}');
+    final highestDay = summary.highestDay;
     if (highestDay != null) {
       buf.writeln(
-        '- 最高消费日：${highestDay.key.substring(5)}，¥${highestDay.value.toStringAsFixed(2)}',
+        '- 最高消费日：${highestDay.date.substring(5)}，¥${highestDay.amount.toStringAsFixed(2)}',
       );
     }
     buf.writeln();
 
-    if (categoryTotals.isNotEmpty) {
+    if (summary.categoryTotals.isNotEmpty) {
       buf.writeln('## 分类');
       buf.writeln();
-      for (final entry in categoryTotals.entries) {
-        buf.writeln('- ${entry.key}：¥${entry.value.toStringAsFixed(2)}');
+      for (final entry in summary.categoryTotals) {
+        buf.writeln('- ${entry.label}：¥${entry.amount.toStringAsFixed(2)}');
       }
       buf.writeln();
     }
 
     buf.writeln('## 每日明细');
     buf.writeln();
-    if (expenses.isEmpty) {
+    if (summary.expenses.isEmpty) {
       buf.writeln('这个月还没有消费记录。');
       buf.writeln();
       return buf.toString();
     }
 
     String? currentDate;
-    for (final expense in expenses) {
+    for (final expense in summary.expenses) {
       final date = expense['date'] as String;
       if (currentDate != date) {
         currentDate = date;
@@ -133,6 +182,18 @@ tags: [账本, 消费]
     buf.writeln();
 
     return buf.toString();
+  }
+
+  Future<String> _writeMonthReport(DateTime date, String content) {
+    return _storage.writeRelativeTextFile(
+      relativePath: _relativeReportPath(date),
+      content: content,
+    );
+  }
+
+  String _relativeReportPath(DateTime date) {
+    final monthKey = monthlyExpenseMonthKey(date);
+    return p.posix.join(_ledgerFolder, 'months', '$monthKey.md');
   }
 
   MapEntry<String, double>? _highestDay(Map<String, double> dailyTotals) {

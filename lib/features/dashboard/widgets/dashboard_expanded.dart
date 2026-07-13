@@ -1217,22 +1217,19 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
   Future<String> _exportDashboardMarkdown(DateTime date) async {
     final day = _dateOnly(date);
     final dayKey = dateKey(day);
+    final bundle = await ref.read(
+      dashboardDayBundleForDateProvider(dayKey).future,
+    );
     final summary = await ref.read(
       dashboardSummaryForDateProvider(dayKey).future,
     );
-    final review = await ref.read(
-      dashboardReviewForDateProvider(dayKey).future,
-    );
-    final records = await ref.read(recordsRepositoryProvider).findByDate(day);
-    final todos = await ref.read(todosRepositoryProvider).findByDate(day);
-    final trackerLogs = await ref
-        .read(trackerLogsRepositoryProvider)
-        .findByDate(day);
-    final focusSessions = await ref
-        .read(focusSessionsRepositoryProvider)
-        .findByDate(day);
-    final expenses = await ref.read(expensesRepositoryProvider).findByDate(day);
-    final bodyLogs = await ref.read(bodyLogsRepositoryProvider).findByDate(day);
+    final review = bundle.review;
+    final records = _rowsOfKind(bundle.activityRows, 'record');
+    final todos = _rowsOfKind(bundle.activityRows, 'todo');
+    final trackerLogs = _rowsOfKind(bundle.activityRows, 'tracker');
+    final focusSessions = _rowsOfKind(bundle.activityRows, 'focus');
+    final expenses = _rowsOfKind(bundle.activityRows, 'expense');
+    final bodyLogs = _rowsOfKind(bundle.activityRows, 'body');
     final trackers = await ref.read(trackersRepositoryProvider).findAll();
     final trackerNames = {
       for (final tracker in trackers)
@@ -1409,6 +1406,10 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
     final noteService = MarkdownNoteService(dirService);
 
     return noteService.saveDailyNote(day, mdContent);
+  }
+
+  List<DatabaseRow> _rowsOfKind(List<DatabaseRow> rows, String kind) {
+    return rows.where((row) => row['kind'] == kind).toList(growable: false);
   }
 
   List<_DailyTimelineItem> _buildDailyTimeline({

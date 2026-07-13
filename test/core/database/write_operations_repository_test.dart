@@ -266,8 +266,10 @@ void main() {
       addTearDown(upgraded.close);
       final db = await upgraded.database;
 
-      expect(await db.getVersion(), 5);
+      expect(await db.getVersion(), 7);
       expect(await db.query('write_operations'), isEmpty);
+      expect(await db.query('derived_sync_jobs'), isEmpty);
+      expect(await db.query('library_items'), isEmpty);
       expect(await db.query('records'), hasLength(1));
     },
   );

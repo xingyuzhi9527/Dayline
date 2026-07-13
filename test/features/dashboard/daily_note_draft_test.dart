@@ -43,11 +43,26 @@ void main() {
     await container
         .read(recordsRepositoryProvider)
         .create(date: day, type: 'memo', content: '第一条');
+    final trackerId = await container
+        .read(trackersRepositoryProvider)
+        .create(name: '跑步');
+    await container
+        .read(todosRepositoryProvider)
+        .create(date: day, title: '完成周报');
+    await container
+        .read(trackerLogsRepositoryProvider)
+        .create(trackerId: trackerId, date: day, value: 1);
+    await container
+        .read(focusSessionsRepositoryProvider)
+        .create(date: day, startedAt: day, durationMinutes: 30);
     await ensureDailyDraftAfterActivity(container, day);
 
     await container
         .read(expensesRepositoryProvider)
         .create(date: day, amount: 35, category: '午饭');
+    await container
+        .read(bodyLogsRepositoryProvider)
+        .create(date: day, metric: 'weight', value: 60.5);
     await ensureDailyDraftAfterActivity(container, day);
 
     final noteService = MarkdownNoteService(
@@ -56,7 +71,7 @@ void main() {
     final raw = await noteService.readDailyNote(day);
 
     expect(raw, contains('status: draft'));
-    expect(raw, contains('record_count: 2'));
+    expect(raw, contains('record_count: 6'));
     expect(raw, contains('## 今日概览'));
   });
 
