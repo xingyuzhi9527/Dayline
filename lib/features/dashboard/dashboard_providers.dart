@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/repositories.dart';
 import '../../core/database/repository_providers.dart';
+import '../../core/performance/perf_trace.dart';
 
 class DashboardSummary {
   const DashboardSummary({
@@ -59,14 +60,8 @@ class DashboardSummary {
   bool get hasUnfinishedTodos => totalTodos > completedTodos;
 }
 
-/// Loads a dashboard for a canonical `yyyy-MM-dd` date key.
-///
-/// Keeping the family argument as a date-only string is intentional: using a
-/// `DateTime` here would create a distinct provider/cache entry for every
-/// timestamp passed by a caller, even when all those timestamps refer to the
-/// same calendar day.
-final dashboardSummaryForDateProvider = FutureProvider.autoDispose
-    .family<DashboardSummary, String>((ref, dateValue) async {
+final dashboardDayBundleForDateProvider = FutureProvider.autoDispose
+    .family<DashboardDayBundle, String>((ref, dateValue) async {
       for (final domain in const [
         DataDomain.records,
         DataDomain.todos,
@@ -79,102 +74,25 @@ final dashboardSummaryForDateProvider = FutureProvider.autoDispose
         ref.watch(dataDomainVersionProvider(domain));
       }
       final day = _dayFromDateKey(dateValue);
-      final dateStr = dateKey(day);
-      // Capture dependencies before the first async gap. A one-shot read of
-      // an auto-disposed family may release its Ref while queries are pending.
-      final recordsRepository = ref.read(recordsRepositoryProvider);
-      final todosRepository = ref.read(todosRepositoryProvider);
-      final trackerLogsRepository = ref.read(trackerLogsRepositoryProvider);
-      final focusSessionsRepository = ref.read(focusSessionsRepositoryProvider);
-      final expensesRepository = ref.read(expensesRepositoryProvider);
-      final bodyLogsRepository = ref.read(bodyLogsRepositoryProvider);
-      final dailyReviewsRepository = ref.read(dailyReviewsRepositoryProvider);
-
-      final records = await recordsRepository.findByDate(day);
-      final todos = await todosRepository.findByDate(day);
-      final trackerLogs = await trackerLogsRepository.findByDate(day);
-      final focusMinutes = await focusSessionsRepository.sumMinutesByDate(day);
-      final expenses = await expensesRepository.findByDate(day);
-      final expenseTotal = await expensesRepository.sumAmountByDate(day);
-      final monthExpenseTotal = await expensesRepository.sumAmountByMonth(day);
-      final bodyLogs = await bodyLogsRepository.findByDate(day);
-      final review = await dailyReviewsRepository.findByDate(dateStr);
-
-      final tagCounts = <String, int>{};
-      for (final r in records) {
-        final tags = _parseTags(r['tags'] as String);
-        for (final tag in tags) {
-          tagCounts[tag] = (tagCounts[tag] ?? 0) + 1;
-        }
-      }
-      final sortedTags = tagCounts.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
-      final topTags = sortedTags.take(5).map((e) => e.key).toList();
-
-      final timestamps = <int>[];
-      for (final r in records) {
-        timestamps.add(r['created_at'] as int);
-      }
-      for (final t in todos) {
-        timestamps.add(t['created_at'] as int);
-        final completedAt = t['completed_at'];
-        if (completedAt != null) timestamps.add(completedAt as int);
-      }
-      for (final l in trackerLogs) {
-        timestamps.add(l['created_at'] as int);
-      }
-      for (final e in expenses) {
-        timestamps.add(e['created_at'] as int);
-      }
-      for (final b in bodyLogs) {
-        timestamps.add(b['created_at'] as int);
-      }
-      timestamps.sort();
-
-      final firstActivityTime = timestamps.isNotEmpty ? timestamps.first : null;
-      final lastActivityTime = timestamps.isNotEmpty ? timestamps.last : null;
-
-      final longestGapMinutes = _calcLongestGap(timestamps);
-      final densestHourRange = _calcDensestHour(timestamps);
-      final insights = _generateInsights(
-        dayLabel: dashboardNarrativeDayLabel(day),
-        recordCount: records.length,
-        totalTodos: todos.length,
-        completedTodos: todos
-            .where((t) => (t['is_completed'] as int) == 1)
-            .length,
-        focusMinutes: focusMinutes,
-        topTags: topTags,
-        tagCounts: tagCounts,
-        firstActivityTime: firstActivityTime,
-        lastActivityTime: lastActivityTime,
-        longestGapMinutes: longestGapMinutes,
-        densestHourRange: densestHourRange,
+      return PerfTrace.measure(
+        'dashboard.day_bundle $dateValue',
+        () => ref.read(dashboardRepositoryProvider).loadDayBundle(day),
       );
+    });
 
-      return DashboardSummary(
-        date: dateStr,
-        recordCount: records.length,
-        totalTodos: todos.length,
-        completedTodos: todos
-            .where((t) => (t['is_completed'] as int) == 1)
-            .length,
-        trackerCount: trackerLogs.length,
-        focusMinutes: focusMinutes,
-        expenseTotal: expenseTotal,
-        monthExpenseTotal: monthExpenseTotal,
-        expenseCount: expenses.length,
-        bodyLogCount: bodyLogs.length,
-        topTags: topTags,
-        categoryCounts: tagCounts,
-        firstActivityTime: firstActivityTime,
-        lastActivityTime: lastActivityTime,
-        longestGapMinutes: longestGapMinutes,
-        densestHourRange: densestHourRange,
-        insights: insights,
-        allTimestamps: timestamps,
-        isReviewed: review != null,
+/// Loads a dashboard for a canonical `yyyy-MM-dd` date key.
+///
+/// Keeping the family argument as a date-only string is intentional: using a
+/// `DateTime` here would create a distinct provider/cache entry for every
+/// timestamp passed by a caller, even when all those timestamps refer to the
+/// same calendar day.
+final dashboardSummaryForDateProvider = FutureProvider.autoDispose
+    .family<DashboardSummary, String>((ref, dateValue) async {
+      final day = _dayFromDateKey(dateValue);
+      final bundle = await ref.watch(
+        dashboardDayBundleForDateProvider(dateValue).future,
       );
+      return _buildDashboardSummary(day, bundle);
     });
 
 final dashboardSummaryProvider = FutureProvider.autoDispose<DashboardSummary>((
@@ -291,8 +209,10 @@ List<String> _parseTags(String raw) {
 final dashboardReviewForDateProvider = FutureProvider.autoDispose
     .family<Map<String, Object?>?, String>((ref, dateValue) async {
       ref.watch(dataDomainVersionProvider(DataDomain.reviews));
-      final day = _dayFromDateKey(dateValue);
-      return ref.read(dailyReviewsRepositoryProvider).findByDate(dateKey(day));
+      final bundle = await ref.watch(
+        dashboardDayBundleForDateProvider(dateValue).future,
+      );
+      return bundle.review;
     });
 
 final dashboardReviewProvider =
@@ -308,4 +228,124 @@ DateTime _dayFromDateKey(String value) {
     throw ArgumentError.value(value, 'value', 'Expected a yyyy-MM-dd date');
   }
   return DateTime(parsed.year, parsed.month, parsed.day);
+}
+
+DashboardSummary _buildDashboardSummary(
+  DateTime day,
+  DashboardDayBundle bundle,
+) {
+  final dateStr = dateKey(day);
+  final records = _rowsOfKind(bundle.activityRows, 'record');
+  final todos = _rowsOfKind(bundle.activityRows, 'todo');
+  final trackerLogs = _rowsOfKind(bundle.activityRows, 'tracker');
+  final focusSessions = _rowsOfKind(bundle.activityRows, 'focus');
+  final expenses = _rowsOfKind(bundle.activityRows, 'expense');
+  final bodyLogs = _rowsOfKind(bundle.activityRows, 'body');
+
+  final focusMinutes = focusSessions.fold<int>(0, (sum, row) {
+    return sum + _intValue(row['duration_minutes']);
+  });
+  final expenseTotal = expenses.fold<double>(0, (sum, row) {
+    return sum + _doubleValue(row['amount']);
+  });
+
+  final tagCounts = <String, int>{};
+  for (final r in records) {
+    final tags = _parseTags((r['tags'] as String?) ?? '[]');
+    for (final tag in tags) {
+      tagCounts[tag] = (tagCounts[tag] ?? 0) + 1;
+    }
+  }
+  final sortedTags = tagCounts.entries.toList()
+    ..sort((a, b) => b.value.compareTo(a.value));
+  final topTags = sortedTags.take(5).map((e) => e.key).toList();
+
+  final timestamps = <int>[];
+  for (final r in records) {
+    timestamps.add(_intValue(r['created_at']));
+  }
+  for (final t in todos) {
+    timestamps.add(_intValue(t['created_at']));
+    final completedAt = _intValueOrNull(t['completed_at']);
+    if (completedAt != null) timestamps.add(completedAt);
+  }
+  for (final l in trackerLogs) {
+    timestamps.add(_intValue(l['created_at']));
+  }
+  for (final e in expenses) {
+    timestamps.add(_intValue(e['created_at']));
+  }
+  for (final b in bodyLogs) {
+    timestamps.add(_intValue(b['created_at']));
+  }
+  timestamps.sort();
+
+  final firstActivityTime = timestamps.isNotEmpty ? timestamps.first : null;
+  final lastActivityTime = timestamps.isNotEmpty ? timestamps.last : null;
+  final longestGapMinutes = _calcLongestGap(timestamps);
+  final densestHourRange = _calcDensestHour(timestamps);
+  final completedTodos = todos
+      .where((t) => _intValue(t['is_completed']) == 1)
+      .length;
+  final insights = _generateInsights(
+    dayLabel: dashboardNarrativeDayLabel(day),
+    recordCount: records.length,
+    totalTodos: todos.length,
+    completedTodos: completedTodos,
+    focusMinutes: focusMinutes,
+    topTags: topTags,
+    tagCounts: tagCounts,
+    firstActivityTime: firstActivityTime,
+    lastActivityTime: lastActivityTime,
+    longestGapMinutes: longestGapMinutes,
+    densestHourRange: densestHourRange,
+  );
+
+  return DashboardSummary(
+    date: dateStr,
+    recordCount: records.length,
+    totalTodos: todos.length,
+    completedTodos: completedTodos,
+    trackerCount: trackerLogs.length,
+    focusMinutes: focusMinutes,
+    expenseTotal: expenseTotal,
+    monthExpenseTotal: bundle.monthExpenseTotal,
+    expenseCount: expenses.length,
+    bodyLogCount: bodyLogs.length,
+    topTags: topTags,
+    categoryCounts: tagCounts,
+    firstActivityTime: firstActivityTime,
+    lastActivityTime: lastActivityTime,
+    longestGapMinutes: longestGapMinutes,
+    densestHourRange: densestHourRange,
+    insights: insights,
+    allTimestamps: timestamps,
+    isReviewed: bundle.review != null,
+  );
+}
+
+List<DatabaseRow> _rowsOfKind(List<DatabaseRow> rows, String kind) {
+  return rows.where((row) => row['kind'] == kind).toList(growable: false);
+}
+
+int _intValue(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? 0;
+  return 0;
+}
+
+int? _intValueOrNull(Object? value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value);
+  return null;
+}
+
+double _doubleValue(Object? value) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value) ?? 0;
+  return 0;
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import '../database/repositories.dart';
 import '../database/repository_providers.dart';
 import '../markdown/markdown_directory_service.dart';
 import '../markdown/markdown_storage_service.dart';
+import '../performance/perf_trace.dart';
 
 final documentLibraryServiceProvider = Provider<DocumentLibraryService>((ref) {
   final settings = ref.watch(appSettingsRepositoryProvider);
@@ -15,6 +17,7 @@ final documentLibraryServiceProvider = Provider<DocumentLibraryService>((ref) {
   return DocumentLibraryService(
     settingsRepository: settings,
     recordsRepository: ref.watch(recordsRepositoryProvider),
+    libraryItemsRepository: ref.watch(libraryItemsRepositoryProvider),
     directoryService: dirService,
     storageService: MarkdownStorageService(dirService),
   );
@@ -57,6 +60,48 @@ class DocumentLibraryItem {
       isFavorite: isFavorite ?? this.isFavorite,
     );
   }
+
+  Map<String, Object?> toJson() => {
+    'kind': kind.name,
+    'name': name,
+    'relativePath': relativePath,
+    'location': location,
+    'mimeType': mimeType,
+    'sizeBytes': sizeBytes,
+    'updatedAt': updatedAt,
+    'isFavorite': isFavorite,
+  };
+
+  static DocumentLibraryItem? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final name = raw['name'] as String?;
+    final relativePath = raw['relativePath'] as String?;
+    final location = raw['location'] as String?;
+    if (name == null || relativePath == null || location == null) return null;
+
+    final kindValue = raw['kind'] as String?;
+    final kind = kindValue == LibraryItemKind.document.name
+        ? LibraryItemKind.document
+        : LibraryItemKind.markdown;
+
+    int? parseInt(Object? value) {
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      if (value is String) return int.tryParse(value);
+      return null;
+    }
+
+    return DocumentLibraryItem(
+      kind: kind,
+      name: name,
+      relativePath: relativePath,
+      location: location,
+      mimeType: raw['mimeType'] as String?,
+      sizeBytes: parseInt(raw['sizeBytes']),
+      updatedAt: parseInt(raw['updatedAt']),
+      isFavorite: raw['isFavorite'] == true,
+    );
+  }
 }
 
 class DocumentLibrarySnapshot {
@@ -73,6 +118,35 @@ class DocumentLibrarySnapshot {
   final List<DocumentLibraryItem> documents;
   final List<DocumentFavoriteRecord> favoriteRecords;
   final List<DocumentFavoriteFolder> favoriteFolders;
+
+  Map<String, Object?> toJson() => {
+    'rootLabel': rootLabel,
+    'notes': notes.map((item) => item.toJson()).toList(growable: false),
+    'documents': documents.map((item) => item.toJson()).toList(growable: false),
+    'favoriteRecords': favoriteRecords
+        .map((item) => item.toJson())
+        .toList(growable: false),
+    'favoriteFolders': favoriteFolders
+        .map((item) => item.toJson())
+        .toList(growable: false),
+  };
+
+  static DocumentLibrarySnapshot? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final rootLabel = raw['rootLabel'] as String?;
+    if (rootLabel == null || rootLabel.isEmpty) return null;
+    return DocumentLibrarySnapshot(
+      rootLabel: rootLabel,
+      notes: DocumentLibraryService._itemsFromJson(raw['notes']),
+      documents: DocumentLibraryService._itemsFromJson(raw['documents']),
+      favoriteRecords: DocumentLibraryService._favoriteRecordsFromJson(
+        raw['favoriteRecords'],
+      ),
+      favoriteFolders: DocumentLibraryService._favoriteFoldersFromJson(
+        raw['favoriteFolders'],
+      ),
+    );
+  }
 }
 
 class DocumentFavoriteRecord {
@@ -98,6 +172,42 @@ class DocumentFavoriteRecord {
 
   bool get isMarkdown => location != null && location!.isNotEmpty;
   bool get isLibraryNoteFavorite => libraryFavoriteKey != null;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'title': title,
+    'content': content,
+    'createdAt': createdAt,
+    'location': location,
+    'relativePath': relativePath,
+    'fileName': fileName,
+    'libraryFavoriteKey': libraryFavoriteKey,
+  };
+
+  static DocumentFavoriteRecord? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final title = raw['title'] as String?;
+    final content = raw['content'] as String?;
+    if (title == null || content == null) return null;
+
+    int? parseInt(Object? value) {
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      if (value is String) return int.tryParse(value);
+      return null;
+    }
+
+    return DocumentFavoriteRecord(
+      id: parseInt(raw['id']) ?? 0,
+      title: title,
+      content: content,
+      createdAt: parseInt(raw['createdAt']) ?? 0,
+      location: raw['location'] as String?,
+      relativePath: raw['relativePath'] as String?,
+      fileName: raw['fileName'] as String?,
+      libraryFavoriteKey: raw['libraryFavoriteKey'] as String?,
+    );
+  }
 }
 
 class DocumentFavoriteFolder {
@@ -141,23 +251,42 @@ class DocumentLibraryService {
   DocumentLibraryService({
     required AppSettingsRepository settingsRepository,
     required RecordsRepository recordsRepository,
+    LibraryItemsRepository? libraryItemsRepository,
     required MarkdownDirectoryService directoryService,
     required MarkdownStorageService storageService,
   }) : _settingsRepository = settingsRepository,
        _recordsRepository = recordsRepository,
+       _libraryItemsRepository = libraryItemsRepository,
        _directoryService = directoryService,
        _storageService = storageService;
 
   static const _favoriteFoldersKey = 'document_favorite_folders';
   static const _favoriteNotesKey = 'document_favorite_notes';
+  static const _snapshotCacheKey = 'document_library_snapshot_v1';
 
   final AppSettingsRepository _settingsRepository;
   final RecordsRepository _recordsRepository;
+  final LibraryItemsRepository? _libraryItemsRepository;
   final MarkdownDirectoryService _directoryService;
   final MarkdownStorageService _storageService;
+  DocumentLibrarySnapshot? _cachedSnapshot;
+  bool _snapshotCacheDirty = false;
 
-  Future<DocumentLibrarySnapshot> load() async {
-    await _storageService.ensureCoreDirectories();
+  DocumentLibrarySnapshot? get cachedSnapshot => _cachedSnapshot;
+
+  Future<DocumentLibrarySnapshot> load({bool forceRefresh = false}) {
+    return PerfTrace.measure(
+      'document_library.load force=$forceRefresh',
+      () => _load(forceRefresh: forceRefresh),
+    );
+  }
+
+  Future<DocumentLibrarySnapshot> _load({bool forceRefresh = false}) async {
+    if (!forceRefresh && !_snapshotCacheDirty) {
+      final cached = _cachedSnapshot;
+      if (cached != null) return cached;
+    }
+
     final favoriteFolders = await _loadFavoriteFolders();
     final favoriteNotes = await _loadFavoriteNotes();
     final recordRows = await _recordsRepository.findDocumentLibraryCandidates();
@@ -166,22 +295,53 @@ class DocumentLibraryService {
       _dailyFavoriteRecordsFromRows(recordRows),
       favoriteNotes,
     );
+
+    if (!forceRefresh) {
+      final indexed = await _loadIndexedSnapshot(
+        favoriteFolders,
+        favoriteNotes,
+        longNoteItems,
+        favoriteRecords,
+      );
+      if (indexed != null) {
+        _cachedSnapshot = indexed;
+        _snapshotCacheDirty = false;
+        return indexed;
+      }
+
+      if (!_snapshotCacheDirty) {
+        final persisted = await _loadPersistedSnapshot();
+        if (persisted != null) {
+          _cachedSnapshot = persisted;
+          return persisted;
+        }
+      }
+    }
+
+    await _storageService.ensureCoreDirectories();
     final treeUri = await _directoryService.getTreeRootUri();
+    late final DocumentLibrarySnapshot snapshot;
     if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
-      return _loadTree(
+      snapshot = await _loadTree(
         treeUri,
         favoriteFolders,
         favoriteNotes,
         longNoteItems,
         favoriteRecords,
       );
+    } else {
+      snapshot = await _loadLocal(
+        favoriteFolders,
+        favoriteNotes,
+        longNoteItems,
+        favoriteRecords,
+      );
     }
-    return _loadLocal(
-      favoriteFolders,
-      favoriteNotes,
-      longNoteItems,
-      favoriteRecords,
-    );
+    _cachedSnapshot = snapshot;
+    _snapshotCacheDirty = false;
+    await _saveIndexedSnapshot(snapshot);
+    await _savePersistedSnapshot(snapshot);
+    return snapshot;
   }
 
   Future<DocumentLibraryItem?> importDocument() async {
@@ -189,7 +349,10 @@ class DocumentLibraryService {
     if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
       final row = await _storageService.importDocumentToTree();
       if (row == null) return null;
-      return _itemFromTreeRow(treeUri, row, LibraryItemKind.document);
+      final item = _itemFromTreeRow(treeUri, row, LibraryItemKind.document);
+      await _upsertIndexedItem(item);
+      _invalidateCache();
+      return item;
     }
 
     throw PlatformException(
@@ -227,6 +390,8 @@ class DocumentLibraryService {
     final treeUri = await _directoryService.getTreeRootUri();
     if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
       await _storageService.deleteTreeDocument(relativePath: item.relativePath);
+      await _deleteIndexedItem(item);
+      _invalidateCache();
       return;
     }
 
@@ -235,6 +400,8 @@ class DocumentLibraryService {
     if (await file.exists()) {
       await file.delete();
     }
+    await _deleteIndexedItem(item);
+    _invalidateCache();
   }
 
   Future<void> setFavoriteNote({
@@ -251,6 +418,8 @@ class DocumentLibraryService {
       await _saveFavoriteNotes(
         current.where((record) => record.libraryFavoriteKey != key).toList(),
       );
+      await _upsertIndexedItem(item.copyWith(isFavorite: false));
+      _invalidateCache();
       return;
     }
 
@@ -269,6 +438,8 @@ class DocumentLibraryService {
       record,
       ...current.where((item) => item.libraryFavoriteKey != key),
     ]);
+    await _upsertIndexedItem(item.copyWith(isFavorite: true));
+    _invalidateCache();
   }
 
   Future<DocumentFavoriteFolder?> addFavoriteFolder() async {
@@ -286,6 +457,7 @@ class DocumentLibraryService {
       folder,
       ...current.where((item) => item.id != folder.id),
     ]);
+    _invalidateCache();
     return folder;
   }
 
@@ -294,6 +466,7 @@ class DocumentLibraryService {
     await _saveFavoriteFolders(
       current.where((item) => item.id != folder.id).toList(growable: false),
     );
+    _invalidateCache();
   }
 
   Future<List<DocumentLibraryItem>> loadFavoriteFolderFiles(
@@ -732,6 +905,187 @@ class DocumentLibraryService {
       '.md' => 'text/markdown',
       _ => null,
     };
+  }
+
+  void _invalidateCache() {
+    _cachedSnapshot = null;
+    _snapshotCacheDirty = true;
+    unawaited(_deletePersistedSnapshot());
+  }
+
+  Future<DocumentLibrarySnapshot?> _loadIndexedSnapshot(
+    List<DocumentFavoriteFolder> favoriteFolders,
+    List<DocumentFavoriteRecord> favoriteNotes,
+    List<DocumentLibraryItem> longNoteItems,
+    List<DocumentFavoriteRecord> favoriteRecords,
+  ) async {
+    final indexRepository = _libraryItemsRepository;
+    if (indexRepository == null) return null;
+
+    final rows = await indexRepository.findAll();
+    if (rows.isEmpty) return null;
+
+    final notes = <DocumentLibraryItem>[];
+    final documents = <DocumentLibraryItem>[];
+    for (final row in rows) {
+      final item = _itemFromIndexRow(row);
+      if (item == null) continue;
+      if (item.isMarkdown) {
+        notes.add(item);
+      } else {
+        documents.add(item);
+      }
+    }
+    if (notes.isEmpty && documents.isEmpty) return null;
+
+    return DocumentLibrarySnapshot(
+      rootLabel: await _currentRootLabel(),
+      notes: _markFavoriteNotes(_mergeNoteItems(notes, longNoteItems), [
+        ...favoriteRecords,
+        ...favoriteNotes,
+      ]),
+      documents: _sortItems(documents),
+      favoriteRecords: favoriteRecords,
+      favoriteFolders: favoriteFolders,
+    );
+  }
+
+  Future<void> _saveIndexedSnapshot(DocumentLibrarySnapshot snapshot) async {
+    final indexRepository = _libraryItemsRepository;
+    if (indexRepository == null) return;
+
+    final indexedAt = DateTime.now().millisecondsSinceEpoch;
+    final rows = <DatabaseRow>[];
+    final seen = <String>{};
+    for (final item in [...snapshot.notes, ...snapshot.documents]) {
+      final row = _indexRowForItem(item, indexedAt: indexedAt);
+      final itemKey = row['item_key'] as String;
+      if (seen.add(itemKey)) rows.add(row);
+    }
+    await indexRepository.replaceAll(rows);
+  }
+
+  Future<void> _upsertIndexedItem(DocumentLibraryItem item) async {
+    final indexRepository = _libraryItemsRepository;
+    if (indexRepository == null) return;
+
+    await indexRepository.upsert(
+      _indexRowForItem(item, indexedAt: DateTime.now().millisecondsSinceEpoch),
+    );
+  }
+
+  Future<void> _deleteIndexedItem(DocumentLibraryItem item) async {
+    final indexRepository = _libraryItemsRepository;
+    if (indexRepository == null) return;
+
+    await indexRepository.deleteByKey(_indexKeyForItem(item));
+  }
+
+  DocumentLibraryItem? _itemFromIndexRow(DatabaseRow row) {
+    final name = _string(row['name']);
+    final relativePath = _string(row['relative_path']);
+    final location = _string(row['location']);
+    if (name == null || relativePath == null || location == null) return null;
+
+    final kind = row['kind'] == LibraryItemKind.document.name
+        ? LibraryItemKind.document
+        : LibraryItemKind.markdown;
+    return DocumentLibraryItem(
+      kind: kind,
+      name: name,
+      relativePath: relativePath,
+      location: location,
+      mimeType: _string(row['mime_type']),
+      sizeBytes: _intValue(row['size_bytes']),
+      updatedAt: _intValue(row['updated_at']),
+      isFavorite: _intValue(row['is_favorite']) == 1,
+    );
+  }
+
+  DatabaseRow _indexRowForItem(
+    DocumentLibraryItem item, {
+    required int indexedAt,
+  }) {
+    return {
+      'item_key': _indexKeyForItem(item),
+      'kind': item.kind.name,
+      'name': item.name,
+      'relative_path': item.relativePath,
+      'location': item.location,
+      'mime_type': item.mimeType,
+      'size_bytes': item.sizeBytes,
+      'updated_at': item.updatedAt,
+      'source_type': item.location.startsWith('content://') ? 'tree' : 'local',
+      'is_favorite': item.isFavorite ? 1 : 0,
+      'indexed_at': indexedAt,
+    };
+  }
+
+  String _indexKeyForItem(DocumentLibraryItem item) {
+    final location = item.location.trim();
+    if (location.isNotEmpty) return '${item.kind.name}:location:$location';
+    return '${item.kind.name}:relative:${item.relativePath}';
+  }
+
+  Future<String> _currentRootLabel() async {
+    final treeUri = await _directoryService.getTreeRootUri();
+    if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
+      return 'Liflow';
+    }
+    return _directoryService.ensureRoot();
+  }
+
+  Future<DocumentLibrarySnapshot?> _loadPersistedSnapshot() async {
+    final row = await _settingsRepository.findByKey(_snapshotCacheKey);
+    final raw = row?['value'] as String?;
+    if (raw == null || raw.trim().isEmpty) return null;
+    try {
+      return DocumentLibrarySnapshot.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _savePersistedSnapshot(DocumentLibrarySnapshot snapshot) async {
+    final value = jsonEncode(snapshot.toJson());
+    final existing = await _settingsRepository.findByKey(_snapshotCacheKey);
+    if (existing != null) {
+      await _settingsRepository.update(_snapshotCacheKey, value);
+    } else {
+      await _settingsRepository.create(key: _snapshotCacheKey, value: value);
+    }
+  }
+
+  Future<void> _deletePersistedSnapshot() async {
+    try {
+      await _settingsRepository.delete(_snapshotCacheKey);
+    } catch (_) {
+      // The cache is only an optimization.
+    }
+  }
+
+  static List<DocumentLibraryItem> _itemsFromJson(Object? raw) {
+    if (raw is! List) return const [];
+    return raw
+        .map(DocumentLibraryItem.fromJson)
+        .whereType<DocumentLibraryItem>()
+        .toList(growable: false);
+  }
+
+  static List<DocumentFavoriteRecord> _favoriteRecordsFromJson(Object? raw) {
+    if (raw is! List) return const [];
+    return raw
+        .map(DocumentFavoriteRecord.fromJson)
+        .whereType<DocumentFavoriteRecord>()
+        .toList(growable: false);
+  }
+
+  static List<DocumentFavoriteFolder> _favoriteFoldersFromJson(Object? raw) {
+    if (raw is! List) return const [];
+    return raw
+        .map(DocumentFavoriteFolder.fromJson)
+        .whereType<DocumentFavoriteFolder>()
+        .toList(growable: false);
   }
 
   Future<List<DocumentFavoriteFolder>> _loadFavoriteFolders() async {

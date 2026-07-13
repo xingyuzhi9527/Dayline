@@ -169,6 +169,47 @@ void main() {
     });
 
     test(
+      'dashboardSummaryProvider derives expense and focus totals from rows',
+      () async {
+        final db = _memoryDatabase();
+        final container = ProviderContainer(
+          overrides: [localDatabaseProvider.overrideWithValue(db)],
+        );
+
+        final now = DateTime.now();
+        final expensesRepo = container.read(expensesRepositoryProvider);
+        await expensesRepo.create(
+          date: now,
+          amount: 12,
+          category: '餐饮',
+          createdAt: now,
+        );
+        await expensesRepo.create(
+          date: now,
+          amount: 8,
+          category: '交通',
+          createdAt: now.add(const Duration(minutes: 5)),
+        );
+        final focusRepo = container.read(focusSessionsRepositoryProvider);
+        await focusRepo.create(
+          date: now,
+          startedAt: now,
+          durationMinutes: 45,
+          createdAt: now,
+        );
+
+        final summary = await container.read(dashboardSummaryProvider.future);
+
+        expect(summary.expenseCount, 2);
+        expect(summary.expenseTotal, 20);
+        expect(summary.monthExpenseTotal, greaterThanOrEqualTo(20));
+        expect(summary.focusMinutes, 45);
+
+        container.dispose();
+      },
+    );
+
+    test(
       'dashboardSummaryForDateProvider labels yesterday insights correctly',
       () async {
         final db = _memoryDatabase();
@@ -205,6 +246,36 @@ void main() {
         container.dispose();
       },
     );
+
+    test('dashboardSummaryProvider handles 1000+ records', () async {
+      final db = _memoryDatabase();
+      final container = ProviderContainer(
+        overrides: [localDatabaseProvider.overrideWithValue(db)],
+      );
+
+      final day = DateTime(2030, 1, 1);
+      final recordsRepo = container.read(recordsRepositoryProvider);
+      for (var i = 0; i < 1001; i++) {
+        await recordsRepo.create(
+          date: day,
+          type: 'memo',
+          content: '规模记录 $i',
+          tags: ['tag${i % 5}'],
+          createdAt: day.add(Duration(minutes: i)),
+        );
+      }
+
+      final summary = await container.read(
+        dashboardSummaryForDateProvider(dateKey(day)).future,
+      );
+
+      expect(summary.recordCount, 1001);
+      expect(summary.categoryCounts['tag0'], 201);
+      expect(summary.topTags.first, 'tag0');
+      expect(summary.allTimestamps, hasLength(1001));
+
+      container.dispose();
+    });
 
     test(
       'dashboardReviewProvider returns null when no review exists',

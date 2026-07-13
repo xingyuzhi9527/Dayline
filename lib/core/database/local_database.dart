@@ -16,7 +16,7 @@ final localDatabaseProvider = Provider<LocalDatabase>((ref) {
 
 class LocalDatabase {
   static const _databaseName = 'liflow.db';
-  static const _databaseVersion = 5;
+  static const _databaseVersion = 7;
   static final _transactionExecutorKey = Object();
 
   LocalDatabase({
@@ -249,6 +249,8 @@ CREATE TABLE media_attachments (
     );
 
     await _createWriteOperationsSchema(db);
+    await _createDerivedSyncJobsSchema(db);
+    await _createLibraryItemsSchema(db);
   }
 
   Future<void> _upgradeSchema(
@@ -302,11 +304,17 @@ CREATE TABLE media_attachments (
     if (oldVersion < 5) {
       await _createWriteOperationsSchema(db);
     }
+    if (oldVersion < 6) {
+      await _createDerivedSyncJobsSchema(db);
+    }
+    if (oldVersion < 7) {
+      await _createLibraryItemsSchema(db);
+    }
   }
 
   Future<void> _createWriteOperationsSchema(sqflite.DatabaseExecutor db) async {
     await db.execute('''
-CREATE TABLE write_operations (
+CREATE TABLE IF NOT EXISTS write_operations (
   operation_id TEXT PRIMARY KEY NOT NULL,
   operation_type TEXT NOT NULL,
   fingerprint TEXT NOT NULL,
@@ -318,7 +326,45 @@ CREATE TABLE write_operations (
 )
 ''');
     await db.execute(
-      'CREATE INDEX idx_write_operations_status ON write_operations (status, updated_at)',
+      'CREATE INDEX IF NOT EXISTS idx_write_operations_status ON write_operations (status, updated_at)',
+    );
+  }
+
+  Future<void> _createDerivedSyncJobsSchema(sqflite.DatabaseExecutor db) async {
+    await db.execute('''
+CREATE TABLE IF NOT EXISTS derived_sync_jobs (
+  job_key TEXT PRIMARY KEY NOT NULL,
+  job_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)
+''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_derived_sync_jobs_updated ON derived_sync_jobs (updated_at)',
+    );
+  }
+
+  Future<void> _createLibraryItemsSchema(sqflite.DatabaseExecutor db) async {
+    await db.execute('''
+CREATE TABLE IF NOT EXISTS library_items (
+  item_key TEXT PRIMARY KEY NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('markdown', 'document')),
+  name TEXT NOT NULL,
+  relative_path TEXT NOT NULL,
+  location TEXT NOT NULL,
+  mime_type TEXT,
+  size_bytes INTEGER,
+  updated_at INTEGER,
+  source_type TEXT NOT NULL DEFAULT 'scan',
+  is_favorite INTEGER NOT NULL DEFAULT 0,
+  indexed_at INTEGER NOT NULL
+)
+''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_library_items_kind_updated ON library_items (kind, updated_at)',
     );
   }
 }
