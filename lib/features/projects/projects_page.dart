@@ -1260,6 +1260,9 @@ class _ProjectCardCarousel extends StatelessWidget {
         },
         scrollDirection: Axis.horizontal,
         itemCount: cards.length,
+        // Flutter 3.41 introduces `onReorderItem`, but older supported SDKs
+        // only expose `onReorder`. Keep the cross-version API for now.
+        // ignore: deprecated_member_use
         onReorder: handleReorder,
         itemBuilder: (context, index) {
           final item = cards[index];
