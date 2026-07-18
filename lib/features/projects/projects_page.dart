@@ -965,6 +965,16 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Project updates can be written by other pages (for example, saving a
+    // long note with a project). Keep this page in sync with the shared data
+    // version signal instead of waiting for the page to be recreated.
+    ref.listen<int>(
+      dataDomainVersionProvider(DataDomain.projects),
+      (_, _) {
+        if (mounted) unawaited(_loadProjects());
+      },
+    );
+
     final project = _selectedProject;
     final activeProjects = _activeProjects;
     final completedProjects = _completedProjects;
