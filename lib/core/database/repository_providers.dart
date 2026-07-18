@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'derived_sync_jobs_repository.dart';
 import 'daily_reviews_repository.dart';
 import 'local_database.dart';
 import 'repositories.dart';
@@ -37,6 +38,14 @@ final bodyLogsRepositoryProvider = Provider<BodyLogsRepository>((ref) {
   return BodyLogsRepository(ref.watch(localDatabaseProvider));
 });
 
+final libraryItemsRepositoryProvider = Provider<LibraryItemsRepository>((ref) {
+  return LibraryItemsRepository(ref.watch(localDatabaseProvider));
+});
+
+final dashboardRepositoryProvider = Provider<DashboardRepository>((ref) {
+  return DashboardRepository(ref.watch(localDatabaseProvider));
+});
+
 final appSettingsRepositoryProvider = Provider<AppSettingsRepository>((ref) {
   return AppSettingsRepository(ref.watch(localDatabaseProvider));
 });
@@ -55,6 +64,12 @@ final writeOperationsRepositoryProvider = Provider<WriteOperationsRepository>((
   ref,
 ) {
   return WriteOperationsRepository(ref.watch(localDatabaseProvider));
+});
+
+final derivedSyncJobsRepositoryProvider = Provider<DerivedSyncJobsRepository>((
+  ref,
+) {
+  return DerivedSyncJobsRepository(ref.watch(localDatabaseProvider));
 });
 
 class DataVersionNotifier extends Notifier<int> {

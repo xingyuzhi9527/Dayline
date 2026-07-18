@@ -6,10 +6,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/local_database.dart';
+import '../../core/database/derived_sync_jobs_repository.dart';
 import '../../core/database/repository_providers.dart';
 import '../../core/database/write_operations_repository.dart';
 import '../../core/media/audio_recording_service.dart';
 import '../../core/media/photo_moment_service.dart';
+import '../../core/performance/perf_trace.dart';
 import '../../core/parser/expense_line_item.dart';
 import '../../core/parser/expense_note_cleaner.dart';
 import '../../core/parser/lui_lite_parser.dart';
@@ -33,6 +35,9 @@ final flashSaveTimeoutProvider = Provider<Duration>((ref) {
 class FlashRecordNotifier extends Notifier<FlashRecordState> {
   static const _parsedWriteOperationType = 'flash_record.parsed.v2';
   static const _audioWriteOperationType = 'flash_record.audio.v2';
+  static const _dailyDraftSyncJobType = 'daily_draft';
+  static const _monthlyExpenseSyncJobType = 'monthly_expense_report';
+  static const _projectFlashArchiveSyncJobType = 'project_flash_archive';
   static final _riskyAmountMemoContext = RegExp(
     r'(工资|薪资|收入|房贷|申报|报销|预算|以上|以内|不超过|至少|额度|规则)',
   );
@@ -51,6 +56,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   SttRecordingDraft? _recordingDraft;
   AudioRecordingService? _audioRecordingService;
   Future<void>? _saveInFlight;
+  Future<void>? _derivedSyncDrainInFlight;
   bool _disposed = false;
   int _listenRequestId = 0;
 
@@ -58,6 +64,7 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   FlashRecordState build() {
     _disposed = false;
     _sttEngine = ref.watch(sttEngineProvider);
+    unawaited(Future<void>.microtask(_drainDerivedSyncJobsSafely));
     ref.onDispose(() {
       _disposed = true;
       unawaited(_sttSub?.cancel());
@@ -720,6 +727,12 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
           selectedProjectId: selectedProjectId,
           receiptImagePath: receiptImagePath,
         );
+        await _enqueueParsedOperationMirrorJobs(
+          latest,
+          parsed,
+          rawText: rawText,
+          selectedProjectId: selectedProjectId,
+        );
         return operations.markCommitted(
           operation.id,
           result: {'draftConsumed': draftConsumed},
@@ -728,43 +741,155 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     }
 
     if (!current.isCompleted) {
-      await ensureDailyDraftAfterActivity(ref, current.createdAt);
-      if (selectedProjectId != null) {
-        try {
-          await syncProjectFlashEntryArchive(
-            ref,
-            projectId: selectedProjectId,
-            text: _projectEntryText(parsed, rawText),
-            isTodo: parsed.type == ParsedInputType.todo,
-            operationId: current.id,
-            updatedAt: current.createdAt,
-            notify: false,
-          );
-        } catch (_) {
-          // The project JSON and timeline record are authoritative. A later
-          // project edit can rebuild the derived Markdown archive.
-        }
-      }
-      if (parsed.type == ParsedInputType.expense) {
-        try {
-          await syncMonthlyExpenseReportForDate(
-            settingsRepository: ref.read(appSettingsRepositoryProvider),
-            expensesRepository: ref.read(expensesRepositoryProvider),
-            date: current.createdAt,
-            generatedAt: current.createdAt,
-          );
-        } catch (_) {
-          // The SQLite expense is authoritative. A later expense/export can
-          // refresh the derived monthly Markdown report.
-        }
-      }
-      if (current.result['draftConsumed'] == true) {
-        await _audioRecordingService?.deleteDraftIfExists(recordingDraft);
-      }
       current = await operations.markCompleted(operation.id);
+      unawaited(_drainDerivedSyncJobsSafely());
+      unawaited(_cleanupConsumedDraft(current, recordingDraft));
     }
 
     return current.result['draftConsumed'] == true;
+  }
+
+  Future<void> _enqueueParsedOperationMirrorJobs(
+    WriteOperation operation,
+    ParsedInput parsed, {
+    required String rawText,
+    String? selectedProjectId,
+  }) async {
+    final jobs = ref.read(derivedSyncJobsRepositoryProvider);
+    await jobs.enqueue(
+      key: 'daily:${_dateKey(operation.createdAt)}',
+      type: _dailyDraftSyncJobType,
+      payload: {'updatedAt': operation.createdAt.millisecondsSinceEpoch},
+      enqueuedAt: operation.createdAt,
+    );
+
+    if (selectedProjectId != null) {
+      await jobs.enqueue(
+        key: 'project:${operation.id}',
+        type: _projectFlashArchiveSyncJobType,
+        payload: {
+          'projectId': selectedProjectId,
+          'text': _projectEntryText(parsed, rawText),
+          'isTodo': parsed.type == ParsedInputType.todo,
+          'operationId': operation.id,
+          'updatedAt': operation.createdAt.millisecondsSinceEpoch,
+        },
+        enqueuedAt: operation.createdAt,
+      );
+    }
+
+    if (parsed.type == ParsedInputType.expense) {
+      await jobs.enqueue(
+        key: 'expense:${_monthKey(operation.createdAt)}',
+        type: _monthlyExpenseSyncJobType,
+        payload: {'date': operation.createdAt.millisecondsSinceEpoch},
+        enqueuedAt: operation.createdAt,
+      );
+    }
+  }
+
+  Future<void> _cleanupConsumedDraft(
+    WriteOperation operation,
+    SttRecordingDraft? recordingDraft,
+  ) async {
+    if (operation.result['draftConsumed'] == true) {
+      try {
+        await _audioRecordingService?.deleteDraftIfExists(recordingDraft);
+      } catch (_) {
+        // A leftover draft is harmless compared with blocking the save UI.
+      }
+    }
+  }
+
+  Future<void> _drainDerivedSyncJobs() async {
+    if (_disposed) return;
+    final inFlight = _derivedSyncDrainInFlight;
+    if (inFlight != null) {
+      await inFlight;
+      return;
+    }
+
+    late final Future<void> drain;
+    drain = _runDerivedSyncDrain().whenComplete(() {
+      if (identical(_derivedSyncDrainInFlight, drain)) {
+        _derivedSyncDrainInFlight = null;
+      }
+    });
+    _derivedSyncDrainInFlight = drain;
+    await drain;
+  }
+
+  Future<void> _drainDerivedSyncJobsSafely() async {
+    try {
+      await _drainDerivedSyncJobs();
+    } catch (_) {
+      // The persisted outbox keeps jobs retryable on the next drain.
+    }
+  }
+
+  Future<void> _runDerivedSyncDrain() async {
+    await PerfTrace.measure('flash_record.derived_sync_drain', () async {
+      final repository = ref.read(derivedSyncJobsRepositoryProvider);
+      final jobs = await repository.findPending();
+      for (final job in jobs) {
+        if (_disposed) return;
+        try {
+          await _performDerivedSyncJob(job);
+          await repository.delete(job.key);
+        } catch (error) {
+          try {
+            await repository.markFailed(job.key, error);
+          } catch (_) {
+            // The app may be shutting down or the database may be closed.
+          }
+        }
+      }
+    });
+  }
+
+  Future<void> _performDerivedSyncJob(DerivedSyncJob job) async {
+    switch (job.type) {
+      case _dailyDraftSyncJobType:
+        await ensureDailyDraftAfterActivity(
+          ref,
+          _millisPayloadDate(job, 'updatedAt'),
+        );
+      case _monthlyExpenseSyncJobType:
+        final date = _millisPayloadDate(job, 'date');
+        await syncMonthlyExpenseReportForDate(
+          settingsRepository: ref.read(appSettingsRepositoryProvider),
+          expensesRepository: ref.read(expensesRepositoryProvider),
+          date: date,
+          generatedAt: date,
+        );
+      case _projectFlashArchiveSyncJobType:
+        await syncProjectFlashEntryArchive(
+          ref,
+          projectId: _stringPayload(job, 'projectId'),
+          text: _stringPayload(job, 'text'),
+          isTodo: job.payload['isTodo'] == true,
+          operationId: _stringPayload(job, 'operationId'),
+          updatedAt: _millisPayloadDate(job, 'updatedAt'),
+          notify: false,
+        );
+      default:
+        throw StateError('Unknown derived sync job type: ${job.type}');
+    }
+  }
+
+  DateTime _millisPayloadDate(DerivedSyncJob job, String key) {
+    final value = job.payload[key];
+    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+    if (value is num) {
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+    }
+    throw StateError('Invalid derived sync date for ${job.key}: $key');
+  }
+
+  String _stringPayload(DerivedSyncJob job, String key) {
+    final value = job.payload[key];
+    if (value is String && value.trim().isNotEmpty) return value;
+    throw StateError('Invalid derived sync payload for ${job.key}: $key');
   }
 
   Future<void> _commitAudioOperation(
@@ -800,10 +925,20 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
     }
 
     if (!current.isCompleted) {
-      if (current.result['draftConsumed'] == true) {
-        await _audioService().deleteDraftIfExists(draft);
-      }
-      await operations.markCompleted(operation.id);
+      current = await operations.markCompleted(operation.id);
+      unawaited(_finishAudioOperationMirrors(current, draft));
+    }
+  }
+
+  Future<void> _finishAudioOperationMirrors(
+    WriteOperation operation,
+    SttRecordingDraft draft,
+  ) async {
+    if (operation.result['draftConsumed'] != true) return;
+    try {
+      await _audioService().deleteDraftIfExists(draft);
+    } catch (_) {
+      // The voice memo has already been committed; draft cleanup can lag.
     }
   }
 
@@ -900,6 +1035,17 @@ class FlashRecordNotifier extends Notifier<FlashRecordState> {
   String _fingerprint(Object? payload) {
     final canonical = jsonEncode(_canonicalize(payload));
     return sha256.convert(utf8.encode(canonical)).toString();
+  }
+
+  String _dateKey(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}-$month-$day';
+  }
+
+  String _monthKey(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    return '${date.year}-$month';
   }
 
   Object? _canonicalize(Object? value) {

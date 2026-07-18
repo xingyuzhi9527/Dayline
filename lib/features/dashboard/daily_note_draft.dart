@@ -156,31 +156,16 @@ tags: []
 }
 
 Future<int> _activityCount(Object ref, DateTime date) async {
-  final records = await _read(ref, recordsRepositoryProvider).countByDate(date);
-  final todos = await _read(ref, todosRepositoryProvider).countByDate(date);
-  final trackerLogs = await _read(
-    ref,
-    trackerLogsRepositoryProvider,
-  ).countByDate(date);
-  final focusSessions = await _read(
-    ref,
-    focusSessionsRepositoryProvider,
-  ).findByDate(date);
-  final expenses = await _read(
-    ref,
-    expensesRepositoryProvider,
-  ).findByDate(date);
-  final bodyLogs = await _read(
-    ref,
-    bodyLogsRepositoryProvider,
-  ).findByDate(date);
+  final results = await Future.wait<int>([
+    _read(ref, recordsRepositoryProvider).countByDate(date),
+    _read(ref, todosRepositoryProvider).countByDate(date),
+    _read(ref, trackerLogsRepositoryProvider).countByDate(date),
+    _read(ref, focusSessionsRepositoryProvider).countByDate(date),
+    _read(ref, expensesRepositoryProvider).countByDate(date),
+    _read(ref, bodyLogsRepositoryProvider).countByDate(date),
+  ]);
 
-  return records +
-      todos +
-      trackerLogs +
-      focusSessions.length +
-      expenses.length +
-      bodyLogs.length;
+  return results.fold<int>(0, (sum, value) => sum + value);
 }
 
 DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);

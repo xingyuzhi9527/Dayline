@@ -14,6 +14,7 @@ void main() {
   late LocalDatabase database;
   late AppSettingsRepository settingsRepository;
   late RecordsRepository recordsRepository;
+  late LibraryItemsRepository libraryItemsRepository;
   late Directory rootDir;
   late DocumentLibraryService service;
 
@@ -24,6 +25,7 @@ void main() {
     );
     settingsRepository = AppSettingsRepository(database);
     recordsRepository = RecordsRepository(database);
+    libraryItemsRepository = LibraryItemsRepository(database);
     rootDir = await Directory.systemTemp.createTemp('liflow-docs-root-');
     await settingsRepository.create(
       key: 'markdown_root_path',
@@ -34,6 +36,7 @@ void main() {
     service = DocumentLibraryService(
       settingsRepository: settingsRepository,
       recordsRepository: recordsRepository,
+      libraryItemsRepository: libraryItemsRepository,
       directoryService: dirService,
       storageService: MarkdownStorageService(dirService),
     );
@@ -91,6 +94,98 @@ void main() {
     );
     expect(snapshot.documents.map((item) => item.name), contains('paper.pdf'));
     expect(snapshot.favoriteFolders, isEmpty);
+  });
+
+  test('load reuses persisted snapshot before rescanning filesystem', () async {
+    final notesDir = Directory(
+      '${rootDir.path}${Platform.pathSeparator}notes${Platform.pathSeparator}2026-05',
+    );
+    await notesDir.create(recursive: true);
+    await File(
+      '${notesDir.path}${Platform.pathSeparator}cached.md',
+    ).writeAsString('# Cached');
+
+    final firstSnapshot = await service.load();
+    expect(firstSnapshot.notes.map((item) => item.name), contains('cached.md'));
+
+    await notesDir.delete(recursive: true);
+    final secondService = DocumentLibraryService(
+      settingsRepository: settingsRepository,
+      recordsRepository: recordsRepository,
+      directoryService: MarkdownDirectoryService(settingsRepository),
+      storageService: MarkdownStorageService(
+        MarkdownDirectoryService(settingsRepository),
+      ),
+    );
+
+    final persistedSnapshot = await secondService.load();
+
+    expect(
+      persistedSnapshot.notes.map((item) => item.name),
+      contains('cached.md'),
+    );
+  });
+
+  test('load reuses SQLite index before rescanning filesystem', () async {
+    final notesDir = Directory(
+      '${rootDir.path}${Platform.pathSeparator}notes${Platform.pathSeparator}2026-05',
+    );
+    await notesDir.create(recursive: true);
+    await File(
+      '${notesDir.path}${Platform.pathSeparator}indexed.md',
+    ).writeAsString('# Indexed');
+
+    final firstSnapshot = await service.load(forceRefresh: true);
+    expect(
+      firstSnapshot.notes.map((item) => item.name),
+      contains('indexed.md'),
+    );
+
+    await settingsRepository.delete('document_library_snapshot_v1');
+    await notesDir.delete(recursive: true);
+    final secondService = DocumentLibraryService(
+      settingsRepository: settingsRepository,
+      recordsRepository: recordsRepository,
+      libraryItemsRepository: libraryItemsRepository,
+      directoryService: MarkdownDirectoryService(settingsRepository),
+      storageService: MarkdownStorageService(
+        MarkdownDirectoryService(settingsRepository),
+      ),
+    );
+
+    final indexedSnapshot = await secondService.load();
+
+    expect(
+      indexedSnapshot.notes.map((item) => item.name),
+      contains('indexed.md'),
+    );
+  });
+
+  test('load handles 2000 indexed library items', () async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await libraryItemsRepository.replaceAll([
+      for (var i = 0; i < 2000; i++)
+        {
+          'item_key': 'markdown:location:indexed-$i',
+          'kind': 'markdown',
+          'name': 'indexed-$i.md',
+          'relative_path': 'notes/indexed-$i.md',
+          'location':
+              '${rootDir.path}${Platform.pathSeparator}notes${Platform.pathSeparator}indexed-$i.md',
+          'mime_type': 'text/markdown',
+          'size_bytes': i,
+          'updated_at': now - i,
+          'source_type': 'local',
+          'is_favorite': 0,
+          'indexed_at': now,
+        },
+    ]);
+
+    final snapshot = await service.load();
+
+    expect(snapshot.notes, hasLength(2000));
+    expect(snapshot.documents, isEmpty);
+    expect(snapshot.notes.first.name, 'indexed-0.md');
   });
 
   test('deleteDocument removes imported copy from documents folder', () async {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -141,7 +142,7 @@ class AudioRecordingService {
       sourcePath: sourceFile.path,
       targetPath: targetPath,
     );
-    await _copyAudioToVisibleDocuments(targetPath, writtenAt);
+    unawaited(_copyAudioToVisibleDocuments(targetPath, writtenAt));
     return targetPath;
   }
 

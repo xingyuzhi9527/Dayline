@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -34,17 +36,43 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
   @override
   void initState() {
     super.initState();
-    _snapshotFuture = _load();
+    final service = ref.read(documentLibraryServiceProvider);
+    final cachedSnapshot = service.cachedSnapshot;
+    if (cachedSnapshot == null) {
+      _snapshotFuture = _load();
+      unawaited(
+        _snapshotFuture.then((_) {
+          if (mounted) unawaited(_refreshInBackground());
+        }),
+      );
+    } else {
+      _snapshotFuture = Future.value(cachedSnapshot);
+      unawaited(Future<void>.microtask(_refreshInBackground));
+    }
   }
 
-  Future<DocumentLibrarySnapshot> _load() {
-    return ref.read(documentLibraryServiceProvider).load();
+  Future<DocumentLibrarySnapshot> _load({bool forceRefresh = false}) {
+    return ref
+        .read(documentLibraryServiceProvider)
+        .load(forceRefresh: forceRefresh);
   }
 
   void _refresh() {
     setState(() {
-      _snapshotFuture = _load();
+      _snapshotFuture = _load(forceRefresh: true);
     });
+  }
+
+  Future<void> _refreshInBackground() async {
+    try {
+      final snapshot = await _load(forceRefresh: true);
+      if (!mounted) return;
+      setState(() {
+        _snapshotFuture = Future.value(snapshot);
+      });
+    } catch (_) {
+      // Keep the cached library visible; manual refresh can surface errors.
+    }
   }
 
   @override
@@ -355,7 +383,7 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
       if (folder != null) {
         setState(() {
           _view = _LibraryView.folders;
-          _snapshotFuture = _load();
+          _snapshotFuture = _load(forceRefresh: true);
         });
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
@@ -393,7 +421,7 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
       if (item != null) {
         setState(() {
           _view = _LibraryView.documents;
-          _snapshotFuture = _load();
+          _snapshotFuture = _load(forceRefresh: true);
         });
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
@@ -459,7 +487,7 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
             .read(dataVersionProvider.notifier)
             .increment(domains: DataDomain.values.toSet());
         setState(() {
-          _snapshotFuture = _load();
+          _snapshotFuture = _load(forceRefresh: true);
         });
       }
     } catch (e) {
@@ -562,7 +590,7 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
       if (!mounted) return;
       setState(() {
         _view = _LibraryView.documents;
-        _snapshotFuture = _load();
+        _snapshotFuture = _load(forceRefresh: true);
       });
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -594,7 +622,7 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
           .setFavoriteNote(item: item, favorite: nextFavorite);
       if (!mounted) return;
       setState(() {
-        _snapshotFuture = _load();
+        _snapshotFuture = _load(forceRefresh: true);
         if (nextFavorite) _view = _LibraryView.favorites;
       });
       ScaffoldMessenger.of(context)
@@ -645,7 +673,7 @@ class _DocumentLibraryPageState extends ConsumerState<DocumentLibraryPage> {
     if (!mounted) return;
     setState(() {
       _view = _LibraryView.folders;
-      _snapshotFuture = _load();
+      _snapshotFuture = _load(forceRefresh: true);
     });
   }
 

@@ -49,16 +49,40 @@ final monthlyExpenseSummaryProvider =
       final month = DateTime(date.year, date.month);
       final repo = ref.read(expensesRepositoryProvider);
       final expenses = await repo.findByMonth(month);
-      final categoryTotals = await repo.sumAmountByCategoryForMonth(month);
-      final dailyTotals = await repo.sumAmountByDayForMonth(month);
-      final total = await repo.sumAmountByMonth(month);
+      final categoryTotals = <String, double>{};
+      final dailyTotals = <String, double>{};
+      var total = 0.0;
+      for (final expense in expenses) {
+        final amount = (expense['amount'] as num?)?.toDouble() ?? 0;
+        total += amount;
+        final category = (expense['category'] as String?)?.trim();
+        final categoryKey = category == null || category.isEmpty
+            ? 'other'
+            : category;
+        categoryTotals[categoryKey] =
+            (categoryTotals[categoryKey] ?? 0) + amount;
+        final dayKey = expense['date'] as String? ?? '';
+        if (dayKey.isNotEmpty) {
+          dailyTotals[dayKey] = (dailyTotals[dayKey] ?? 0) + amount;
+        }
+      }
       final dayCount = DateTime(month.year, month.month + 1, 0).day;
-      final sortedDailyTotals = dailyTotals.entries
-          .map(
-            (entry) =>
-                MonthlyExpenseDayTotal(date: entry.key, amount: entry.value),
-          )
-          .toList();
+      final sortedDailyTotals =
+          dailyTotals.entries
+              .map(
+                (entry) => MonthlyExpenseDayTotal(
+                  date: entry.key,
+                  amount: entry.value,
+                ),
+              )
+              .toList()
+            ..sort((a, b) => a.date.compareTo(b.date));
+      final sortedCategoryTotals = categoryTotals.entries.toList()
+        ..sort((a, b) {
+          final amountCompare = b.value.compareTo(a.value);
+          if (amountCompare != 0) return amountCompare;
+          return a.key.compareTo(b.key);
+        });
       final highestDay = sortedDailyTotals.isEmpty
           ? null
           : sortedDailyTotals.reduce((a, b) {
@@ -74,7 +98,7 @@ final monthlyExpenseSummaryProvider =
         total: total,
         count: expenses.length,
         dailyAverage: dayCount == 0 ? 0 : total / dayCount,
-        categoryTotals: categoryTotals.entries
+        categoryTotals: sortedCategoryTotals
             .map(
               (entry) =>
                   MonthlyExpenseBucket(label: entry.key, amount: entry.value),

@@ -965,6 +965,16 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Project updates can be written by other pages (for example, saving a
+    // long note with a project). Keep this page in sync with the shared data
+    // version signal instead of waiting for the page to be recreated.
+    ref.listen<int>(
+      dataDomainVersionProvider(DataDomain.projects),
+      (_, _) {
+        if (mounted) unawaited(_loadProjects());
+      },
+    );
+
     final project = _selectedProject;
     final activeProjects = _activeProjects;
     final completedProjects = _completedProjects;
@@ -1250,7 +1260,10 @@ class _ProjectCardCarousel extends StatelessWidget {
         },
         scrollDirection: Axis.horizontal,
         itemCount: cards.length,
-        onReorderItem: handleReorder,
+        // Flutter 3.41 introduces `onReorderItem`, but older supported SDKs
+        // only expose `onReorder`. Keep the cross-version API for now.
+        // ignore: deprecated_member_use
+        onReorder: handleReorder,
         itemBuilder: (context, index) {
           final item = cards[index];
           if (item is _ProjectShelfStack) {
