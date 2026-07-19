@@ -8,9 +8,11 @@ import 'package:liflow_app/core/database/repositories.dart';
 import 'package:liflow_app/core/database/repository_providers.dart';
 import 'package:liflow_app/features/projects/project_store.dart';
 import 'package:liflow_app/features/projects/projects_page.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  sqfliteFfiInit();
 
   testWidgets('给定八条项目待办，默认收纳第八条并可展开', (tester) async {
     tester.view.physicalSize = const Size(1200, 2400);
@@ -79,7 +81,13 @@ void main() {
 }
 
 class _FakeAppSettingsRepository extends AppSettingsRepository {
-  _FakeAppSettingsRepository(this.projectsJson) : super(LocalDatabase());
+  _FakeAppSettingsRepository(this.projectsJson)
+    : super(
+        LocalDatabase(
+          databaseFactory: databaseFactoryFfi,
+          databasePath: inMemoryDatabasePath,
+        ),
+      );
 
   final String projectsJson;
 
@@ -91,7 +99,13 @@ class _FakeAppSettingsRepository extends AppSettingsRepository {
 }
 
 class _EmptyRecordsRepository extends RecordsRepository {
-  _EmptyRecordsRepository() : super(LocalDatabase());
+  _EmptyRecordsRepository()
+    : super(
+        LocalDatabase(
+          databaseFactory: databaseFactoryFfi,
+          databasePath: inMemoryDatabasePath,
+        ),
+      );
 
   @override
   Future<List<DatabaseRow>> findByDate(DateTime date) async => const [];
