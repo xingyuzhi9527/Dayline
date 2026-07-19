@@ -13,6 +13,7 @@ import '../../core/markdown/markdown_storage_service.dart';
 import '../../core/parser/expense_line_item.dart';
 import '../../core/parser/lui_lite_parser.dart';
 import '../projects/project_store.dart';
+import '../search/data/search_index_service.dart';
 
 class MarkdownRestoreFile {
   const MarkdownRestoreFile({
@@ -534,15 +535,18 @@ class MarkdownRestoreService {
     required LocalDatabase database,
     required RecordsRepository recordsRepository,
     required AppSettingsRepository settingsRepository,
+    SearchIndexService? searchIndexService,
   }) : _source = source,
        _database = database,
        _recordsRepository = recordsRepository,
-       _settingsRepository = settingsRepository;
+       _settingsRepository = settingsRepository,
+       _searchIndexService = searchIndexService ?? SearchIndexService(database);
 
   final MarkdownRestoreSource _source;
   final LocalDatabase _database;
   final RecordsRepository _recordsRepository;
   final AppSettingsRepository _settingsRepository;
+  final SearchIndexService _searchIndexService;
 
   Future<RestorePreview> preview() async {
     final snapshot = await _readSnapshot();
@@ -616,6 +620,12 @@ class MarkdownRestoreService {
   }
 
   Future<RestoreResult> restore() async {
+    final result = await _restore();
+    await _searchIndexService.repairAfterRestore();
+    return result;
+  }
+
+  Future<RestoreResult> _restore() async {
     final snapshot = await _readSnapshot();
     if (snapshot != null) {
       final snapshotResult = await _restoreSnapshot(snapshot);

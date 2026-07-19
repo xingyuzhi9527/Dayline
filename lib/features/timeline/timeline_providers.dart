@@ -85,6 +85,8 @@ class TimelineDateNotifier extends Notifier<DateTime> {
   void goToNextDay() => state = state.add(const Duration(days: 1));
 
   void goToToday() => state = DateTime.now();
+
+  void setDate(DateTime date) => state = date;
 }
 
 final timelineDateProvider = NotifierProvider<TimelineDateNotifier, DateTime>(

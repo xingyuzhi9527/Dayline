@@ -20,7 +20,14 @@ import 'project_ordering.dart';
 import 'project_store.dart';
 
 class ProjectsPage extends ConsumerStatefulWidget {
-  const ProjectsPage({super.key});
+  const ProjectsPage({
+    this.initialProjectId,
+    this.standalone = false,
+    super.key,
+  });
+
+  final String? initialProjectId;
+  final bool standalone;
 
   @override
   ConsumerState<ProjectsPage> createState() => _ProjectsPageState();
@@ -36,6 +43,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   var _saving = false;
   var _addingProjectImage = false;
   var _addingProjectFile = false;
+  var _targetMissing = false;
 
   _ProjectInfo? get _selectedProject {
     final selectedId = _selectedProjectId;
@@ -43,6 +51,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       final selected = _projectById(selectedId);
       if (selected != null) return selected;
     }
+    if (widget.initialProjectId != null) return null;
     return _firstProject(_activeProjects) ?? _firstProject(_projects);
   }
 
@@ -52,24 +61,35 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadProjects());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_loadProjects());
+    });
   }
 
   Future<void> _loadProjects() async {
     final settings = ref.read(appSettingsRepositoryProvider);
     final row = await settings.findByKey(projectsSettingsKey);
     final projects = _decodeProjects(row?['value'] as String?);
-    final projectRecordHeatEntries = await _loadProjectRecordHeatEntries(
-      projects,
-    );
+    final projectRecordHeatEntries = widget.standalone
+        ? const <_ProjectHeatEntry>[]
+        : await _loadProjectRecordHeatEntries(projects);
     if (!mounted) return;
 
     setState(() {
       _projects = projects;
       _projectRecordHeatEntries = projectRecordHeatEntries;
-      _selectedProjectId =
-          _projectById(_selectedProjectId ?? '')?.id ??
-          _firstProject(_activeProjects)?.id;
+      final targetProjectId = widget.initialProjectId;
+      if (targetProjectId != null) {
+        _selectedProjectId = resolveProjectTargetId(
+          projects.map((project) => project.id),
+          targetProjectId,
+        );
+        _targetMissing = _selectedProjectId == null;
+      } else {
+        _selectedProjectId =
+            _projectById(_selectedProjectId ?? '')?.id ??
+            _firstProject(_activeProjects)?.id;
+      }
       _loading = false;
     });
   }
@@ -980,6 +1000,9 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                 slivers: [
                   SliverToBoxAdapter(
                     child: _ProjectsHeader(
+                      onBack: widget.standalone
+                          ? () => Navigator.of(context).maybePop()
+                          : null,
                       onOpenAllProjects: _projects.isEmpty
                           ? null
                           : _openAllProjects,
@@ -987,7 +1010,12 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                       saving: _saving,
                     ),
                   ),
-                  if (_projects.isEmpty || project == null)
+                  if (_targetMissing)
+                    const SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: _MissingProjectTarget(),
+                    )
+                  else if (_projects.isEmpty || project == null)
                     SliverFillRemaining(
                       hasScrollBody: false,
                       child: _EmptyProjects(onAddProject: _openAddProject),
@@ -1059,11 +1087,13 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
 
 class _ProjectsHeader extends StatelessWidget {
   const _ProjectsHeader({
+    this.onBack,
     required this.onOpenAllProjects,
     required this.onAddProject,
     required this.saving,
   });
 
+  final VoidCallback? onBack;
   final VoidCallback? onOpenAllProjects;
   final VoidCallback onAddProject;
   final bool saving;
@@ -1085,10 +1115,12 @@ class _ProjectsHeader extends StatelessWidget {
         child: Row(
           children: [
             IconButton(
-              onPressed: onOpenAllProjects,
-              icon: const Icon(Icons.menu_rounded),
-              tooltip: '项目总览',
-              color: onOpenAllProjects == null
+              onPressed: onBack ?? onOpenAllProjects,
+              icon: Icon(
+                onBack == null ? Icons.menu_rounded : Icons.arrow_back_rounded,
+              ),
+              tooltip: onBack == null ? '项目总览' : '返回搜索',
+              color: onBack == null && onOpenAllProjects == null
                   ? colors.onSurfaceVariant.withAlpha(110)
                   : colors.onSurface,
             ),
@@ -1108,6 +1140,32 @@ class _ProjectsHeader extends StatelessWidget {
               tooltip: '添加项目',
               color: colors.onSurface,
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MissingProjectTarget extends StatelessWidget {
+  const _MissingProjectTarget();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.flag_outlined,
+              size: 40,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text('项目不存在或已移除', style: theme.textTheme.titleMedium),
           ],
         ),
       ),

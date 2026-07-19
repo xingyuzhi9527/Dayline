@@ -129,6 +129,88 @@ void main() {
       colors.outlineVariant.withAlpha(180),
     );
   });
+
+  testWidgets(
+    'dashboard collapsed and expanded search routes cover bottom navigation',
+    (tester) async {
+      tester.view.physicalSize = const Size(420, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final database = LocalDatabase(
+        databaseFactory: databaseFactoryFfi,
+        databasePath: inMemoryDatabasePath,
+      );
+      addTearDown(database.close);
+      final container = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          sttEngineProvider.overrideWithValue(_CountingSttEngine()),
+          dashboardSummaryProvider.overrideWith((ref) async => _emptySummary()),
+          dashboardReviewProvider.overrideWith((ref) async => null),
+          timelineEventsProvider.overrideWith((ref) async => const []),
+          deletedRecordsProvider.overrideWith((ref) async => const []),
+        ],
+      );
+      addTearDown(container.dispose);
+      final router = container.read(appRouterProvider);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const LiflowApp(),
+        ),
+      );
+      router.go('/dashboard');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 700));
+
+      final collapsedSearch = find.ancestor(
+        of: find.byKey(const ValueKey('dashboard-search-shortcut')),
+        matching: find.byType(InkWell),
+      );
+      tester.widget<InkWell>(collapsedSearch).onTap!();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        '/dashboard/search',
+      );
+      expect(find.byKey(const ValueKey('search-page')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('liflow-bottom-navigation')),
+        findsNothing,
+      );
+
+      router.pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(
+        find.byKey(const ValueKey('dashboard-open-review-pill')),
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('dashboard-empty-expanded-search')),
+        findsOneWidget,
+      );
+      tester
+          .widget<OutlinedButton>(
+            find.byKey(const ValueKey('dashboard-empty-expanded-search')),
+          )
+          .onPressed!();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        '/dashboard/search',
+      );
+      expect(
+        find.byKey(const ValueKey('liflow-bottom-navigation')),
+        findsNothing,
+      );
+    },
+  );
 }
 
 double _branchPage(WidgetTester tester) {

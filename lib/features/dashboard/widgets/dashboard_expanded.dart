@@ -34,12 +34,14 @@ class DashboardExpandedView extends StatefulWidget {
     required this.summary,
     required this.onCollapse,
     required this.onOpenLibrary,
+    required this.onOpenSearch,
     super.key,
   });
 
   final DashboardSummary summary;
   final VoidCallback onCollapse;
   final VoidCallback onOpenLibrary;
+  final VoidCallback onOpenSearch;
 
   @override
   State<DashboardExpandedView> createState() => _DashboardExpandedViewState();
@@ -66,7 +68,11 @@ class _DashboardExpandedViewState extends State<DashboardExpandedView> {
     final theme = Theme.of(context);
 
     if (!widget.summary.hasData) {
-      return _EmptyExpanded(theme: theme, onBack: widget.onCollapse);
+      return _EmptyExpanded(
+        theme: theme,
+        onBack: widget.onCollapse,
+        onOpenSearch: widget.onOpenSearch,
+      );
     }
 
     return SingleChildScrollView(
@@ -84,6 +90,7 @@ class _DashboardExpandedViewState extends State<DashboardExpandedView> {
             summary: widget.summary,
             onCollapse: widget.onCollapse,
             onOpenLibrary: widget.onOpenLibrary,
+            onOpenSearch: widget.onOpenSearch,
           ),
           const SizedBox(height: AppSpacing.md),
           _TodayStatusCard(summary: widget.summary),
@@ -139,11 +146,13 @@ class _ExpandedHeader extends StatelessWidget {
     required this.summary,
     required this.onCollapse,
     required this.onOpenLibrary,
+    required this.onOpenSearch,
   });
 
   final DashboardSummary summary;
   final VoidCallback onCollapse;
   final VoidCallback onOpenLibrary;
+  final VoidCallback onOpenSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -169,6 +178,13 @@ class _ExpandedHeader extends StatelessWidget {
         const SizedBox(width: AppSpacing.sm),
         _CompactStreakBadge(recordCount: summary.recordCount),
         const Spacer(),
+        IconButton(
+          key: const ValueKey('dashboard-expanded-search'),
+          onPressed: onOpenSearch,
+          icon: const Icon(Icons.search_rounded),
+          tooltip: '搜索记录与项目',
+          color: colors.onSurfaceVariant,
+        ),
         IconButton(
           onPressed: onOpenLibrary,
           icon: const Icon(Icons.folder_special_rounded),
@@ -225,10 +241,15 @@ class _CompactStreakBadge extends StatelessWidget {
 }
 
 class _EmptyExpanded extends StatelessWidget {
-  const _EmptyExpanded({required this.theme, required this.onBack});
+  const _EmptyExpanded({
+    required this.theme,
+    required this.onBack,
+    required this.onOpenSearch,
+  });
 
   final ThemeData theme;
   final VoidCallback onBack;
+  final VoidCallback onOpenSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -259,6 +280,13 @@ class _EmptyExpanded extends StatelessWidget {
               ),
             ),
             const SizedBox(height: AppSpacing.lg),
+            OutlinedButton.icon(
+              key: const ValueKey('dashboard-empty-expanded-search'),
+              onPressed: onOpenSearch,
+              icon: const Icon(Icons.search_rounded),
+              label: const Text('搜索'),
+            ),
+            const SizedBox(height: AppSpacing.sm),
             OutlinedButton(onPressed: onBack, child: const Text('返回')),
           ],
         ),

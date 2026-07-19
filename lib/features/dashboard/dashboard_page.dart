@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_spacing.dart';
 import 'dashboard_providers.dart';
@@ -24,6 +25,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     ).push(MaterialPageRoute(builder: (_) => const DocumentLibraryPage()));
   }
 
+  void _openSearch(BuildContext context) {
+    context.go('/dashboard/search');
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -46,6 +51,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       summary: visibleSummary,
                       onCollapse: () => setState(() => _expanded = false),
                       onOpenLibrary: () => _openLibrary(context),
+                      onOpenSearch: () => _openSearch(context),
                     )
                   : _CollapsedView(
                       summary: visibleSummary,
@@ -66,7 +72,23 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               Positioned(
                 top: AppSpacing.sm,
                 right: AppSpacing.md,
-                child: _LibraryShortcut(onTap: () => _openLibrary(context)),
+                child: Row(
+                  children: [
+                    _DashboardShortcut(
+                      widgetKey: const ValueKey('dashboard-search-shortcut'),
+                      tooltip: '搜索记录与项目',
+                      icon: Icons.search_rounded,
+                      onTap: () => _openSearch(context),
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    _DashboardShortcut(
+                      widgetKey: const ValueKey('dashboard-library-shortcut'),
+                      tooltip: '资料库',
+                      icon: Icons.folder_special_rounded,
+                      onTap: () => _openLibrary(context),
+                    ),
+                  ],
+                ),
               ),
           ],
         ),
@@ -75,9 +97,17 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   }
 }
 
-class _LibraryShortcut extends StatelessWidget {
-  const _LibraryShortcut({required this.onTap});
+class _DashboardShortcut extends StatelessWidget {
+  const _DashboardShortcut({
+    required this.widgetKey,
+    required this.tooltip,
+    required this.icon,
+    required this.onTap,
+  });
 
+  final Key widgetKey;
+  final String tooltip;
+  final IconData icon;
   final VoidCallback onTap;
 
   @override
@@ -85,7 +115,7 @@ class _LibraryShortcut extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     return SafeArea(
       child: Tooltip(
-        message: '资料库',
+        message: tooltip,
         child: Material(
           color: colors.surface.withAlpha(235),
           shape: const CircleBorder(),
@@ -95,13 +125,10 @@ class _LibraryShortcut extends StatelessWidget {
             customBorder: const CircleBorder(),
             onTap: onTap,
             child: SizedBox(
-              width: 44,
-              height: 44,
-              child: Icon(
-                Icons.folder_special_rounded,
-                color: colors.primary,
-                size: 22,
-              ),
+              key: widgetKey,
+              width: 48,
+              height: 48,
+              child: Icon(icon, color: colors.primary, size: 22),
             ),
           ),
         ),
