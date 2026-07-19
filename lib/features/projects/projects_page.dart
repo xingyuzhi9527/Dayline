@@ -1664,25 +1664,22 @@ class _SmartTodoSection extends StatefulWidget {
 }
 
 class _SmartTodoSectionState extends State<_SmartTodoSection> {
-  var _showOlderTodos = false;
+  static const _visibleTodoLimit = 7;
+
+  var _showArchivedTodos = false;
 
   @override
   Widget build(BuildContext context) {
-    final recentTodos = _sortProjectTodos(
-      widget.project.todos.where(_isRecentProjectTodo).toList(),
-    );
-    final olderTodos = _sortProjectTodos(
-      widget.project.todos
-          .where((todo) => !_isRecentProjectTodo(todo))
-          .toList(),
-    );
+    final sortedTodos = _sortProjectTodos(widget.project.todos);
+    final visibleTodos = sortedTodos.take(_visibleTodoLimit).toList();
+    final archivedTodos = sortedTodos.skip(_visibleTodoLimit).toList();
     final doneCount = widget.project.todos.where((todo) => todo.done).length;
 
     return _SectionCard(
       title: '待办',
       trailing: widget.project.todos.isEmpty
           ? '还没有下一步'
-          : '${recentTodos.length} 个近7天 · $doneCount 已完成',
+          : '${widget.project.todos.length} 个待办 · $doneCount 已完成',
       action: TextButton.icon(
         onPressed: widget.onAddTodo,
         icon: const Icon(Icons.add_rounded, size: 16),
@@ -1693,28 +1690,27 @@ class _SmartTodoSectionState extends State<_SmartTodoSection> {
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (recentTodos.isEmpty)
-                  const _SoftEmptyText('近7天没有待办，早一点的事项已经收进下面。')
-                else
-                  for (final todo in recentTodos)
-                    _ExpandableTodoRow(
-                      key: ValueKey(todo.id),
-                      todo: todo,
-                      onTap: () => widget.onToggle(todo.id),
-                      onEdit: () => widget.onEditTodo(todo.id),
-                    ),
-                if (olderTodos.isNotEmpty) ...[
+                for (final todo in visibleTodos)
+                  _ExpandableTodoRow(
+                    key: ValueKey(todo.id),
+                    todo: todo,
+                    onTap: () => widget.onToggle(todo.id),
+                    onEdit: () => widget.onEditTodo(todo.id),
+                  ),
+                if (archivedTodos.isNotEmpty) ...[
                   const SizedBox(height: AppSpacing.xs),
                   _ArchiveBox(
-                    title: '7天以外',
-                    subtitle: '${olderTodos.length} 个待办已收纳',
-                    expanded: _showOlderTodos,
-                    onToggle: () =>
-                        setState(() => _showOlderTodos = !_showOlderTodos),
+                    key: const ValueKey('project-todo-archive-toggle'),
+                    title: '更多待办',
+                    subtitle: '${archivedTodos.length} 个待办已收纳',
+                    expanded: _showArchivedTodos,
+                    onToggle: () => setState(
+                      () => _showArchivedTodos = !_showArchivedTodos,
+                    ),
                   ),
                 ],
-                if (_showOlderTodos)
-                  for (final todo in olderTodos)
+                if (_showArchivedTodos)
+                  for (final todo in archivedTodos)
                     Padding(
                       padding: const EdgeInsets.only(top: AppSpacing.xs),
                       child: _ExpandableTodoRow(
@@ -1732,6 +1728,7 @@ class _SmartTodoSectionState extends State<_SmartTodoSection> {
 
 class _ArchiveBox extends StatelessWidget {
   const _ArchiveBox({
+    super.key,
     required this.title,
     required this.subtitle,
     required this.expanded,
@@ -4477,12 +4474,6 @@ List<_ProjectTodo> _sortProjectTodos(List<_ProjectTodo> todos) {
     if (a.done != b.done) return a.done ? 1 : -1;
     return b.createdAt.compareTo(a.createdAt);
   });
-}
-
-bool _isRecentProjectTodo(_ProjectTodo todo) {
-  final createdAt = _dateOnly(todo.createdAt);
-  final today = _dateOnly(DateTime.now());
-  return !createdAt.isBefore(today.subtract(const Duration(days: 6)));
 }
 
 _ProjectInfo? _firstProject(List<_ProjectInfo> projects) {
