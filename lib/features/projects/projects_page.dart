@@ -1486,6 +1486,9 @@ class _ProjectSwitcherDrawerState extends State<_ProjectSwitcherDrawer> {
                         vertical: AppSpacing.sm,
                       ),
                       itemCount: visibleProjects.length,
+                      // Flutter 3.41 adds `onReorderItem`, but older supported
+                      // SDKs only expose `onReorder` and require index repair.
+                      // ignore: deprecated_member_use
                       onReorder: _handleReorder,
                       proxyDecorator: (child, _, _) => Material(
                         color: colors.surface,
