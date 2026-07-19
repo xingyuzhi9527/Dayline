@@ -158,6 +158,20 @@ class RecordsRepository extends Repository {
     );
   }
 
+  Future<List<String>> findDistinctTypes() async {
+    final db = await localDatabase.executor;
+    final rows = await db.rawQuery('''
+SELECT DISTINCT type
+FROM records
+WHERE is_deleted = 0 AND TRIM(type) <> ''
+ORDER BY type COLLATE NOCASE ASC
+''');
+    return rows
+        .map((row) => row['type'])
+        .whereType<String>()
+        .toList(growable: false);
+  }
+
   Future<List<DatabaseRow>> findDocumentLibraryCandidates() async {
     final db = await localDatabase.executor;
     return db.query(
