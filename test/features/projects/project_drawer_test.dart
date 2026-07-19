@@ -41,6 +41,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 80));
       await tester.pumpAndSettle();
 
+      final drawerSize = tester.getSize(
+        find.byKey(const ValueKey('project-switcher-drawer')),
+      );
+      expect(drawerSize.width, closeTo(344 * (2 / 3), 0.1));
+
       expect(
         find.byKey(const ValueKey('project-drawer-item-active-a')),
         findsOneWidget,
@@ -84,7 +89,7 @@ void main() {
 }
 
 void _configureView(WidgetTester tester) {
-  tester.view.physicalSize = const Size(800, 1400);
+  tester.view.physicalSize = const Size(400, 800);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
