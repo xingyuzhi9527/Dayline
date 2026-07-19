@@ -28,10 +28,10 @@ class ProjectsPage extends ConsumerStatefulWidget {
 
 class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   final _imagePicker = ImagePicker();
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   var _projects = <_ProjectInfo>[];
   var _projectRecordHeatEntries = <_ProjectHeatEntry>[];
   String? _selectedProjectId;
-  var _completedExpanded = false;
   var _loading = true;
   var _saving = false;
   var _addingProjectImage = false;
@@ -43,15 +43,11 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       final selected = _projectById(selectedId);
       if (selected != null) return selected;
     }
-    return _firstProject(_activeProjects) ??
-        (_completedExpanded ? _firstProject(_completedProjects) : null);
+    return _firstProject(_activeProjects) ?? _firstProject(_projects);
   }
 
   List<_ProjectInfo> get _activeProjects =>
       _projects.where((project) => project.isActiveForDaily).toList();
-
-  List<_ProjectInfo> get _completedProjects =>
-      _projects.where((project) => project.isCompleted).toList();
 
   @override
   void initState() {
@@ -119,7 +115,6 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     if (nextIndex >= 0) {
       setState(() {
         _selectedProjectId = _projects[nextIndex].id;
-        if (_projects[nextIndex].isCompleted) _completedExpanded = true;
       });
     }
   }
@@ -211,7 +206,6 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     setState(() {
       _projects = nextProjects;
       if (status == '归档' || status == '完成') {
-        _completedExpanded = false;
         _selectedProjectId = _firstProject(_activeProjects)?.id;
       } else {
         _selectedProjectId = updatedProject.id;
@@ -885,16 +879,9 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     return null;
   }
 
-  void _toggleCompletedStack() {
-    setState(() {
-      _completedExpanded = !_completedExpanded;
-      final selected = _selectedProject;
-      if (!_completedExpanded && (selected?.isCompleted ?? false)) {
-        _selectedProjectId = _firstProject(_activeProjects)?.id;
-      } else if (_completedExpanded && selected == null) {
-        _selectedProjectId = _firstProject(_completedProjects)?.id;
-      }
-    });
+  void _selectProjectFromDrawer(_ProjectInfo project) {
+    setState(() => _selectedProjectId = project.id);
+    _scaffoldKey.currentState?.closeEndDrawer();
   }
 
   Future<List<_ProjectHeatEntry>> _loadProjectRecordHeatEntries(
@@ -968,18 +955,24 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     // Project updates can be written by other pages (for example, saving a
     // long note with a project). Keep this page in sync with the shared data
     // version signal instead of waiting for the page to be recreated.
-    ref.listen<int>(
-      dataDomainVersionProvider(DataDomain.projects),
-      (_, _) {
-        if (mounted) unawaited(_loadProjects());
-      },
-    );
+    ref.listen<int>(dataDomainVersionProvider(DataDomain.projects), (_, _) {
+      if (mounted) unawaited(_loadProjects());
+    });
 
     final project = _selectedProject;
-    final activeProjects = _activeProjects;
-    final completedProjects = _completedProjects;
-
     return Scaffold(
+      key: _scaffoldKey,
+      endDrawerEnableOpenDragGesture: true,
+      drawerScrimColor: Theme.of(context).colorScheme.scrim.withAlpha(72),
+      endDrawer: _projects.isEmpty
+          ? null
+          : _ProjectSwitcherDrawer(
+              projects: _projects,
+              selectedProjectId: project?.id,
+              onSelected: _selectProjectFromDrawer,
+              onReorderProjects: _reorderProjects,
+              onClose: () => _scaffoldKey.currentState?.closeEndDrawer(),
+            ),
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -994,23 +987,18 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                       saving: _saving,
                     ),
                   ),
-                  if (_projects.isEmpty)
+                  if (_projects.isEmpty || project == null)
                     SliverFillRemaining(
                       hasScrollBody: false,
                       child: _EmptyProjects(onAddProject: _openAddProject),
                     )
                   else ...[
                     SliverToBoxAdapter(
-                      child: _ProjectCardCarousel(
-                        activeProjects: activeProjects,
-                        completedProjects: completedProjects,
-                        completedExpanded: _completedExpanded,
-                        selectedProjectId: project?.id,
-                        onSelected: (project) =>
-                            setState(() => _selectedProjectId = project.id),
-                        onEdit: _openEditProject,
-                        onToggleCompleted: _toggleCompletedStack,
-                        onReorderProjects: _reorderProjects,
+                      child: _CurrentProjectCard(
+                        project: project,
+                        onOpenDrawer: () =>
+                            _scaffoldKey.currentState?.openEndDrawer(),
+                        onEdit: () => _openEditProject(project),
                       ),
                     ),
                     SliverPadding(
@@ -1022,42 +1010,38 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                       ),
                       sliver: SliverList.list(
                         children: [
-                          if (project != null) ...[
-                            _CurrentProjectHint(project: project),
+                          if (project.isArchived)
+                            _ArchivedProjectNotice(
+                              project: project,
+                              onEdit: () => _openEditProject(project),
+                            )
+                          else ...[
+                            _SmartTodoSection(
+                              project: project,
+                              onToggle: _toggleTodo,
+                              onAddTodo: _openAddTodo,
+                              onEditTodo: _openEditTodo,
+                            ),
                             const SizedBox(height: AppSpacing.md),
-                            if (project.isArchived)
-                              _ArchivedProjectNotice(
-                                project: project,
-                                onEdit: () => _openEditProject(project),
-                              )
-                            else ...[
-                              _SmartTodoSection(
-                                project: project,
-                                onToggle: _toggleTodo,
-                                onAddTodo: _openAddTodo,
-                                onEditTodo: _openEditTodo,
-                              ),
-                              const SizedBox(height: AppSpacing.md),
-                              _ProjectFavoritesSection(
-                                favorites: project.favorites,
-                                onOpenFavorite: _openProjectFavorite,
-                                onDeleteFavorite: _deleteProjectFavorite,
-                              ),
-                              const SizedBox(height: AppSpacing.md),
-                              _SmartUpdatesSection(
-                                project: project,
-                                onAddUpdate: _openAddUpdate,
-                                onAddImage: _openAddProjectImageMaterial,
-                                onAddFile: _openAddProjectFileMaterial,
-                                onSaveArchive: _saveArchiveSnapshot,
-                                onOpenUpdate: _openProjectUpdate,
-                                onToggleFavorite: _toggleProjectFavorite,
-                                addingImage: _addingProjectImage,
-                                addingFile: _addingProjectFile,
-                              ),
-                            ],
+                            _ProjectFavoritesSection(
+                              favorites: project.favorites,
+                              onOpenFavorite: _openProjectFavorite,
+                              onDeleteFavorite: _deleteProjectFavorite,
+                            ),
                             const SizedBox(height: AppSpacing.md),
+                            _SmartUpdatesSection(
+                              project: project,
+                              onAddUpdate: _openAddUpdate,
+                              onAddImage: _openAddProjectImageMaterial,
+                              onAddFile: _openAddProjectFileMaterial,
+                              onSaveArchive: _saveArchiveSnapshot,
+                              onOpenUpdate: _openProjectUpdate,
+                              onToggleFavorite: _toggleProjectFavorite,
+                              addingImage: _addingProjectImage,
+                              addingFile: _addingProjectFile,
+                            ),
                           ],
+                          const SizedBox(height: AppSpacing.md),
                           _HeatmapSection(
                             projects: _projects,
                             recordEntries: _projectRecordHeatEntries,
@@ -1183,139 +1167,383 @@ class _EmptyProjects extends StatelessWidget {
   }
 }
 
-class _ProjectCardCarousel extends StatelessWidget {
-  const _ProjectCardCarousel({
-    required this.activeProjects,
-    required this.completedProjects,
-    required this.completedExpanded,
-    required this.selectedProjectId,
-    required this.onSelected,
+class _CurrentProjectCard extends StatelessWidget {
+  const _CurrentProjectCard({
+    required this.project,
+    required this.onOpenDrawer,
     required this.onEdit,
-    required this.onToggleCompleted,
-    required this.onReorderProjects,
   });
 
-  final List<_ProjectInfo> activeProjects;
-  final List<_ProjectInfo> completedProjects;
-  final bool completedExpanded;
-  final String? selectedProjectId;
-  final ValueChanged<_ProjectInfo> onSelected;
-  final ValueChanged<_ProjectInfo> onEdit;
-  final VoidCallback onToggleCompleted;
-  final ValueChanged<List<String>> onReorderProjects;
+  final _ProjectInfo project;
+  final VoidCallback onOpenDrawer;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
-    final cards = [
-      ...activeProjects.map<_ProjectShelfItem>(_ProjectShelfCard.new),
-      if (completedProjects.isNotEmpty)
-        if (completedExpanded) ...[
-          ...completedProjects.map<_ProjectShelfItem>(_ProjectShelfCard.new),
-          _ProjectShelfStack(completedProjects),
-        ] else
-          _ProjectShelfStack(completedProjects),
-    ];
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final remainingTodos = project.todos.where((todo) => !todo.done).length;
 
-    void handleReorder(int oldIndex, int newIndex) {
-      if (oldIndex < 0 || oldIndex >= cards.length) return;
-      if (cards[oldIndex] is! _ProjectShelfCard) return;
-
-      final nextCards = [...cards];
-      final moved = nextCards.removeAt(oldIndex);
-      var insertionIndex = newIndex;
-      final stackOffset =
-          nextCards.isNotEmpty && nextCards.last is _ProjectShelfStack ? 1 : 0;
-      final maxInsertionIndex = nextCards.length - stackOffset;
-      insertionIndex = insertionIndex.clamp(0, maxInsertionIndex).toInt();
-      nextCards.insert(insertionIndex, moved);
-
-      onReorderProjects([
-        for (final item in nextCards)
-          if (item is _ProjectShelfCard) item.project.id,
-      ]);
-    }
-
-    return SizedBox(
-      height: 150,
-      child: ReorderableListView.builder(
-        buildDefaultDragHandles: false,
-        padding: const EdgeInsets.only(left: AppSpacing.containerMargin),
-        proxyDecorator: (child, _, animation) {
-          return AnimatedBuilder(
-            animation: animation,
-            builder: (context, child) {
-              final t = Curves.easeOutCubic.transform(animation.value);
-              return Transform.scale(
-                scale: 1 + t * 0.03,
-                child: Material(
-                  color: Colors.transparent,
-                  elevation: 8 * t,
-                  borderRadius: BorderRadius.circular(12),
-                  child: child,
-                ),
-              );
-            },
-            child: child,
-          );
-        },
-        scrollDirection: Axis.horizontal,
-        itemCount: cards.length,
-        // Flutter 3.41 introduces `onReorderItem`, but older supported SDKs
-        // only expose `onReorder`. Keep the cross-version API for now.
-        // ignore: deprecated_member_use
-        onReorder: handleReorder,
-        itemBuilder: (context, index) {
-          final item = cards[index];
-          if (item is _ProjectShelfStack) {
-            return Padding(
-              key: const ValueKey('completed-project-stack'),
-              padding: const EdgeInsets.only(right: AppSpacing.containerMargin),
-              child: _CompletedProjectsStack(
-                projects: item.projects,
-                expanded: completedExpanded,
-                onTap: onToggleCompleted,
-              ),
-            );
-          }
-          final project = (item as _ProjectShelfCard).project;
-          return Padding(
-            key: ValueKey('project-card-${project.id}'),
-            padding: EdgeInsets.only(
-              right: index == cards.length - 1
-                  ? AppSpacing.containerMargin
-                  : AppSpacing.sm,
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.containerMargin,
+      ),
+      child: RepaintBoundary(
+        child: Semantics(
+          container: true,
+          label: '当前项目，${project.name}',
+          child: Material(
+            key: const ValueKey('project-current-card'),
+            color: colors.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              side: BorderSide(color: colors.outlineVariant),
             ),
-            child: _ProjectCard(
-              project: project,
-              selected: project.id == selectedProjectId,
-              onTap: () => onSelected(project),
-              onEdit: () => onEdit(project),
-              reorderHandle: ReorderableDragStartListener(
-                index: index,
-                child: const _ProjectReorderHandle(),
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              height: 124,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  project.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: colors.onSurface,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: AppSpacing.xs),
+                              _StatusEditPill(
+                                status: project.status,
+                                onEdit: onEdit,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            project.goal,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colors.onSurfaceVariant,
+                            ),
+                          ),
+                          const Spacer(),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.schedule_rounded,
+                                size: 14,
+                                color: colors.primary,
+                              ),
+                              const SizedBox(width: AppSpacing.xxs),
+                              Flexible(
+                                child: Text(
+                                  project.lastUpdate,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colors.primary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: AppSpacing.sm),
+                              Text(
+                                '$remainingTodos 项待办',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Tooltip(
+                    message: '切换项目',
+                    child: InkWell(
+                      key: const ValueKey('project-drawer-open-button'),
+                      onTap: onOpenDrawer,
+                      child: Ink(
+                        width: 44,
+                        color: colors.surfaceContainerLow,
+                        child: Center(
+                          child: Icon(
+                            Icons.chevron_left_rounded,
+                            color: colors.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
 }
 
-sealed class _ProjectShelfItem {
-  const _ProjectShelfItem();
-}
+enum _ProjectDrawerFilter { active, completed, archived }
 
-class _ProjectShelfCard extends _ProjectShelfItem {
-  const _ProjectShelfCard(this.project);
-
-  final _ProjectInfo project;
-}
-
-class _ProjectShelfStack extends _ProjectShelfItem {
-  const _ProjectShelfStack(this.projects);
+class _ProjectSwitcherDrawer extends StatefulWidget {
+  const _ProjectSwitcherDrawer({
+    required this.projects,
+    required this.selectedProjectId,
+    required this.onSelected,
+    required this.onReorderProjects,
+    required this.onClose,
+  });
 
   final List<_ProjectInfo> projects;
+  final String? selectedProjectId;
+  final ValueChanged<_ProjectInfo> onSelected;
+  final ValueChanged<List<String>> onReorderProjects;
+  final VoidCallback onClose;
+
+  @override
+  State<_ProjectSwitcherDrawer> createState() => _ProjectSwitcherDrawerState();
+}
+
+class _ProjectSwitcherDrawerState extends State<_ProjectSwitcherDrawer> {
+  late _ProjectDrawerFilter _filter = _initialFilter();
+
+  _ProjectDrawerFilter _initialFilter() {
+    final selected = _selectedProject;
+    if (selected?.isArchived ?? false) return _ProjectDrawerFilter.archived;
+    if (selected?.isCompleted ?? false) return _ProjectDrawerFilter.completed;
+    return _ProjectDrawerFilter.active;
+  }
+
+  _ProjectInfo? get _selectedProject {
+    for (final project in widget.projects) {
+      if (project.id == widget.selectedProjectId) return project;
+    }
+    return null;
+  }
+
+  List<_ProjectInfo> get _visibleProjects => switch (_filter) {
+    _ProjectDrawerFilter.active =>
+      widget.projects.where((project) => project.isActiveForDaily).toList(),
+    _ProjectDrawerFilter.completed =>
+      widget.projects.where((project) => project.isCompleted).toList(),
+    _ProjectDrawerFilter.archived =>
+      widget.projects.where((project) => project.isArchived).toList(),
+  };
+
+  int _count(_ProjectDrawerFilter filter) {
+    return switch (filter) {
+      _ProjectDrawerFilter.active =>
+        widget.projects.where((project) => project.isActiveForDaily).length,
+      _ProjectDrawerFilter.completed =>
+        widget.projects.where((project) => project.isCompleted).length,
+      _ProjectDrawerFilter.archived =>
+        widget.projects.where((project) => project.isArchived).length,
+    };
+  }
+
+  void _handleReorder(int oldIndex, int newIndex) {
+    final nextProjects = [..._visibleProjects];
+    if (oldIndex < newIndex) newIndex -= 1;
+    final project = nextProjects.removeAt(oldIndex);
+    nextProjects.insert(newIndex, project);
+    widget.onReorderProjects([for (final project in nextProjects) project.id]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final standardDrawerWidth = (MediaQuery.sizeOf(context).width * 0.86)
+        .clamp(280.0, 344.0)
+        .toDouble();
+    final drawerWidth = standardDrawerWidth * (2 / 3);
+    final visibleProjects = _visibleProjects;
+
+    return Drawer(
+      key: const ValueKey('project-switcher-drawer'),
+      width: drawerWidth,
+      elevation: 4,
+      shadowColor: colors.shadow.withAlpha(24),
+      backgroundColor: colors.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.horizontal(
+          left: Radius.circular(AppSpacing.radiusLg),
+        ),
+      ),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.sm,
+                AppSpacing.xs,
+                AppSpacing.xs,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '切换项目',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: colors.onSurface,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          _selectedProject?.name ?? '选择一个项目',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('project-drawer-close-button'),
+                    onPressed: widget.onClose,
+                    icon: const Icon(Icons.chevron_right_rounded),
+                    tooltip: '收起项目栏',
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                children: [
+                  _ProjectDrawerFilterChip(
+                    key: const ValueKey('project-filter-active'),
+                    label: '未完成',
+                    count: _count(_ProjectDrawerFilter.active),
+                    selected: _filter == _ProjectDrawerFilter.active,
+                    onSelected: () =>
+                        setState(() => _filter = _ProjectDrawerFilter.active),
+                  ),
+                  _ProjectDrawerFilterChip(
+                    key: const ValueKey('project-filter-completed'),
+                    label: '已完成',
+                    count: _count(_ProjectDrawerFilter.completed),
+                    selected: _filter == _ProjectDrawerFilter.completed,
+                    onSelected: () => setState(
+                      () => _filter = _ProjectDrawerFilter.completed,
+                    ),
+                  ),
+                  _ProjectDrawerFilterChip(
+                    key: const ValueKey('project-filter-archived'),
+                    label: '归档',
+                    count: _count(_ProjectDrawerFilter.archived),
+                    selected: _filter == _ProjectDrawerFilter.archived,
+                    onSelected: () =>
+                        setState(() => _filter = _ProjectDrawerFilter.archived),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Divider(height: 1, color: colors.outlineVariant),
+            Expanded(
+              child: visibleProjects.isEmpty
+                  ? Center(
+                      child: Text(
+                        '这里暂时没有项目',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  : ReorderableListView.builder(
+                      buildDefaultDragHandles: false,
+                      itemExtent: 72,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xs,
+                        vertical: AppSpacing.sm,
+                      ),
+                      itemCount: visibleProjects.length,
+                      // Flutter 3.41 adds `onReorderItem`, but older supported
+                      // SDKs only expose `onReorder` and require index repair.
+                      // ignore: deprecated_member_use
+                      onReorder: _handleReorder,
+                      proxyDecorator: (child, _, _) => Material(
+                        color: colors.surface,
+                        elevation: 2,
+                        shadowColor: colors.shadow.withAlpha(28),
+                        borderRadius: BorderRadius.circular(
+                          AppSpacing.radiusMd,
+                        ),
+                        child: child,
+                      ),
+                      itemBuilder: (context, index) {
+                        final project = visibleProjects[index];
+                        return _ProjectDrawerRow(
+                          key: ValueKey('project-drawer-item-${project.id}'),
+                          project: project,
+                          selected: project.id == widget.selectedProjectId,
+                          onTap: () => widget.onSelected(project),
+                          reorderHandle: ReorderableDragStartListener(
+                            index: index,
+                            child: const _ProjectReorderHandle(),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProjectDrawerFilterChip extends StatelessWidget {
+  const _ProjectDrawerFilterChip({
+    super.key,
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final String label;
+  final int count;
+  final bool selected;
+  final VoidCallback onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      label: Text('$label $count'),
+      selected: selected,
+      onSelected: (_) => onSelected(),
+      visualDensity: VisualDensity.compact,
+    );
+  }
 }
 
 class _ProjectReorderHandle extends StatelessWidget {
@@ -1340,20 +1568,19 @@ class _ProjectReorderHandle extends StatelessWidget {
   }
 }
 
-class _ProjectCard extends StatelessWidget {
-  const _ProjectCard({
+class _ProjectDrawerRow extends StatelessWidget {
+  const _ProjectDrawerRow({
+    super.key,
     required this.project,
     required this.selected,
     required this.onTap,
-    required this.onEdit,
-    this.reorderHandle,
+    required this.reorderHandle,
   });
 
   final _ProjectInfo project;
   final bool selected;
   final VoidCallback onTap;
-  final VoidCallback onEdit;
-  final Widget? reorderHandle;
+  final Widget reorderHandle;
 
   @override
   Widget build(BuildContext context) {
@@ -1365,247 +1592,71 @@ class _ProjectCard extends StatelessWidget {
       selected: selected,
       label: '查看${project.name}',
       child: Material(
-        color: Colors.transparent,
+        color: selected ? colors.primary.withAlpha(18) : Colors.transparent,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            width: selected ? 216 : 190,
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              color: selected ? colors.surface : colors.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: selected
-                    ? colors.primary.withAlpha(130)
-                    : colors.outlineVariant,
-              ),
-              boxShadow: [
-                if (selected)
-                  BoxShadow(
-                    color: colors.primary.withAlpha(18),
-                    blurRadius: 18,
-                    offset: const Offset(0, 8),
-                  ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        project.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: colors.onSurface,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (reorderHandle != null) ...[
-                      const SizedBox(width: AppSpacing.xxs),
-                      reorderHandle!,
-                    ],
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  project.goal,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.onSurfaceVariant,
-                    height: 1.5,
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _statusColor(project.status, colors),
+                    shape: BoxShape.circle,
                   ),
                 ),
-                const Spacer(),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.schedule_rounded,
-                      size: 14,
-                      color: colors.primary.withAlpha(150),
-                    ),
-                    const SizedBox(width: AppSpacing.xxs),
-                    Expanded(
-                      child: Text(
-                        project.lastUpdate,
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              project.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: colors.onSurface,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          if (selected) ...[
+                            const SizedBox(width: AppSpacing.xs),
+                            Icon(
+                              Icons.check_circle_rounded,
+                              size: 15,
+                              color: colors.primary,
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        project.goal,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.primary,
-                          fontWeight: FontWeight.w600,
+                          color: colors.onSurfaceVariant,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: AppSpacing.xs),
-                    _StatusEditPill(status: project.status, onEdit: onEdit),
-                  ],
+                    ],
+                  ),
                 ),
+                const SizedBox(width: AppSpacing.xs),
+                reorderHandle,
               ],
             ),
           ),
         ),
       ),
-    );
-  }
-}
-
-class _CompletedProjectsStack extends StatelessWidget {
-  const _CompletedProjectsStack({
-    required this.projects,
-    required this.expanded,
-    required this.onTap,
-  });
-
-  final List<_ProjectInfo> projects;
-  final bool expanded;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final topProject = projects.first;
-
-    return Semantics(
-      button: true,
-      label: expanded ? '收起已完成项目' : '展开已完成项目',
-      child: SizedBox(
-        width: 154,
-        height: 150,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned(
-              left: 10,
-              top: 14,
-              right: 0,
-              bottom: 4,
-              child: _StackPaperLayer(alpha: 150),
-            ),
-            Positioned(
-              left: 5,
-              top: 8,
-              right: 5,
-              bottom: 10,
-              child: _StackPaperLayer(alpha: 190),
-            ),
-            Positioned.fill(
-              child: Material(
-                color: colors.surface,
-                elevation: 2,
-                shadowColor: colors.shadow.withAlpha(13),
-                borderRadius: BorderRadius.circular(12),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: onTap,
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.auto_stories_rounded,
-                              size: 18,
-                              color: AppColors.tracker,
-                            ),
-                            const Spacer(),
-                            _StatusPill(status: '完成'),
-                          ],
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        Text(
-                          expanded ? '收起完成' : '已完成',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: colors.onSurface,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          expanded ? '放回纸堆' : '${projects.length} 个项目',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          topProject.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colors.primary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StackPaperLayer extends StatelessWidget {
-  const _StackPaperLayer({required this.alpha});
-
-  final int alpha;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerLow.withAlpha(alpha),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.outlineVariant.withAlpha(180)),
-      ),
-    );
-  }
-}
-
-class _CurrentProjectHint extends StatelessWidget {
-  const _CurrentProjectHint({required this.project});
-
-  final _ProjectInfo project;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-
-    return Row(
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: colors.primary,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: AppSpacing.xs),
-        Text(
-          '当前查看：${project.name}',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: colors.onSurfaceVariant,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
     );
   }
 }
@@ -1664,25 +1715,22 @@ class _SmartTodoSection extends StatefulWidget {
 }
 
 class _SmartTodoSectionState extends State<_SmartTodoSection> {
-  var _showOlderTodos = false;
+  static const _visibleTodoLimit = 7;
+
+  var _showArchivedTodos = false;
 
   @override
   Widget build(BuildContext context) {
-    final recentTodos = _sortProjectTodos(
-      widget.project.todos.where(_isRecentProjectTodo).toList(),
-    );
-    final olderTodos = _sortProjectTodos(
-      widget.project.todos
-          .where((todo) => !_isRecentProjectTodo(todo))
-          .toList(),
-    );
+    final sortedTodos = _sortProjectTodos(widget.project.todos);
+    final visibleTodos = sortedTodos.take(_visibleTodoLimit).toList();
+    final archivedTodos = sortedTodos.skip(_visibleTodoLimit).toList();
     final doneCount = widget.project.todos.where((todo) => todo.done).length;
 
     return _SectionCard(
       title: '待办',
       trailing: widget.project.todos.isEmpty
           ? '还没有下一步'
-          : '${recentTodos.length} 个近7天 · $doneCount 已完成',
+          : '${widget.project.todos.length} 个待办 · $doneCount 已完成',
       action: TextButton.icon(
         onPressed: widget.onAddTodo,
         icon: const Icon(Icons.add_rounded, size: 16),
@@ -1693,28 +1741,27 @@ class _SmartTodoSectionState extends State<_SmartTodoSection> {
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (recentTodos.isEmpty)
-                  const _SoftEmptyText('近7天没有待办，早一点的事项已经收进下面。')
-                else
-                  for (final todo in recentTodos)
-                    _ExpandableTodoRow(
-                      key: ValueKey(todo.id),
-                      todo: todo,
-                      onTap: () => widget.onToggle(todo.id),
-                      onEdit: () => widget.onEditTodo(todo.id),
-                    ),
-                if (olderTodos.isNotEmpty) ...[
+                for (final todo in visibleTodos)
+                  _ExpandableTodoRow(
+                    key: ValueKey(todo.id),
+                    todo: todo,
+                    onTap: () => widget.onToggle(todo.id),
+                    onEdit: () => widget.onEditTodo(todo.id),
+                  ),
+                if (archivedTodos.isNotEmpty) ...[
                   const SizedBox(height: AppSpacing.xs),
                   _ArchiveBox(
-                    title: '7天以外',
-                    subtitle: '${olderTodos.length} 个待办已收纳',
-                    expanded: _showOlderTodos,
-                    onToggle: () =>
-                        setState(() => _showOlderTodos = !_showOlderTodos),
+                    key: const ValueKey('project-todo-archive-toggle'),
+                    title: '更多待办',
+                    subtitle: '${archivedTodos.length} 个待办已收纳',
+                    expanded: _showArchivedTodos,
+                    onToggle: () => setState(
+                      () => _showArchivedTodos = !_showArchivedTodos,
+                    ),
                   ),
                 ],
-                if (_showOlderTodos)
-                  for (final todo in olderTodos)
+                if (_showArchivedTodos)
+                  for (final todo in archivedTodos)
                     Padding(
                       padding: const EdgeInsets.only(top: AppSpacing.xs),
                       child: _ExpandableTodoRow(
@@ -1732,6 +1779,7 @@ class _SmartTodoSectionState extends State<_SmartTodoSection> {
 
 class _ArchiveBox extends StatelessWidget {
   const _ArchiveBox({
+    super.key,
     required this.title,
     required this.subtitle,
     required this.expanded,
@@ -4477,12 +4525,6 @@ List<_ProjectTodo> _sortProjectTodos(List<_ProjectTodo> todos) {
     if (a.done != b.done) return a.done ? 1 : -1;
     return b.createdAt.compareTo(a.createdAt);
   });
-}
-
-bool _isRecentProjectTodo(_ProjectTodo todo) {
-  final createdAt = _dateOnly(todo.createdAt);
-  final today = _dateOnly(DateTime.now());
-  return !createdAt.isBefore(today.subtract(const Duration(days: 6)));
 }
 
 _ProjectInfo? _firstProject(List<_ProjectInfo> projects) {
