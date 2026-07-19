@@ -1369,9 +1369,10 @@ class _ProjectSwitcherDrawerState extends State<_ProjectSwitcherDrawer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final drawerWidth = (MediaQuery.sizeOf(context).width * 0.86)
+    final standardDrawerWidth = (MediaQuery.sizeOf(context).width * 0.86)
         .clamp(280.0, 344.0)
         .toDouble();
+    final drawerWidth = standardDrawerWidth * (2 / 3);
     final visibleProjects = _visibleProjects;
 
     return Drawer(
