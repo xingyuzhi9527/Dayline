@@ -89,6 +89,7 @@ class ProjectImageMaterial {
   });
 
   final String relativePath;
+  // A local path or a serialized document-tree location; no private original copy.
   final String localPath;
   final String mimeType;
   final String fileName;
@@ -590,6 +591,7 @@ Future<ProjectImageMaterial> addProjectImageMaterial(
   required String sourceImagePath,
   String? title,
   DateTime? createdAt,
+  Future<void> Function()? onSaved,
 }) async {
   final writtenAt = createdAt ?? DateTime.now();
   final sourceFile = File(sourceImagePath);
@@ -599,7 +601,7 @@ Future<ProjectImageMaterial> addProjectImageMaterial(
 
   final settings = ref.read(appSettingsRepositoryProvider);
   final directoryService = MarkdownDirectoryService(settings);
-  final storage = MarkdownStorageService(directoryService);
+  final storage = ref.read(markdownStorageProvider) as MarkdownStorageService;
   await _ensureProjectMaterialsNoMedia(
     directoryService,
     storage,
@@ -616,6 +618,7 @@ Future<ProjectImageMaterial> addProjectImageMaterial(
   );
   final relativePath = await _uniqueProjectImageRelativePath(
     directoryService,
+    storage: storage,
     projectId: projectId,
     projectName: projectName,
     fileName: fileName,
@@ -628,16 +631,14 @@ Future<ProjectImageMaterial> addProjectImageMaterial(
     mimeType: mimeType,
   );
 
-  final localPath = await _ensureLocalProjectImageCopy(
-    directoryService,
-    relativePath: relativePath,
-    sourceImagePath: sourceImagePath,
-  );
+  final localPath = await storage.locationForRelativePath(relativePath);
 
   await _updateProject(
     ref,
     projectId: projectId,
     updatedAt: writtenAt,
+    persistBeforeArchive: true,
+    onSaved: onSaved,
     archiveEntry: ProjectArchiveEntry(
       text: '图片资料：$fileName',
       source: '图片资料',
@@ -683,6 +684,7 @@ Future<ProjectImageMaterial> addProjectImageMaterials(
   required List<String> sourceImagePaths,
   String? title,
   DateTime? createdAt,
+  Future<void> Function()? onSaved,
 }) async {
   if (sourceImagePaths.isEmpty) {
     throw StateError('No project images selected.');
@@ -695,6 +697,7 @@ Future<ProjectImageMaterial> addProjectImageMaterials(
       sourceImagePath: sourceImagePaths.single,
       title: title,
       createdAt: createdAt,
+      onSaved: onSaved,
     );
   }
 
@@ -708,9 +711,10 @@ Future<ProjectImageMaterial> addProjectImageMaterials(
 
   final settings = ref.read(appSettingsRepositoryProvider);
   final directoryService = MarkdownDirectoryService(settings);
-  final storage = MarkdownStorageService(directoryService);
+  final storage = ref.read(markdownStorageProvider) as MarkdownStorageService;
   final folderName = await _uniqueProjectImageFolderName(
     directoryService,
+    storage: storage,
     projectId: projectId,
     projectName: projectName,
     folderName: _buildProjectImageFolderName(
@@ -749,11 +753,7 @@ Future<ProjectImageMaterial> addProjectImageMaterials(
       mimeType: mimeType,
     );
 
-    final localPath = await _ensureLocalProjectImageCopy(
-      directoryService,
-      relativePath: relativePath,
-      sourceImagePath: sourceImagePath,
-    );
+    final localPath = await storage.locationForRelativePath(relativePath);
     relativePaths.add(relativePath);
     localPaths.add(localPath);
     mimeTypes.add(mimeType);
@@ -765,6 +765,8 @@ Future<ProjectImageMaterial> addProjectImageMaterials(
     ref,
     projectId: projectId,
     updatedAt: writtenAt,
+    persistBeforeArchive: true,
+    onSaved: onSaved,
     archiveEntry: ProjectArchiveEntry(
       text: '图片资料：$displayName',
       source: '图片资料',
@@ -818,7 +820,7 @@ Future<void> deleteProjectImageMaterial(
 }) async {
   final settings = ref.read(appSettingsRepositoryProvider);
   final directoryService = MarkdownDirectoryService(settings);
-  final storage = MarkdownStorageService(directoryService);
+  final storage = ref.read(markdownStorageProvider) as MarkdownStorageService;
   final root = await directoryService.ensureRoot();
 
   Map<String, Object?>? removedUpdate;
@@ -905,7 +907,7 @@ Future<void> updateProjectImageMaterialName(
 
   final settings = ref.read(appSettingsRepositoryProvider);
   final directoryService = MarkdownDirectoryService(settings);
-  final storage = MarkdownStorageService(directoryService);
+  final storage = ref.read(markdownStorageProvider) as MarkdownStorageService;
   final root = await directoryService.ensureRoot();
   final existingLocalFile = File(
     _localPathForRelative(root, imageRelativePath),
@@ -942,7 +944,16 @@ Future<void> updateProjectImageMaterialName(
           : DateTime.fromMillisecondsSinceEpoch(createdAtMillis);
       final oldRelativePath = imageRelativePath;
       final oldLocalPath = update?['imagePath'] as String?;
-      final sourceLocalFile = oldLocalPath == null || oldLocalPath.isEmpty
+      final isTreeImage =
+          MarkdownStorageLocation.parse(
+            await storage.locationForRelativePath(oldRelativePath),
+          ).kind ==
+          MarkdownStorageKind.documentTree;
+      final sourceLocalFile =
+          oldLocalPath == null ||
+              oldLocalPath.isEmpty ||
+              MarkdownStorageLocation.parse(oldLocalPath).kind ==
+                  MarkdownStorageKind.documentTree
           ? existingLocalFile
           : File(oldLocalPath);
       final oldExtension = p.extension(oldRelativePath).toLowerCase();
@@ -955,26 +966,34 @@ Future<void> updateProjectImageMaterialName(
       );
       final newRelativePath = await _uniqueProjectImageRelativePath(
         directoryService,
+        storage: storage,
+        parentDirectory: isTreeImage ? p.posix.dirname(oldRelativePath) : null,
         projectId: projectId,
         projectName: projectName,
         fileName: newFileName,
         exceptRelativePath: oldRelativePath,
       );
-      final newLocalPath = _localPathForRelative(root, newRelativePath);
+      final newLocalPath = isTreeImage
+          ? await storage.locationForRelativePath(newRelativePath)
+          : _localPathForRelative(root, newRelativePath);
       final changedPath = newRelativePath != oldRelativePath;
 
       if (changedPath) {
-        await _renameLocalProjectImage(
-          sourceLocalFile: sourceLocalFile,
-          targetPath: newLocalPath,
-        );
-        await _renameVisibleProjectImage(
-          storage,
-          oldRelativePath: oldRelativePath,
-          newRelativePath: newRelativePath,
-          sourcePath: newLocalPath,
-          mimeType: _mimeTypeForPath(newRelativePath),
-        );
+        if (isTreeImage) {
+          await storage.renameTreeImage(oldRelativePath, newRelativePath);
+        } else {
+          await _renameLocalProjectImage(
+            sourceLocalFile: sourceLocalFile,
+            targetPath: newLocalPath,
+          );
+          await _renameVisibleProjectImage(
+            storage,
+            oldRelativePath: oldRelativePath,
+            newRelativePath: newRelativePath,
+            sourcePath: newLocalPath,
+            mimeType: _mimeTypeForPath(newRelativePath),
+          );
+        }
       }
 
       return {
@@ -1025,6 +1044,8 @@ Future<void> _updateProject(
   bool archiveEntryAsMajor = false,
   bool syncArchive = true,
   bool notify = true,
+  bool persistBeforeArchive = false,
+  Future<void> Function()? onSaved,
   required FutureOr<Map<String, Object?>> Function(Map<String, Object?> project)
   update,
 }) async {
@@ -1043,6 +1064,15 @@ Future<void> _updateProject(
         project,
   ];
   if (!changed) return;
+  if (persistBeforeArchive) {
+    await _saveProjects(
+      ref,
+      nextProjects,
+      updatedAt: updatedAt,
+      notify: notify,
+    );
+    await onSaved?.call();
+  }
   var projectsToSave = nextProjects;
   final archiveProject = changedProject;
   if (archiveProject != null && syncArchive) {
@@ -1067,6 +1097,30 @@ Future<void> _updateProject(
     } catch (_) {
       projectsToSave = nextProjects;
     }
+  }
+  if (persistBeforeArchive) {
+    // Do not overwrite edits made while the archive was being written.
+    final location = projectsToSave.firstWhere(
+      (p) => p['id'] == projectId,
+    )[ProjectMarkdownService.archiveLocationKey];
+    if (location != null &&
+        location !=
+            archiveProject?[ProjectMarkdownService.archiveLocationKey]) {
+      final latest = await _loadProjects(ref);
+      await _saveProjects(
+        ref,
+        [
+          for (final project in latest)
+            if (project['id'] == projectId)
+              {...project, ProjectMarkdownService.archiveLocationKey: location}
+            else
+              project,
+        ],
+        updatedAt: updatedAt,
+        notify: false,
+      );
+    }
+    return;
   }
   await _saveProjects(
     ref,
@@ -1230,20 +1284,6 @@ String _formatProjectTime(DateTime time) {
   return '${time.month}月${time.day}日';
 }
 
-Future<String> _ensureLocalProjectImageCopy(
-  MarkdownDirectoryService directoryService, {
-  required String relativePath,
-  required String sourceImagePath,
-}) async {
-  final root = await directoryService.ensureRoot();
-  final target = File(_localPathForRelative(root, relativePath));
-  await _localFileWriter.copyFile(
-    sourcePath: sourceImagePath,
-    targetPath: target.path,
-  );
-  return target.path;
-}
-
 Future<void> _ensureProjectMaterialsNoMedia(
   MarkdownDirectoryService directoryService,
   MarkdownStorageService storage, {
@@ -1262,24 +1302,19 @@ Future<void> _ensureProjectMaterialsNoMedia(
     '.nomedia',
   ]);
   try {
-    await storage.writeRelativeTextFile(
-      relativePath: relativePath,
-      content: '',
-    );
-  } catch (_) {}
-
-  try {
-    final root = await directoryService.ensureRoot();
-    final file = File(_localPathForRelative(root, relativePath));
-    await file.parent.create(recursive: true);
-    if (!await file.exists()) {
-      await file.writeAsString('');
+    if (!await storage.relativePathExists(relativePath)) {
+      await storage.writeRelativeTextFile(
+        relativePath: relativePath,
+        content: '',
+      );
     }
   } catch (_) {}
 }
 
 Future<String> _uniqueProjectImageRelativePath(
   MarkdownDirectoryService directoryService, {
+  MarkdownStorageService? storage,
+  String? parentDirectory,
   required String projectId,
   required String projectName,
   required String fileName,
@@ -1292,18 +1327,25 @@ Future<String> _uniqueProjectImageRelativePath(
       : fileName.substring(0, fileName.length - parsed.length);
   for (var index = 1; index < 100; index++) {
     final candidateFileName = index == 1 ? fileName : '$base-$index$parsed';
-    final relativePath = ProjectMarkdownPaths.projectImageMaterial(
-      projectId: projectId,
-      projectName: projectName,
-      filename: candidateFileName,
-    );
+    final relativePath = parentDirectory != null
+        ? p.posix.join(parentDirectory, candidateFileName)
+        : ProjectMarkdownPaths.projectImageMaterial(
+            projectId: projectId,
+            projectName: projectName,
+            filename: candidateFileName,
+          );
     if (relativePath == exceptRelativePath) return relativePath;
-    if (!await File(_localPathForRelative(root, relativePath)).exists()) {
+    if (!(await (storage ?? MarkdownStorageService(directoryService))
+            .relativePathExists(relativePath)) &&
+        !await File(_localPathForRelative(root, relativePath)).exists()) {
       return relativePath;
     }
   }
   final fallbackFileName =
       '$base-${DateTime.now().millisecondsSinceEpoch}$parsed';
+  if (parentDirectory != null) {
+    return p.posix.join(parentDirectory, fallbackFileName);
+  }
   return ProjectMarkdownPaths.projectImageMaterial(
     projectId: projectId,
     projectName: projectName,
@@ -1360,6 +1402,7 @@ String _projectFileMaterialRelativePath({
 
 Future<String> _uniqueProjectImageFolderName(
   MarkdownDirectoryService directoryService, {
+  required MarkdownStorageService storage,
   required String projectId,
   required String projectName,
   required String folderName,
@@ -1375,7 +1418,10 @@ Future<String> _uniqueProjectImageFolderName(
       filename: '.probe',
     );
     final dir = Directory(p.dirname(_localPathForRelative(root, probePath)));
-    if (!await dir.exists()) return candidate;
+    if (!await dir.exists() &&
+        !await storage.relativePathExists(p.posix.dirname(probePath))) {
+      return candidate;
+    }
   }
   return '$base-${DateTime.now().millisecondsSinceEpoch}';
 }

@@ -29,20 +29,21 @@ Future<DailyNoteInfo> loadDailyNoteInfo(Object ref, DateTime date) async {
     return DailyNoteInfo(date: day, status: DailyNoteStatus.missing);
   }
 
-  final noteService = MarkdownNoteService(dirService);
-  final location = await noteService.findDailyNote(day);
-  if (location == null) {
+  final noteService = _read<MarkdownNoteService>(
+    ref,
+    markdownNoteServiceProvider,
+  );
+  final note = await noteService.readDailyNoteIfExists(day);
+  if (note == null) {
     return DailyNoteInfo(date: day, status: DailyNoteStatus.missing);
   }
 
-  final storage = MarkdownStorageService(dirService);
-  final raw = await storage.readTextFileLocation(location);
   return DailyNoteInfo(
     date: day,
-    status: isDailyNoteDraftContent(raw)
+    status: isDailyNoteDraftContent(note.content)
         ? DailyNoteStatus.draft
         : DailyNoteStatus.finalNote,
-    location: location,
+    location: note.location,
   );
 }
 
@@ -53,12 +54,15 @@ Future<void> ensureDailyDraftAfterActivity(Object ref, DateTime date) async {
     final dirService = MarkdownDirectoryService(settings);
     if (!await dirService.isConfigured()) return;
 
-    final noteService = MarkdownNoteService(dirService);
+    final noteService = _read<MarkdownNoteService>(
+      ref,
+      markdownNoteServiceProvider,
+    );
     final activityCount = await _activityCount(ref, day);
-    final location = await noteService.findDailyNote(day);
-    if (location != null) {
+    final note = await noteService.readDailyNoteIfExists(day);
+    if (note != null) {
       final storage = MarkdownStorageService(dirService);
-      final raw = await storage.readTextFileLocation(location);
+      final raw = note.content;
       if (!isDailyNoteDraftContent(raw)) return;
 
       final updated = refreshDailyDraftActivityCount(
@@ -66,7 +70,7 @@ Future<void> ensureDailyDraftAfterActivity(Object ref, DateTime date) async {
         activityCount: activityCount,
       );
       if (updated != raw) {
-        await storage.writeTextFileLocation(location, updated);
+        await storage.writeTextFileLocation(note.location, updated);
       }
       return;
     }

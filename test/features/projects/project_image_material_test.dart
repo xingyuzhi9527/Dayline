@@ -1,16 +1,21 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liflow_app/core/database/local_database.dart';
 import 'package:liflow_app/core/database/repositories.dart';
 import 'package:liflow_app/core/database/repository_providers.dart';
+import 'package:liflow_app/core/markdown/markdown_directory_service.dart';
+import 'package:liflow_app/core/markdown/markdown_storage_service.dart';
 import 'package:liflow_app/features/projects/project_store.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
 
   late LocalDatabase database;
@@ -50,6 +55,11 @@ void main() {
   });
 
   tearDown(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('liflow/markdown_storage'),
+          null,
+        );
     container.dispose();
     await database.close();
     if (await rootDir.exists()) {
@@ -59,6 +69,134 @@ void main() {
       await sourceDir.delete(recursive: true);
     }
   });
+
+  test('image metadata is visible before the archive is written', () async {
+    final source = File(p.join(sourceDir.path, 'source.jpg'));
+    await source.writeAsBytes([1, 2, 3]);
+    var saved = false;
+    await addProjectImageMaterial(
+      container,
+      projectId: 'project-12345678',
+      projectName: '毕业论文',
+      sourceImagePath: source.path,
+      onSaved: () async {
+        final row = await settings.findByKey(projectsSettingsKey);
+        final project =
+            (jsonDecode(row!['value'] as String) as List).single as Map;
+        expect(project['updates'], hasLength(1));
+        expect(project['archiveLocation'], isNull);
+        final update = (project['updates'] as List).single as Map;
+        expect(await File(update['imagePath'] as String).readAsBytes(), [
+          1,
+          2,
+          3,
+        ]);
+        saved = true;
+      },
+    );
+    expect(saved, isTrue);
+    final row = await settings.findByKey(projectsSettingsKey);
+    final project = (jsonDecode(row!['value'] as String) as List).single as Map;
+    expect(await File(project['archiveLocation'] as String).exists(), isTrue);
+  });
+
+  test(
+    'tree images keep one original and rename and delete without a private copy',
+    () async {
+      final treeFiles = <String, List<int>>{};
+      final calls = <String>[];
+      await settings.create(
+        key: 'markdown_root_tree_uri',
+        value: 'content://test/tree/root',
+      );
+      await settings.create(key: 'markdown_root_tree_subdir', value: 'Liflow');
+      final storage = MarkdownStorageService(
+        MarkdownDirectoryService(settings),
+        documentTreeSupported: true,
+      );
+      container.dispose();
+      container = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          markdownStorageProvider.overrideWithValue(storage),
+        ],
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('liflow/markdown_storage'),
+            (call) async {
+              calls.add(call.method);
+              final args = (call.arguments as Map).cast<String, Object?>();
+              final path = args['relativePath'] as String;
+              switch (call.method) {
+                case 'pathExists':
+                  return treeFiles.containsKey(path);
+                case 'writeTextFile':
+                  treeFiles[path] = utf8.encode(args['content'] as String);
+                  return null;
+                case 'writeBinaryFile':
+                  treeFiles[path] = await File(
+                    args['sourcePath'] as String,
+                  ).readAsBytes();
+                  return null;
+                case 'renameImage':
+                  treeFiles[args['newRelativePath'] as String] = treeFiles
+                      .remove(path)!;
+                  return null;
+                case 'deleteDocument':
+                  treeFiles.remove(path);
+                  return null;
+                default:
+                  throw StateError('Unexpected method: ${call.method}');
+              }
+            },
+          );
+      final source = File(p.join(sourceDir.path, 'source.jpg'));
+      await source.writeAsBytes([1, 2, 3]);
+      final material = await addProjectImageMaterial(
+        container,
+        projectId: 'project-12345678',
+        projectName: '毕业论文',
+        sourceImagePath: source.path,
+        title: 'photo',
+      );
+      expect(
+        MarkdownStorageLocation.parse(material.localPath).kind,
+        MarkdownStorageKind.documentTree,
+      );
+      expect(
+        await File(p.join(rootDir.path, material.relativePath)).exists(),
+        isFalse,
+      );
+      expect(treeFiles['Liflow/${material.relativePath}'], [1, 2, 3]);
+      expect(calls.where((c) => c == 'writeBinaryFile'), hasLength(1));
+
+      await updateProjectImageMaterialName(
+        container,
+        projectId: 'project-12345678',
+        projectName: '毕业论文',
+        imageRelativePath: material.relativePath,
+        title: 'renamed',
+        updatedAt: DateTime.now(),
+      );
+      final row = await settings.findByKey(projectsSettingsKey);
+      final project =
+          (jsonDecode(row!['value'] as String) as List).single as Map;
+      final update = (project['updates'] as List).single as Map;
+      final renamedPath = update['imageRelativePath'] as String;
+      expect(treeFiles['Liflow/$renamedPath'], [1, 2, 3]);
+      expect(treeFiles.containsKey('Liflow/${material.relativePath}'), isFalse);
+      expect(calls.where((c) => c == 'writeBinaryFile'), hasLength(1));
+      await deleteProjectImageMaterial(
+        container,
+        projectId: 'project-12345678',
+        imageRelativePath: renamedPath,
+        updatedAt: DateTime.now(),
+      );
+      expect(treeFiles.containsKey('Liflow/$renamedPath'), isFalse);
+      expect(await source.exists(), isTrue);
+    },
+  );
 
   test(
     'adding a project image stores the file under the project without timeline record',

@@ -1,9 +1,18 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liflow_app/app.dart';
 import 'package:liflow_app/app_router.dart';
 import 'package:liflow_app/core/database/local_database.dart';
+import 'package:liflow_app/core/database/repositories.dart';
+import 'package:liflow_app/core/database/repository_providers.dart';
+import 'package:liflow_app/features/search/domain/search_models.dart';
+import 'package:liflow_app/features/search/data/search_index_service.dart';
+import 'package:liflow_app/features/projects/project_store.dart';
+import 'package:liflow_app/features/search/application/search_providers.dart';
+import 'package:liflow_app/features/search/presentation/search_page.dart';
 import 'package:liflow_app/core/stt/stt_engine.dart';
 import 'package:liflow_app/core/stt/stt_providers.dart';
 import 'package:liflow_app/features/dashboard/dashboard_providers.dart';
@@ -11,9 +20,172 @@ import 'package:liflow_app/features/timeline/timeline_providers.dart';
 import 'package:liflow_app/shell/liflow_shell.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+class _SearchSettings extends AppSettingsRepository {
+  _SearchSettings(super.database, this.projectsJson);
+  final String projectsJson;
+  @override
+  Future<DatabaseRow?> findByKey(String key) async {
+    if (key != projectsSettingsKey) {
+      throw StateError('Storage setup unavailable in navigation test');
+    }
+    return {'key': key, 'value': projectsJson};
+  }
+}
+
+class _SearchRecords extends RecordsRepository {
+  _SearchRecords(super.database);
+  @override
+  Future<List<DatabaseRow>> findByDate(DateTime date) async => [];
+  @override
+  Future<List<String>> findDistinctTypes() async => [];
+}
+
+class _ProjectSearchResults implements LocalSearchDataSource {
+  @override
+  Future<SearchResultPage> search(SearchQuery query) async => SearchResultPage(
+    items: [
+      for (final id in ['alpha', 'beta'])
+        if (query.filters.projectId == null || query.filters.projectId == id)
+          SearchResultItem(
+            kind: SearchResultKind.project,
+            stableId: 'project-$id',
+            projectId: id,
+            title: 'Alpha $id',
+            matchReason: SearchMatchReason.projectName,
+            matchLevel: 1,
+            updatedAt: 1,
+          ),
+    ],
+    backend: SearchBackend.likeFallback,
+    hasMore: false,
+  );
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
+
+  testWidgets('project search keeps scope and query across source navigation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final database = LocalDatabase(
+      databaseFactory: databaseFactoryFfi,
+      databasePath: inMemoryDatabasePath,
+    );
+    addTearDown(database.close);
+    final projectsJson = jsonEncode([
+      {
+        'id': 'alpha',
+        'name': 'Alpha project with a very long name',
+        'status': '进行中',
+        'todos': [],
+        'updates': [],
+      },
+      {
+        'id': 'beta',
+        'name': 'Alpha other',
+        'status': '归档',
+        'todos': [],
+        'updates': [],
+      },
+    ]);
+    final container = ProviderContainer(
+      overrides: [
+        localDatabaseProvider.overrideWithValue(database),
+        appSettingsRepositoryProvider.overrideWithValue(
+          _SearchSettings(database, projectsJson),
+        ),
+        recordsRepositoryProvider.overrideWithValue(_SearchRecords(database)),
+        localSearchRepositoryProvider.overrideWithValue(
+          _ProjectSearchResults(),
+        ),
+        searchIndexWarmupProvider.overrideWith(
+          (ref) async => const SearchIndexState(
+            backend: 'like_fallback',
+            status: 'ready',
+            schemaVersion: 1,
+            updatedAt: 1,
+          ),
+        ),
+        sttEngineProvider.overrideWithValue(_CountingSttEngine()),
+        dashboardSummaryProvider.overrideWith((ref) async => _emptySummary()),
+        dashboardReviewProvider.overrideWith((ref) async => null),
+        timelineEventsProvider.overrideWith((ref) async => const []),
+        deletedRecordsProvider.overrideWith((ref) async => const []),
+        searchDebounceDurationProvider.overrideWithValue(Duration.zero),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = container.read(appRouterProvider);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(container: container, child: const LiflowApp()),
+    );
+    router.go('/projects');
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await container.read(projectSearchSummariesProvider.future);
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('projects-search')));
+    await tester.pumpAndSettle();
+    final searchContainer = ProviderScope.containerOf(
+      tester.element(find.byType(SearchPage)),
+    );
+    expect(searchContainer.read(searchFormProvider).filters.projectId, 'alpha');
+    await tester.enterText(find.byKey(const ValueKey('search-input')), 'Alpha');
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await searchContainer.read(searchResultsProvider.future);
+    });
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('search-result-project-beta')),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byKey(const ValueKey('search-result-project-alpha')));
+    await tester.pumpAndSettle();
+    expect(
+      router.routeInformationProvider.value.uri.path,
+      '/projects/search/project/alpha',
+    );
+    router.pop();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('search-input')))
+          .controller!
+          .text,
+      'Alpha',
+    );
+    expect(searchContainer.read(searchFormProvider).filters.projectId, 'alpha');
+    await tester.tap(find.byTooltip('搜索全部项目'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await searchContainer.read(searchResultsProvider.future);
+    });
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('search-result-project-beta')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('返回项目'));
+    await tester.pumpAndSettle();
+    expect(router.routeInformationProvider.value.uri.path, '/projects');
+    router.go('/dashboard/search');
+    await tester.pumpAndSettle();
+    final globalContainer = ProviderScope.containerOf(
+      tester.element(find.byType(SearchPage)),
+    );
+    expect(globalContainer.read(searchFormProvider).isEmpty, isTrue);
+    expect(globalContainer.read(searchFormProvider).filters.projectId, isNull);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('router and swipe keep the visible branch in sync', (
     tester,

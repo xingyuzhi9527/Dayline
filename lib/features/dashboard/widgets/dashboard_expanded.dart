@@ -124,7 +124,7 @@ class _DashboardExpandedViewState extends State<DashboardExpandedView> {
           const SizedBox(height: AppSpacing.lg),
           _DividerLabel(label: '日记'),
           const SizedBox(height: AppSpacing.sm),
-          _GenerateNoteSection(
+          DailyNoteGenerationSection(
             selectedDate: _selectedDate,
             today: _today,
             availableDates: _availableDates,
@@ -944,12 +944,13 @@ class _ReviewField extends StatelessWidget {
 
 // ── Section 6: Generate Note ──
 
-class _GenerateNoteSection extends ConsumerStatefulWidget {
-  const _GenerateNoteSection({
+class DailyNoteGenerationSection extends ConsumerStatefulWidget {
+  const DailyNoteGenerationSection({
     required this.selectedDate,
     required this.today,
     required this.availableDates,
     required this.onDateChanged,
+    super.key,
   });
 
   final DateTime selectedDate;
@@ -958,11 +959,12 @@ class _GenerateNoteSection extends ConsumerStatefulWidget {
   final ValueChanged<DateTime> onDateChanged;
 
   @override
-  ConsumerState<_GenerateNoteSection> createState() =>
+  ConsumerState<DailyNoteGenerationSection> createState() =>
       _GenerateNoteSectionState();
 }
 
-class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
+class _GenerateNoteSectionState
+    extends ConsumerState<DailyNoteGenerationSection> {
   bool _checkingNote = true;
   bool _isGenerating = false;
   Map<String, DailyNoteInfo> _noteInfoByDate = const {};
@@ -1150,39 +1152,41 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
 
   Future<void> _handleNoteAction(BuildContext context) async {
     if (_checkingNote || _isGenerating) return;
-
-    final scaffold = ScaffoldMessenger.of(context);
-    final settings = ref.read(appSettingsRepositoryProvider);
-    final dirService = MarkdownDirectoryService(settings);
-    if (!await dirService.isConfigured()) {
-      if (!context.mounted) return;
-      final configured = await showMarkdownDirectoryDialog(context, dirService);
-      if (!configured) return;
-      if (!context.mounted) return;
-    }
-
-    final noteService = MarkdownNoteService(dirService);
-    final date = widget.selectedDate;
-    final existingLocation = await noteService.findDailyNote(date);
-    if (!context.mounted) return;
-    if (existingLocation != null) {
-      final storage = MarkdownStorageService(dirService);
-      final raw = await storage.readTextFileLocation(existingLocation);
-      if (!context.mounted) return;
-      if (!isDailyNoteDraftContent(raw)) {
-        await _openDailyNoteEditor(context, existingLocation, date);
-        await _loadDailyNoteState();
-        return;
-      }
-    }
-
-    if (!mounted) return;
     setState(() => _isGenerating = true);
-
+    final date = widget.selectedDate;
+    final scaffold = ScaffoldMessenger.of(context);
     try {
+      final settings = ref.read(appSettingsRepositoryProvider);
+      final dirService = MarkdownDirectoryService(settings);
+      if (!await dirService.isConfigured()) {
+        if (!context.mounted) return;
+        final configured = await showMarkdownDirectoryDialog(
+          context,
+          dirService,
+        );
+        if (!configured) return;
+        if (!context.mounted) return;
+      }
+
+      final noteService = ref.read(markdownNoteServiceProvider);
+      final note = await noteService.readDailyNoteIfExists(date);
+      if (!context.mounted) return;
+      if (note != null) {
+        if (!isDailyNoteDraftContent(note.content)) {
+          await _openDailyNoteEditor(
+            context,
+            note.location,
+            date,
+            initialContent: note.content,
+          );
+          return;
+        }
+      }
+
+      if (!mounted) return;
       scaffold.showSnackBar(
         SnackBar(
-          content: Text(existingLocation == null ? '正在生成日记…' : '正在生成最终稿…'),
+          content: Text(note == null ? '正在生成日记…' : '正在生成最终稿…'),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 1),
         ),
@@ -1190,8 +1194,16 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
 
       final path = await _exportDashboardMarkdown(date);
       if (!context.mounted) return;
-      setState(() => _isGenerating = false);
-      await _loadDailyNoteState();
+      setState(() {
+        _noteInfoByDate = {
+          ..._noteInfoByDate,
+          dateKey(date): DailyNoteInfo(
+            date: date,
+            status: DailyNoteStatus.finalNote,
+            location: path,
+          ),
+        };
+      });
 
       final normalizedPath = path.replaceAll('\\', '/');
       final displayPath = normalizedPath.contains('Liflow/')
@@ -1208,7 +1220,6 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
         );
     } catch (e) {
       if (!context.mounted) return;
-      setState(() => _isGenerating = false);
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -1217,17 +1228,20 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
             behavior: SnackBarBehavior.floating,
           ),
         );
+    } finally {
+      if (mounted) setState(() => _isGenerating = false);
     }
   }
 
   Future<void> _openDailyNoteEditor(
     BuildContext context,
     String location,
-    DateTime noteDate,
-  ) async {
+    DateTime noteDate, {
+    String? initialContent,
+  }) async {
     final settings = ref.read(appSettingsRepositoryProvider);
     final storage = MarkdownStorageService(MarkdownDirectoryService(settings));
-    final raw = await storage.readTextFileLocation(location);
+    final raw = initialContent ?? await storage.readTextFileLocation(location);
     if (!context.mounted) return;
 
     await Navigator.of(context).push<bool>(
@@ -1429,11 +1443,7 @@ class _GenerateNoteSectionState extends ConsumerState<_GenerateNoteSection> {
 
     final mdContent = buf.toString();
 
-    final settings = ref.read(appSettingsRepositoryProvider);
-    final dirService = MarkdownDirectoryService(settings);
-    final noteService = MarkdownNoteService(dirService);
-
-    return noteService.saveDailyNote(day, mdContent);
+    return ref.read(markdownNoteServiceProvider).saveDailyNote(day, mdContent);
   }
 
   List<DatabaseRow> _rowsOfKind(List<DatabaseRow> rows, String kind) {

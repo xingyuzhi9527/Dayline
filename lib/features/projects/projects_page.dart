@@ -4,8 +4,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/database/repository_providers.dart';
 import '../../core/markdown/markdown_directory_service.dart';
@@ -18,6 +20,7 @@ import 'project_image_viewer_page.dart';
 import 'project_markdown_service.dart';
 import 'project_ordering.dart';
 import 'project_store.dart';
+import 'project_stored_image.dart';
 
 class ProjectsPage extends ConsumerStatefulWidget {
   const ProjectsPage({
@@ -66,13 +69,15 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     });
   }
 
-  Future<void> _loadProjects() async {
+  Future<void> _loadProjects({bool refreshHeat = true}) async {
     final settings = ref.read(appSettingsRepositoryProvider);
     final row = await settings.findByKey(projectsSettingsKey);
     final projects = _decodeProjects(row?['value'] as String?);
     final projectRecordHeatEntries = widget.standalone
         ? const <_ProjectHeatEntry>[]
-        : await _loadProjectRecordHeatEntries(projects);
+        : refreshHeat
+        ? await _loadProjectRecordHeatEntries(projects)
+        : _projectRecordHeatEntries;
     if (!mounted) return;
 
     setState(() {
@@ -434,7 +439,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
 
     setState(() => _addingProjectImage = true);
     try {
-      final images = await _imagePicker.pickMultiImage(imageQuality: 94);
+      final images = await _imagePicker.pickMultiImage();
       if (!mounted || images.isEmpty) return;
 
       final createdAt = DateTime.now();
@@ -452,6 +457,8 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       );
       if (!mounted || imageTitle == null || imageTitle.trim().isEmpty) return;
 
+      _showProjectSnack('正在保存图片资料…');
+
       await addProjectImageMaterials(
         ref,
         projectId: project.id,
@@ -459,9 +466,22 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         sourceImagePaths: images.map((image) => image.path).toList(),
         title: imageTitle,
         createdAt: createdAt,
+        onSaved: () async {
+          if (mounted) await _loadProjects(refreshHeat: false);
+        },
       );
+      // Only remove picker-owned temporary copies after durable import succeeds.
+      try {
+        final temporaryRoot = await getTemporaryDirectory();
+        for (final image in images) {
+          if (p.isWithin(temporaryRoot.path, image.path)) {
+            final file = File(image.path);
+            if (await file.exists()) await file.delete();
+          }
+        }
+      } catch (_) {}
       if (!mounted) return;
-      await _loadProjects();
+      await _loadProjects(refreshHeat: false);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -726,6 +746,11 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     for (var i = 0; i < itemCount; i++) {
       final localPath = i < localPaths.length ? localPaths[i] : null;
       if (localPath != null && localPath.isNotEmpty) {
+        if (MarkdownStorageLocation.parse(localPath).kind ==
+            MarkdownStorageKind.documentTree) {
+          items.add(ProjectImageViewerItem(path: localPath));
+          continue;
+        }
         final file = File(localPath);
         if (await file.exists()) {
           items.add(ProjectImageViewerItem(path: localPath));
@@ -737,6 +762,13 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       if (relativePath == null || relativePath.isEmpty) continue;
       final settings = ref.read(appSettingsRepositoryProvider);
       final directoryService = MarkdownDirectoryService(settings);
+      final storage = MarkdownStorageService(directoryService);
+      final location = await storage.locationForRelativePath(relativePath);
+      if (MarkdownStorageLocation.parse(location).kind ==
+          MarkdownStorageKind.documentTree) {
+        items.add(ProjectImageViewerItem(path: location));
+        continue;
+      }
       final root = await directoryService.ensureRoot();
       final file = File(p.joinAll([root, ...p.posix.split(relativePath)]));
       if (await file.exists()) {
@@ -1000,6 +1032,17 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                 slivers: [
                   SliverToBoxAdapter(
                     child: _ProjectsHeader(
+                      onSearch: widget.standalone
+                          ? null
+                          : () => context.go(
+                              Uri(
+                                path: '/projects/search',
+                                queryParameters: {
+                                  if (project != null)
+                                    'scopeProject': project.id,
+                                },
+                              ).toString(),
+                            ),
                       onBack: widget.standalone
                           ? () => Navigator.of(context).maybePop()
                           : null,
@@ -1088,12 +1131,14 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
 class _ProjectsHeader extends StatelessWidget {
   const _ProjectsHeader({
     this.onBack,
+    this.onSearch,
     required this.onOpenAllProjects,
     required this.onAddProject,
     required this.saving,
   });
 
   final VoidCallback? onBack;
+  final VoidCallback? onSearch;
   final VoidCallback? onOpenAllProjects;
   final VoidCallback onAddProject;
   final bool saving;
@@ -1134,6 +1179,13 @@ class _ProjectsHeader extends StatelessWidget {
                 ),
               ),
             ),
+            if (onSearch != null)
+              IconButton(
+                key: const ValueKey('projects-search'),
+                onPressed: onSearch,
+                icon: const Icon(Icons.search_rounded),
+                tooltip: '搜索项目内容',
+              ),
             IconButton(
               onPressed: onAddProject,
               icon: const Icon(Icons.add_rounded),
@@ -2842,13 +2894,10 @@ class _ProjectImagePreview extends StatelessWidget {
         width: 104,
         height: 76,
         color: colors.surfaceContainerLow,
-        child: Image.file(
-          File(path),
+        child: ProjectStoredImage(
+          location: path,
+          thumbnail: true,
           fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => Icon(
-            Icons.image_not_supported_rounded,
-            color: colors.onSurfaceVariant.withAlpha(170),
-          ),
         ),
       ),
     );

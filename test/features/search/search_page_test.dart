@@ -42,10 +42,20 @@ void main() {
               (ref) async => _fallbackState,
             ),
             projectSearchSummariesProvider.overrideWith(
-              (ref) async => const [],
+              (ref) async => const [
+                ProjectSearchSummary(
+                  id: 'alpha',
+                  name: '一个名称很长很长的项目用于验证小屏幕搜索范围显示',
+                  status: '进行中',
+                  updatedAt: 1,
+                ),
+              ],
             ),
           ],
-          child: MaterialApp(theme: AppTheme.light(), home: const SearchPage()),
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: const SearchSession(projectId: 'alpha', fromProjects: true),
+          ),
         ),
       );
       await tester.pump();
@@ -65,6 +75,7 @@ void main() {
       expect(find.text('当前使用兼容搜索'), findsOneWidget);
       expect(find.text('仅显示前 100 条结果'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      expect(repository.lastQuery?.filters.projectId, 'alpha');
 
       final clearSize = tester.getSize(
         find.byKey(const ValueKey('search-clear')),
@@ -128,8 +139,10 @@ const _fallbackState = SearchIndexState(
 );
 
 class _ResultRepository implements LocalSearchDataSource {
+  SearchQuery? lastQuery;
   @override
   Future<SearchResultPage> search(SearchQuery query) async {
+    lastQuery = query;
     return const SearchResultPage(
       items: [
         SearchResultItem(

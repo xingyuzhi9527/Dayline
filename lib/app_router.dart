@@ -59,6 +59,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 path: AppRoute.projects.path,
                 name: AppRoute.projects.name,
                 builder: (context, state) => const ProjectsPage(),
+                routes: [_searchRoute(fromProjects: true)],
               ),
             ],
           ),
@@ -68,43 +69,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 path: AppRoute.dashboard.path,
                 name: AppRoute.dashboard.name,
                 builder: (context, state) => const DashboardPage(),
-                routes: [
-                  GoRoute(
-                    path: 'search',
-                    name: 'search',
-                    parentNavigatorKey: rootNavigatorKey,
-                    builder: (context, state) => const SearchPage(),
-                    routes: [
-                      GoRoute(
-                        path: 'record/:recordId',
-                        name: 'search-record',
-                        parentNavigatorKey: rootNavigatorKey,
-                        builder: (context, state) {
-                          final recordId = int.tryParse(
-                            state.pathParameters['recordId'] ?? '',
-                          );
-                          final date = _parseDate(
-                            state.uri.queryParameters['date'],
-                          );
-                          return TimelinePage(
-                            initialDate: date,
-                            targetRecordId: recordId,
-                            standalone: true,
-                          );
-                        },
-                      ),
-                      GoRoute(
-                        path: 'project/:projectId',
-                        name: 'search-project',
-                        parentNavigatorKey: rootNavigatorKey,
-                        builder: (context, state) => ProjectsPage(
-                          initialProjectId: state.pathParameters['projectId'],
-                          standalone: true,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                routes: [_searchRoute()],
               ),
             ],
           ),
@@ -117,6 +82,40 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
   return router;
 });
+
+GoRoute _searchRoute({bool fromProjects = false}) {
+  final name = fromProjects ? 'projects-search' : 'search';
+  return GoRoute(
+    path: 'search',
+    name: name,
+    parentNavigatorKey: rootNavigatorKey,
+    builder: (context, state) => SearchSession(
+      fromProjects: fromProjects,
+      projectId: state.uri.queryParameters['scopeProject'],
+    ),
+    routes: [
+      GoRoute(
+        path: 'record/:recordId',
+        name: '$name-record',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => TimelinePage(
+          initialDate: _parseDate(state.uri.queryParameters['date']),
+          targetRecordId: int.tryParse(state.pathParameters['recordId'] ?? ''),
+          standalone: true,
+        ),
+      ),
+      GoRoute(
+        path: 'project/:projectId',
+        name: '$name-project',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => ProjectsPage(
+          initialProjectId: state.pathParameters['projectId'],
+          standalone: true,
+        ),
+      ),
+    ],
+  );
+}
 
 DateTime? _parseDate(String? value) {
   final parsed = value == null ? null : DateTime.tryParse(value);

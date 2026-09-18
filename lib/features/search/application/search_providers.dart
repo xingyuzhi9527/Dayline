@@ -11,8 +11,12 @@ import '../data/search_index_service.dart';
 import '../domain/search_models.dart';
 
 class SearchFormNotifier extends Notifier<SearchQuery> {
+  SearchFormNotifier([this.initialQuery = const SearchQuery()]);
+
+  final SearchQuery initialQuery;
+
   @override
-  SearchQuery build() => const SearchQuery();
+  SearchQuery build() => initialQuery;
 
   void setText(String value) {
     state = state.copyWith(text: value);
@@ -34,6 +38,7 @@ class SearchFormNotifier extends Notifier<SearchQuery> {
 final searchFormProvider =
     NotifierProvider.autoDispose<SearchFormNotifier, SearchQuery>(
       SearchFormNotifier.new,
+      dependencies: const [],
     );
 
 final searchIndexServiceProvider = Provider<SearchIndexService>((ref) {
@@ -94,4 +99,4 @@ final searchResultsProvider = FutureProvider.autoDispose<SearchResultPage>((
   if (disposed) return SearchResultPage.idle;
 
   return ref.watch(localSearchRepositoryProvider).search(query);
-});
+}, dependencies: [searchFormProvider]);
