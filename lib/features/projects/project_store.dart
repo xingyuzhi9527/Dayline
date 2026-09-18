@@ -22,11 +22,58 @@ final projectOptionsProvider = FutureProvider<List<ProjectOption>>((ref) async {
   return loadProjectOptions(ref);
 });
 
+final projectSearchSummariesProvider =
+    FutureProvider<List<ProjectSearchSummary>>((ref) async {
+      ref.watch(dataDomainVersionProvider(DataDomain.projects));
+      return loadProjectSearchSummaries(ref);
+    });
+
 class ProjectOption {
   const ProjectOption({required this.id, required this.name});
 
   final String id;
   final String name;
+}
+
+class ProjectSearchSummary {
+  const ProjectSearchSummary({
+    required this.id,
+    required this.name,
+    required this.status,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String name;
+  final String status;
+  final int updatedAt;
+}
+
+String? resolveProjectTargetId(
+  Iterable<String> availableProjectIds,
+  String targetProjectId,
+) {
+  for (final projectId in availableProjectIds) {
+    if (projectId == targetProjectId) return projectId;
+  }
+  return null;
+}
+
+Future<List<ProjectSearchSummary>> loadProjectSearchSummaries(Ref ref) async {
+  final projects = await _loadProjects(ref);
+  final row = await ref
+      .read(appSettingsRepositoryProvider)
+      .findByKey(projectsSettingsKey);
+  final updatedAt = row?['updated_at'] as int? ?? 0;
+  return [
+    for (final project in projects)
+      ProjectSearchSummary(
+        id: project['id'] as String,
+        name: project['name'] as String,
+        status: project['status'] as String,
+        updatedAt: updatedAt,
+      ),
+  ];
 }
 
 class ProjectImageMaterial {

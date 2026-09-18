@@ -58,7 +58,9 @@ Set<DataDomain> _domainsForTimelineSource(TimelineEventSource source) =>
     };
 
 class TimelineDateBar extends ConsumerWidget {
-  const TimelineDateBar({super.key});
+  const TimelineDateBar({this.onBack, super.key});
+
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -79,6 +81,14 @@ class TimelineDateBar extends ConsumerWidget {
         children: [
           Row(
             children: [
+              if (onBack != null) ...[
+                IconButton(
+                  onPressed: onBack,
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  tooltip: '返回搜索',
+                ),
+                const SizedBox(width: AppSpacing.xs),
+              ],
               Text('时间线', style: theme.textTheme.headlineMedium),
               const Spacer(),
               _TrashButton(),
@@ -140,7 +150,9 @@ class TimelineDateBar extends ConsumerWidget {
 }
 
 class TimelineBody extends ConsumerStatefulWidget {
-  const TimelineBody({super.key});
+  const TimelineBody({this.targetRecordId, super.key});
+
+  final int? targetRecordId;
 
   @override
   ConsumerState<TimelineBody> createState() => _TimelineBodyState();
@@ -151,6 +163,8 @@ class _TimelineBodyState extends ConsumerState<TimelineBody> {
   List<TimelineEvent>? _cachedEvents;
   String? _cachedDateKey;
   String? _autoScrolledDateKey;
+  final _targetKey = GlobalKey();
+  String? _targetScrollKey;
 
   @override
   void dispose() {
@@ -173,7 +187,18 @@ class _TimelineBodyState extends ConsumerState<TimelineBody> {
       case AsyncData(value: final events):
         _cachedEvents = events;
         _cachedDateKey = currentDateKey;
-        if (_autoScrolledDateKey != currentDateKey) {
+        final targetRecordId = widget.targetRecordId;
+        if (targetRecordId != null) {
+          final scrollKey = '$currentDateKey:$targetRecordId';
+          final containsTarget = events.any(
+            (event) =>
+                event.source == TimelineEventSource.record &&
+                event.sourceId == targetRecordId,
+          );
+          if (containsTarget && _targetScrollKey != scrollKey) {
+            _scrollToTarget(scrollKey);
+          }
+        } else if (_autoScrolledDateKey != currentDateKey) {
           _autoScrolledDateKey = currentDateKey;
           _scrollToLatest(animated: false);
         }
@@ -199,6 +224,30 @@ class _TimelineBodyState extends ConsumerState<TimelineBody> {
       return _EmptyTimeline(date: date);
     }
 
+    final targetRecordId = widget.targetRecordId;
+    if (targetRecordId != null) {
+      // Search deep links need every child mounted so the target can be located
+      // exactly. A lazy ListView may never build a distant target before the
+      // first ensureVisible call.
+      return SingleChildScrollView(
+        key: PageStorageKey('timeline-target-${dateKey(date)}-$targetRecordId'),
+        controller: _scrollController,
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.sm,
+          AppSpacing.xs,
+          AppSpacing.sm,
+          AppSpacing.xl,
+        ),
+        child: Column(
+          children: [
+            for (var index = 0; index < events.length; index++)
+              _buildEventTile(events, index, targetRecordId),
+            const _TimelineEndMarker(),
+          ],
+        ),
+      );
+    }
+
     return ListView.builder(
       key: PageStorageKey('timeline-body-${dateKey(date)}'),
       controller: _scrollController,
@@ -214,18 +263,46 @@ class _TimelineBodyState extends ConsumerState<TimelineBody> {
           return const _TimelineEndMarker();
         }
 
-        final nextEvent = index < events.length - 1 ? events[index + 1] : null;
-        return _TimelineTile(
-          event: events[index],
-          isLast: index == events.length - 1,
-          gapAfter: nextEvent == null
-              ? null
-              : Duration(
-                  milliseconds: nextEvent.timestamp - events[index].timestamp,
-                ),
-        );
+        return _buildEventTile(events, index, null);
       },
     );
+  }
+
+  Widget _buildEventTile(
+    List<TimelineEvent> events,
+    int index,
+    int? targetRecordId,
+  ) {
+    final event = events[index];
+    final nextEvent = index < events.length - 1 ? events[index + 1] : null;
+    final highlighted =
+        targetRecordId != null &&
+        event.source == TimelineEventSource.record &&
+        event.sourceId == targetRecordId;
+    final tile = _TimelineTile(
+      event: event,
+      isLast: index == events.length - 1,
+      highlighted: highlighted,
+      gapAfter: nextEvent == null
+          ? null
+          : Duration(milliseconds: nextEvent.timestamp - event.timestamp),
+    );
+    return highlighted ? KeyedSubtree(key: _targetKey, child: tile) : tile;
+  }
+
+  void _scrollToTarget(String scrollKey) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _targetScrollKey == scrollKey) return;
+      final targetContext = _targetKey.currentContext;
+      if (targetContext == null) return;
+      _targetScrollKey = scrollKey;
+      Scrollable.ensureVisible(
+        targetContext,
+        alignment: 0.35,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+      );
+    });
   }
 
   void _scrollToLatest({required bool animated}) {
@@ -251,11 +328,13 @@ class _TimelineTile extends ConsumerWidget {
     required this.event,
     required this.isLast,
     required this.gapAfter,
+    this.highlighted = false,
   });
 
   final TimelineEvent event;
   final bool isLast;
   final Duration? gapAfter;
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -278,7 +357,7 @@ class _TimelineTile extends ConsumerWidget {
       onEdit: canEdit ? () => _openEditor(context, ref) : null,
     );
 
-    return Column(
+    final content = Column(
       children: [
         IntrinsicHeight(
           child: Padding(
@@ -328,6 +407,45 @@ class _TimelineTile extends ConsumerWidget {
         if (gapAfter != null && gapAfter!.inMinutes > 0)
           _TimelineGap(gapAfter!),
       ],
+    );
+    if (!highlighted) return content;
+
+    return Semantics(
+      label: '搜索命中的记录',
+      container: true,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+        padding: const EdgeInsets.only(top: AppSpacing.xs),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primaryContainer.withAlpha(28),
+          border: Border.all(color: theme.colorScheme.primary, width: 1.5),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        ),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.my_location_rounded,
+                    size: 16,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    '搜索命中',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            content,
+          ],
+        ),
+      ),
     );
   }
 

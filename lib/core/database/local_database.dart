@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart' as sqflite;
 
+import 'search_index_schema.dart';
+
 final localDatabaseProvider = Provider<LocalDatabase>((ref) {
   final database = LocalDatabase();
 
@@ -16,17 +18,20 @@ final localDatabaseProvider = Provider<LocalDatabase>((ref) {
 
 class LocalDatabase {
   static const _databaseName = 'liflow.db';
-  static const _databaseVersion = 7;
+  static const _databaseVersion = 8;
   static final _transactionExecutorKey = Object();
 
   LocalDatabase({
     sqflite.DatabaseFactory? databaseFactory,
     String? databasePath,
+    SearchIndexSchema? searchIndexSchema,
   }) : _databaseFactory = databaseFactory ?? sqflite.databaseFactory,
-       _databasePath = databasePath;
+       _databasePath = databasePath,
+       searchIndexSchema = searchIndexSchema ?? SearchIndexSchema();
 
   final sqflite.DatabaseFactory _databaseFactory;
   final String? _databasePath;
+  final SearchIndexSchema searchIndexSchema;
 
   sqflite.Database? _database;
 
@@ -251,6 +256,7 @@ CREATE TABLE media_attachments (
     await _createWriteOperationsSchema(db);
     await _createDerivedSyncJobsSchema(db);
     await _createLibraryItemsSchema(db);
+    await searchIndexSchema.install(db);
   }
 
   Future<void> _upgradeSchema(
@@ -309,6 +315,9 @@ CREATE TABLE media_attachments (
     }
     if (oldVersion < 7) {
       await _createLibraryItemsSchema(db);
+    }
+    if (oldVersion < 8) {
+      await searchIndexSchema.install(db);
     }
   }
 

@@ -152,6 +152,30 @@ void main() {
     expect(updated?['tags'], '["日常"]');
   });
 
+  test('finds distinct active record types in stable order', () async {
+    await recordsRepository.create(
+      date: DateTime(2026, 4, 30),
+      type: 'custom_type',
+      content: 'Custom record',
+    );
+    final deleted = await recordsRepository.create(
+      date: DateTime(2026, 4, 30),
+      type: 'deleted_type',
+      content: 'Deleted record',
+    );
+    await recordsRepository.create(
+      date: DateTime(2026, 4, 30),
+      type: 'memo',
+      content: 'Memo record',
+    );
+    await recordsRepository.softDelete(deleted);
+
+    expect(await recordsRepository.findDistinctTypes(), [
+      'custom_type',
+      'memo',
+    ]);
+  });
+
   test('groups media attachments by record ids', () async {
     final today = DateTime(2026, 4, 30);
     final firstRecordId = await recordsRepository.create(
