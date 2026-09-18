@@ -382,6 +382,27 @@ class BackupSnapshotService {
     required File source,
   }) async {
     if (!await source.exists()) {
+      try {
+        final metadata = await _storageService.describeTreeFile(
+          targetRelativePath,
+        );
+        if (metadata != null) {
+          // The original already lives in the portable folder. Reference it
+          // in the snapshot instead of storing another full-size image.
+          return {
+            ...metadata,
+            'status': 'exported',
+            'targetRelativePath': targetRelativePath,
+            'relativePath': targetRelativePath,
+            'mimeType': _mediaMimeType(targetRelativePath),
+          };
+        }
+      } catch (_) {
+        return {
+          'status': 'copyFailed',
+          'targetRelativePath': targetRelativePath,
+        };
+      }
       return {
         'status': 'missingSource',
         'targetRelativePath': targetRelativePath,

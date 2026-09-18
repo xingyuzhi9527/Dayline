@@ -113,6 +113,27 @@ class _SearchFilterBarState extends ConsumerState<SearchFilterBar> {
                 ),
               ],
             ),
+            if (widget.filters.projectId != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: InputChip(
+                  key: const ValueKey('search-active-project'),
+                  avatar: const Icon(Icons.flag_outlined, size: 18),
+                  label: Text(
+                    projects.value
+                            ?.where((p) => p.id == widget.filters.projectId)
+                            .firstOrNull
+                            ?.name ??
+                        '所选项目',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  deleteButtonTooltipMessage: '搜索全部项目',
+                  onDeleted: () => widget.onChanged(
+                    widget.filters.copyWith(clearProjectId: true),
+                  ),
+                ),
+              ),
             AnimatedSize(
               duration: const Duration(milliseconds: 180),
               curve: Curves.easeOutCubic,

@@ -43,6 +43,27 @@ void main() {
   });
 
   test(
+    'restored tree image locations read the original from the new local root',
+    () async {
+      final target = File(
+        '${rootDir.path}/projects/example/materials/photo.jpg',
+      );
+      await target.parent.create(recursive: true);
+      await target.writeAsBytes([1, 2, 3]);
+      final oldLocation = const MarkdownStorageLocation.documentTree(
+        treeUri: 'content://old-device/tree/root',
+        relativePath: 'projects/example/materials/photo.jpg',
+      ).serialize();
+      expect(await service.readImageLocation(oldLocation), [1, 2, 3]);
+      expect(await service.readImageLocation(oldLocation, thumbnail: true), [
+        1,
+        2,
+        3,
+      ]);
+    },
+  );
+
+  test(
     'replaces an existing local file without truncating on failure',
     () async {
       final location = await service.writeRelativeTextFile(

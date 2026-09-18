@@ -9,8 +9,34 @@ import '../domain/search_models.dart';
 import 'widgets/search_filter_bar.dart';
 import 'widgets/search_result_tile.dart';
 
+class SearchSession extends StatelessWidget {
+  const SearchSession({this.projectId, this.fromProjects = false, super.key});
+
+  final String? projectId;
+  final bool fromProjects;
+
+  @override
+  Widget build(BuildContext context) => ProviderScope(
+    overrides: [
+      searchFormProvider.overrideWith(
+        () => SearchFormNotifier(
+          SearchQuery(filters: SearchFilters(projectId: projectId)),
+        ),
+      ),
+    ],
+    child: SearchPage(initialProjectId: projectId, fromProjects: fromProjects),
+  );
+}
+
 class SearchPage extends ConsumerStatefulWidget {
-  const SearchPage({super.key});
+  const SearchPage({
+    this.initialProjectId,
+    this.fromProjects = false,
+    super.key,
+  });
+
+  final String? initialProjectId;
+  final bool fromProjects;
 
   @override
   ConsumerState<SearchPage> createState() => _SearchPageState();
@@ -65,7 +91,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       key: const ValueKey('search-page'),
       appBar: AppBar(
         leading: IconButton(
-          tooltip: '返回复盘',
+          tooltip: widget.fromProjects ? '返回项目' : '返回复盘',
           onPressed: () => context.pop(),
           icon: const Icon(Icons.arrow_back_rounded),
         ),
@@ -132,18 +158,32 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   }
 
   void _openResult(SearchResultItem item) {
+    final base = widget.fromProjects ? '/projects/search' : '/dashboard/search';
+    final queryParameters = <String, String>{
+      if (widget.initialProjectId != null)
+        'scopeProject': widget.initialProjectId!,
+    };
     if (item.kind == SearchResultKind.record) {
       final recordId = item.recordId;
       final date = item.date;
       if (recordId == null || date == null) return;
+      queryParameters['date'] = date;
       context.go(
-        '/dashboard/search/record/$recordId?date=${Uri.encodeQueryComponent(date)}',
+        Uri(
+          path: '$base/record/$recordId',
+          queryParameters: queryParameters,
+        ).toString(),
       );
       return;
     }
     final projectId = item.projectId;
     if (projectId == null) return;
-    context.go('/dashboard/search/project/${Uri.encodeComponent(projectId)}');
+    context.go(
+      Uri(
+        path: '$base/project/${Uri.encodeComponent(projectId)}',
+        queryParameters: queryParameters.isEmpty ? null : queryParameters,
+      ).toString(),
+    );
   }
 }
 

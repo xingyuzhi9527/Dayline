@@ -2,10 +2,18 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
 import '../storage/recoverable_local_file_writer.dart';
+import '../database/repository_providers.dart';
 import 'markdown_directory_service.dart';
+
+final markdownStorageProvider = Provider<MarkdownStorageService>((ref) {
+  return MarkdownStorageService(
+    MarkdownDirectoryService(ref.watch(appSettingsRepositoryProvider)),
+  );
+});
 
 enum MarkdownStorageKind { localPath, documentTree }
 
@@ -73,16 +81,18 @@ class MarkdownStorageLocation {
 }
 
 class MarkdownStorageService {
-  MarkdownStorageService(this._directoryService);
+  MarkdownStorageService(this._directoryService, {bool? documentTreeSupported})
+    : _documentTreeSupported = documentTreeSupported ?? Platform.isAndroid;
 
   static const _channel = MethodChannel('liflow/markdown_storage');
 
   final MarkdownDirectoryService _directoryService;
+  final bool _documentTreeSupported;
   final RecoverableLocalFileWriter _localFileWriter =
       const RecoverableLocalFileWriter();
 
   Future<MarkdownDirectoryPick?> pickDirectory() async {
-    if (!Platform.isAndroid) return null;
+    if (!_documentTreeSupported) return null;
     final row = await _channel.invokeMapMethod<String, Object?>(
       'pickDirectory',
     );
@@ -95,7 +105,7 @@ class MarkdownStorageService {
   }
 
   Future<MarkdownDirectoryPick?> describeDirectory(String treeUri) async {
-    if (!Platform.isAndroid) return null;
+    if (!_documentTreeSupported) return null;
     final row = await _channel.invokeMapMethod<String, Object?>(
       'describeTree',
       {'treeUri': treeUri},
@@ -109,7 +119,7 @@ class MarkdownStorageService {
   }
 
   Future<bool> hasTreeAccess(String treeUri) async {
-    if (!Platform.isAndroid) return true;
+    if (!_documentTreeSupported) return true;
     return await _channel.invokeMethod<bool>('hasTreeAccess', {
           'treeUri': treeUri,
         }) ??
@@ -118,7 +128,7 @@ class MarkdownStorageService {
 
   Future<void> ensureTreeRootSubdir() async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri == null || treeUri.isEmpty || !Platform.isAndroid) return;
+    if (treeUri == null || treeUri.isEmpty || !_documentTreeSupported) return;
     final current = await _directoryService.getTreeRootSubdir();
     if (current.isNotEmpty) return;
 
@@ -135,7 +145,7 @@ class MarkdownStorageService {
 
   Future<void> ensureCoreDirectories() async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
+    if (treeUri != null && treeUri.isNotEmpty && _documentTreeSupported) {
       await ensureTreeRootSubdir();
       await _channel.invokeMethod<void>('ensureDirectories', {
         'treeUri': treeUri,
@@ -156,7 +166,7 @@ class MarkdownStorageService {
     required List<String> roots,
   }) async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri == null || treeUri.isEmpty || !Platform.isAndroid) {
+    if (treeUri == null || treeUri.isEmpty || !_documentTreeSupported) {
       return const [];
     }
 
@@ -175,7 +185,7 @@ class MarkdownStorageService {
     required String treeUri,
     List<String> roots = const [''],
   }) async {
-    if (treeUri.isEmpty || !Platform.isAndroid) return const [];
+    if (treeUri.isEmpty || !_documentTreeSupported) return const [];
 
     final rows = await _channel.invokeListMethod<Map<Object?, Object?>>(
       'listFiles',
@@ -195,7 +205,7 @@ class MarkdownStorageService {
     String? markdownDirectory,
   }) async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri == null || treeUri.isEmpty || !Platform.isAndroid) {
+    if (treeUri == null || treeUri.isEmpty || !_documentTreeSupported) {
       return null;
     }
 
@@ -215,7 +225,7 @@ class MarkdownStorageService {
     String? mimeType,
   }) async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri == null || treeUri.isEmpty || !Platform.isAndroid) {
+    if (treeUri == null || treeUri.isEmpty || !_documentTreeSupported) {
       throw StateError('Document tree storage is not available.');
     }
 
@@ -232,7 +242,7 @@ class MarkdownStorageService {
     required String relativePath,
     String? mimeType,
   }) async {
-    if (treeUri.isEmpty || !Platform.isAndroid) {
+    if (treeUri.isEmpty || !_documentTreeSupported) {
       throw StateError('Document tree storage is not available.');
     }
 
@@ -245,7 +255,7 @@ class MarkdownStorageService {
 
   Future<void> deleteTreeDocument({required String relativePath}) async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri == null || treeUri.isEmpty || !Platform.isAndroid) {
+    if (treeUri == null || treeUri.isEmpty || !_documentTreeSupported) {
       throw StateError('Document tree storage is not available.');
     }
 
@@ -262,7 +272,7 @@ class MarkdownStorageService {
     required String mimeType,
   }) async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
+    if (treeUri != null && treeUri.isNotEmpty && _documentTreeSupported) {
       await ensureTreeRootSubdir();
       await _channel.invokeMethod<void>('writeBinaryFile', {
         'treeUri': treeUri,
@@ -280,13 +290,74 @@ class MarkdownStorageService {
     );
   }
 
+  Future<bool> relativePathExists(String relativePath) async {
+    final treeUri = await _directoryService.getTreeRootUri();
+    if (treeUri != null && treeUri.isNotEmpty && _documentTreeSupported) {
+      return await _channel.invokeMethod<bool>('pathExists', {
+            'treeUri': treeUri,
+            'relativePath': await _treePath(relativePath),
+          }) ??
+          false;
+    }
+    final root = await _directoryService.ensureRoot();
+    return await FileSystemEntity.type(_joinLocal(root, relativePath)) !=
+        FileSystemEntityType.notFound;
+  }
+
+  Future<Uint8List> readImageLocation(
+    String location, {
+    bool thumbnail = false,
+  }) async {
+    final parsed = MarkdownStorageLocation.parse(location);
+    if (parsed.kind == MarkdownStorageKind.localPath) {
+      return File(parsed.localPath!).readAsBytes();
+    }
+    final currentTree = await _directoryService.getTreeRootUri();
+    if (currentTree == null) {
+      final root = await _directoryService.ensureRoot();
+      final restored = File(_joinLocal(root, parsed.relativePath!));
+      if (await restored.exists()) return restored.readAsBytes();
+    }
+    final bytes = await _channel.invokeMethod<Uint8List>('readImage', {
+      'treeUri': currentTree ?? parsed.treeUri,
+      'relativePath': await _treePath(parsed.relativePath!),
+      'thumbnail': thumbnail,
+    });
+    if (bytes == null) throw StateError('Image could not be read.');
+    return bytes;
+  }
+
+  Future<Map<String, Object?>?> describeTreeFile(String relativePath) async {
+    final treeUri = await _directoryService.getTreeRootUri();
+    if (treeUri == null || !_documentTreeSupported) return null;
+    return _channel.invokeMapMethod<String, Object?>('describeBinaryFile', {
+      'treeUri': treeUri,
+      'relativePath': await _treePath(relativePath),
+    });
+  }
+
+  Future<void> renameTreeImage(
+    String oldRelativePath,
+    String newRelativePath,
+  ) async {
+    final treeUri = await _directoryService.getTreeRootUri();
+    if (treeUri == null || !_documentTreeSupported) {
+      throw StateError('Document tree storage is not available.');
+    }
+    await _channel.invokeMethod<void>('renameImage', {
+      'treeUri': treeUri,
+      'relativePath': await _treePath(oldRelativePath),
+      'newRelativePath': await _treePath(newRelativePath),
+    });
+  }
+
   Future<String> writeRelativeTextFile({
     required String relativePath,
     required String content,
     String? mimeType,
   }) async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
+    if (treeUri != null && treeUri.isNotEmpty && _documentTreeSupported) {
       await ensureTreeRootSubdir();
       await _channel.invokeMethod<void>('writeTextFile', {
         'treeUri': treeUri,
@@ -325,7 +396,7 @@ class MarkdownStorageService {
         }
         await _localFileWriter.writeText(localPath, content);
       case MarkdownStorageKind.documentTree:
-        if (!Platform.isAndroid) {
+        if (!_documentTreeSupported) {
           throw StateError('Document tree storage is not available.');
         }
         await ensureTreeRootSubdir();
@@ -349,7 +420,7 @@ class MarkdownStorageService {
         await _localFileWriter.recover(localPath);
         return File(localPath).readAsString();
       case MarkdownStorageKind.documentTree:
-        if (!Platform.isAndroid) {
+        if (!_documentTreeSupported) {
           throw StateError('Document tree storage is not available.');
         }
         await ensureTreeRootSubdir();
@@ -369,7 +440,7 @@ class MarkdownStorageService {
 
   Future<String> locationForRelativePath(String relativePath) async {
     final treeUri = await _directoryService.getTreeRootUri();
-    if (treeUri != null && treeUri.isNotEmpty && Platform.isAndroid) {
+    if (treeUri != null && treeUri.isNotEmpty && _documentTreeSupported) {
       return MarkdownStorageLocation.documentTree(
         treeUri: treeUri,
         relativePath: relativePath,

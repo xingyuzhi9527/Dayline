@@ -90,6 +90,56 @@ Make the life log stable.
     await database.close();
   });
 
+  test(
+    'snapshot references tree originals without creating a second image',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'liflow-tree-snapshot-',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      final directory = MarkdownDirectoryService(settingsRepository);
+      await directory.setRootPath(root.path);
+      const relativePath = 'projects/example/materials/photo.jpg';
+      await settingsRepository.create(
+        key: projectsSettingsKey,
+        value: jsonEncode([
+          {
+            'id': 'example',
+            'name': 'Example',
+            'updates': [
+              {
+                'id': 'photo',
+                'entryType': 'image',
+                'text': 'Photo',
+                'imageRelativePath': relativePath,
+              },
+            ],
+          },
+        ]),
+      );
+      final storage = _TreeOriginalStorage(directory);
+      await BackupSnapshotService(
+        directoryService: directory,
+        database: database,
+        storageService: storage,
+      ).writeSnapshot();
+      final snapshot =
+          jsonDecode(
+                await File(
+                  '${root.path}/${BackupSnapshotService.snapshotRelativePath}',
+                ).readAsString(),
+              )
+              as Map;
+      final descriptor = (snapshot['project_files'] as List).single as Map;
+      expect(descriptor['status'], 'exported');
+      expect(descriptor['relativePath'], relativePath);
+      expect(descriptor['targetRelativePath'], relativePath);
+      expect(descriptor['sha256'], sha256.convert([1, 2, 3]).toString());
+      expect(storage.binaryWrites, 0);
+      expect(await File('${root.path}/$relativePath').exists(), isFalse);
+    },
+  );
+
   test('scans markdown folder and previews recoverable content', () async {
     final preview = await service.preview();
 
@@ -949,6 +999,31 @@ Map<String, Object?> _portableMediaSnapshot({
     'projects': const <Object?>[],
     'settings': const <Object?>[],
   };
+}
+
+class _TreeOriginalStorage extends MarkdownStorageService {
+  _TreeOriginalStorage(super.directoryService);
+  int binaryWrites = 0;
+
+  @override
+  Future<Map<String, Object?>?> describeTreeFile(String relativePath) async => {
+    'size': 3,
+    'sha256': sha256.convert([1, 2, 3]).toString(),
+  };
+
+  @override
+  Future<void> writeRelativeBinaryFile({
+    required String relativePath,
+    required String sourcePath,
+    required String mimeType,
+  }) async {
+    binaryWrites++;
+    return super.writeRelativeBinaryFile(
+      relativePath: relativePath,
+      sourcePath: sourcePath,
+      mimeType: mimeType,
+    );
+  }
 }
 
 class _CapturingStorageService extends MarkdownStorageService {

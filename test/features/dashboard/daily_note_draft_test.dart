@@ -6,6 +6,7 @@ import 'package:liflow_app/core/database/local_database.dart';
 import 'package:liflow_app/core/database/repository_providers.dart';
 import 'package:liflow_app/core/markdown/markdown_directory_service.dart';
 import 'package:liflow_app/core/markdown/markdown_note_service.dart';
+import 'package:liflow_app/core/markdown/markdown_storage_service.dart';
 import 'package:liflow_app/features/dashboard/daily_note_draft.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -37,6 +38,42 @@ void main() {
       await rootDir.delete(recursive: true);
     }
   });
+
+  test(
+    'loading daily note status reads each existing note only once',
+    () async {
+      final directory = MarkdownDirectoryService(
+        container.read(appSettingsRepositoryProvider),
+      );
+      final storage = _CountingStorage(directory);
+      container.dispose();
+      container = ProviderContainer(
+        overrides: [
+          localDatabaseProvider.overrideWithValue(database),
+          markdownStorageProvider.overrideWithValue(storage),
+        ],
+      );
+      final day = DateTime(2026, 6, 4);
+      final service = container.read(markdownNoteServiceProvider);
+      await service.saveDailyNote(
+        day,
+        buildDailyDraftMarkdown(date: day, activityCount: 1),
+      );
+      final draft = await loadDailyNoteInfo(container, day);
+      expect(draft.status, DailyNoteStatus.draft);
+      expect(storage.readCount, 1);
+      await service.saveDailyNote(day, '---\nstatus: final\n---\n# Final');
+      final finalNote = await loadDailyNoteInfo(container, day);
+      expect(finalNote.status, DailyNoteStatus.finalNote);
+      expect(storage.readCount, 2);
+      final missing = await loadDailyNoteInfo(
+        container,
+        day.add(const Duration(days: 1)),
+      );
+      expect(missing.status, DailyNoteStatus.missing);
+      expect(storage.readCount, 3);
+    },
+  );
 
   test('updates existing draft front matter without replacing body', () async {
     final day = DateTime(2026, 6, 4);
@@ -100,4 +137,16 @@ record_count: 1
     expect(raw, contains('record_count: 1'));
     expect(raw, contains('# final note'));
   });
+}
+
+class _CountingStorage extends MarkdownStorageService {
+  _CountingStorage(super.directoryService);
+
+  int readCount = 0;
+
+  @override
+  Future<String> readTextFileLocation(String location) {
+    readCount++;
+    return super.readTextFileLocation(location);
+  }
 }

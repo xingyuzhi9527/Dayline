@@ -1,8 +1,7 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_spacing.dart';
+import 'project_stored_image.dart';
 
 class ProjectImageViewerItem {
   const ProjectImageViewerItem({required this.path});
@@ -141,13 +140,11 @@ class _ProjectImageViewerPageState extends State<ProjectImageViewerPage> {
                   child: InteractiveViewer(
                     minScale: 0.8,
                     maxScale: 5,
-                    child: Image.file(
-                      File(widget.images[index].path),
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => const Icon(
-                        Icons.image_not_supported_rounded,
-                        color: Colors.white70,
-                        size: 48,
+                    child: IconTheme(
+                      data: const IconThemeData(color: Colors.white70),
+                      child: ProjectStoredImage(
+                        location: widget.images[index].path,
+                        fit: BoxFit.contain,
                       ),
                     ),
                   ),

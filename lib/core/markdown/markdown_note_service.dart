@@ -1,13 +1,23 @@
 import 'package:path/path.dart' as p;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../database/repository_providers.dart';
 
 import 'markdown_directory_service.dart';
 import 'markdown_filename.dart';
 import 'markdown_storage_service.dart';
 import 'project_markdown_paths.dart';
 
+final markdownNoteServiceProvider = Provider<MarkdownNoteService>((ref) {
+  return MarkdownNoteService(
+    MarkdownDirectoryService(ref.watch(appSettingsRepositoryProvider)),
+    storage: ref.watch(markdownStorageProvider),
+  );
+});
+
 class MarkdownNoteService {
-  MarkdownNoteService(this._dirService)
-    : _storage = MarkdownStorageService(_dirService);
+  MarkdownNoteService(this._dirService, {MarkdownStorageService? storage})
+    : _storage = storage ?? MarkdownStorageService(_dirService);
 
   final MarkdownDirectoryService _dirService;
   final MarkdownStorageService _storage;
@@ -21,10 +31,16 @@ class MarkdownNoteService {
   }
 
   Future<String?> findDailyNote(DateTime date) async {
+    return (await readDailyNoteIfExists(date))?.location;
+  }
+
+  Future<({String location, String content})?> readDailyNoteIfExists(
+    DateTime date,
+  ) async {
     final location = await dailyNoteLocation(date);
     try {
-      await _storage.readTextFileLocation(location);
-      return location;
+      final content = await _storage.readTextFileLocation(location);
+      return (location: location, content: content);
     } catch (_) {
       return null;
     }

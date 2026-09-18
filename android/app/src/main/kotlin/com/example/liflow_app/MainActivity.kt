@@ -5,6 +5,7 @@ import android.content.res.AssetManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.provider.DocumentsContract
 import io.flutter.FlutterInjector
 import androidx.documentfile.provider.DocumentFile
 import io.flutter.embedding.android.FlutterActivity
@@ -90,6 +91,10 @@ class MainActivity : FlutterActivity() {
                     "writeBinaryFile" -> writeBinaryFile(call, result)
                     "writeTextFile" -> writeTextFile(call, result)
                     "readTextFile" -> readTextFile(call, result)
+                    "readImage" -> readImage(call, result)
+                    "pathExists" -> pathExists(call, result)
+                    "renameImage" -> renameImage(call, result)
+                    "describeBinaryFile" -> describeBinaryFile(call, result)
                     else -> result.notImplemented()
                 }
             } catch (error: Throwable) {
@@ -479,6 +484,72 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun readImage(call: MethodCall, result: MethodChannel.Result) {
+        val treeUri = Uri.parse(requireNotNull(call.argument<String>("treeUri")))
+        val path = requireNotNull(call.argument<String>("relativePath"))
+        val thumbnail = call.argument<Boolean>("thumbnail") == true
+        executeSafIo(result) {
+            val file = resolveFile(treeUri, path, false)
+            ProjectImageReader(this).read(file, thumbnail)
+        }
+    }
+
+    private fun describeBinaryFile(call: MethodCall, result: MethodChannel.Result) {
+        val treeUri = Uri.parse(requireNotNull(call.argument<String>("treeUri")))
+        val path = requireNotNull(call.argument<String>("relativePath"))
+        executeSafIo(result) {
+            val file = resolveFile(treeUri, path, false)
+            val digest = MessageDigest.getInstance("SHA-256")
+            var size = 0L
+            requireNotNull(contentResolver.openInputStream(file.uri)).use { input ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                    size += count
+                }
+            }
+            mapOf("size" to size, "sha256" to digest.digest().joinToString("") { "%02x".format(it) })
+        }
+    }
+
+    private fun pathExists(call: MethodCall, result: MethodChannel.Result) {
+        val treeUri = Uri.parse(requireNotNull(call.argument<String>("treeUri")))
+        val path = requireNotNull(call.argument<String>("relativePath"))
+        executeSafIo(result) {
+            var entry: DocumentFile? = DocumentFile.fromTreeUri(this, treeUri)
+                ?: throw IllegalStateException("Cannot access folder")
+            for (segment in parseRelativeSegments(path)) {
+                entry = entry?.findFile(segment)
+                if (entry == null) break
+            }
+            entry != null
+        }
+    }
+
+    private fun renameImage(call: MethodCall, result: MethodChannel.Result) {
+        val treeUri = Uri.parse(requireNotNull(call.argument<String>("treeUri")))
+        val oldPath = requireNotNull(call.argument<String>("relativePath"))
+        val newPath = requireNotNull(call.argument<String>("newRelativePath"))
+        executeSafIo(result) {
+            val oldSegments = parseRelativeSegments(oldPath)
+            val newSegments = parseRelativeSegments(newPath)
+            require(oldSegments.dropLast(1) == newSegments.dropLast(1)) {
+                "Image rename must stay in the same folder"
+            }
+            val target = resolveFileTarget(treeUri, oldPath, false)
+            recoverSafArtifacts(target)
+            val source = target.parent.findFile(target.fileName)
+                ?: throw IllegalStateException("Image not found")
+            if (target.fileName != newSegments.last()) {
+                check(target.parent.findFile(newSegments.last()) == null) { "Image name already exists" }
+                check(source.renameTo(newSegments.last())) { "Cannot rename image" }
+            }
+            null
+        }
+    }
+
     private fun resolveFile(
         treeUri: Uri,
         relativePath: String,
@@ -699,12 +770,30 @@ class MainActivity : FlutterActivity() {
 
     private fun recoverSafArtifacts(target: SafFileTarget) {
         val transactions = mutableMapOf<String, SafTransactionArtifacts>()
-        for (entry in target.parent.listFiles().filter { it.isFile }) {
-            val tempId = safArtifactId(entry.name, target.fileName, "temp")
+        // Read names in one provider query, instead of querying metadata for
+        // every unrelated image in the directory on every read and write.
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            target.parent.uri, DocumentsContract.getDocumentId(target.parent.uri),
+        )
+        val names = mutableListOf<String>()
+        val cursor = contentResolver.query(
+            childrenUri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null, null, null,
+        ) ?: throw IllegalStateException("Cannot inspect file recovery state")
+        cursor.use {
+            while (it.moveToNext()) {
+                val name = it.getString(0) ?: continue
+                if (safArtifactId(name, target.fileName, "temp") != null ||
+                    safArtifactId(name, target.fileName, "backup") != null) names.add(name)
+            }
+        }
+        for (name in names) {
+            val entry = target.parent.findFile(name)?.takeIf { it.isFile } ?: continue
+            val tempId = safArtifactId(name, target.fileName, "temp")
             if (tempId != null) {
                 transactions.getOrPut(tempId) { SafTransactionArtifacts(tempId) }.temp = entry
             }
-            val backupId = safArtifactId(entry.name, target.fileName, "backup")
+            val backupId = safArtifactId(name, target.fileName, "backup")
             if (backupId != null) {
                 transactions.getOrPut(backupId) { SafTransactionArtifacts(backupId) }.backup = entry
             }
