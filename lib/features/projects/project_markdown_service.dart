@@ -4,6 +4,7 @@ import '../../core/database/repositories.dart';
 import '../../core/markdown/markdown_directory_service.dart';
 import '../../core/markdown/project_markdown_paths.dart';
 import '../../core/markdown/markdown_storage_service.dart';
+import 'project_time.dart';
 
 class ProjectArchiveEntry {
   const ProjectArchiveEntry({
@@ -75,7 +76,10 @@ class ProjectMarkdownService {
     final name = _string(project['name'], fallback: '未命名项目');
     final goal = _string(project['goal'], fallback: '慢慢推进这件事');
     final status = _string(project['status'], fallback: '进行中');
-    final lastUpdate = _string(project['lastUpdate'], fallback: '刚刚');
+    final lastUpdate = formatStoredProjectTime(
+      timestamp: project['lastUpdatedAt'],
+      legacyText: project['lastUpdate'],
+    );
     final todos = _listOfMaps(project['todos']);
     final updates = _listOfMaps(project['updates']);
     var majorBody = _markedBody(existing, _majorStart, _majorEnd);
@@ -157,7 +161,11 @@ class ProjectMarkdownService {
     if (updates.isEmpty) return '_暂无最近更新。_';
     return updates
         .map((update) {
-          final time = _string(update['time'], fallback: '刚刚');
+          final time = formatStoredProjectTime(
+            timestamp: update['createdAt'],
+            legacyText: update['time'],
+            id: update['id'] as String?,
+          );
           final source = _string(update['source'], fallback: '项目');
           final text = _oneLine(_string(update['text'], fallback: ''));
           final entryLink = _projectEntryLink(update);
@@ -242,10 +250,6 @@ class ProjectMarkdownService {
   String _yamlString(String value) => jsonEncode(value);
 
   String _formatDateTime(DateTime dateTime) {
-    final date =
-        '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}';
-    final time =
-        '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
-    return '$date $time';
+    return formatProjectDateTime(dateTime);
   }
 }

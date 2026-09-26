@@ -13,6 +13,7 @@ import '../../core/markdown/markdown_storage_service.dart';
 import '../../core/parser/expense_line_item.dart';
 import '../../core/parser/lui_lite_parser.dart';
 import '../projects/project_store.dart';
+import '../projects/project_time.dart';
 import '../search/data/search_index_service.dart';
 
 class MarkdownRestoreFile {
@@ -1586,7 +1587,9 @@ class MarkdownRestoreService {
           frontMatter,
           keys: const ['updated_at', 'created_at'],
         ) ??
-        _dateFromMillis(file.updatedAt);
+        (file.updatedAt == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(file.updatedAt!));
     final title = _firstNonEmpty([
       frontMatter['title'],
       document.title,
@@ -1597,33 +1600,40 @@ class MarkdownRestoreService {
       'restored-${_stablePathId(file.relativePath)}',
     ]);
     final projectDir = p.posix.dirname(file.relativePath);
-    final fileUpdates = _extractProjectFileUpdates(
-      raw,
-      projectDir: projectDir,
-      updatedAt: updatedAt,
-    );
+    final fileUpdates = updatedAt == null
+        ? const <Map<String, Object?>>[]
+        : _extractProjectFileUpdates(
+            raw,
+            projectDir: projectDir,
+            updatedAt: updatedAt,
+          );
     return _ProjectRestoreCandidate(
       project: {
         'id': id,
         'name': title,
         'status': _firstNonEmpty([frontMatter['status'], '进行中']),
         'goal': _extractSection(raw, const ['目标', '鐩爣']) ?? '从原文件夹恢复',
-        'lastUpdate': _dateLabel(updatedAt),
+        'lastUpdate': updatedAt == null
+            ? '时间未记录'
+            : formatProjectDateTime(updatedAt),
+        if (updatedAt != null)
+          'lastUpdatedAt': updatedAt.millisecondsSinceEpoch,
         'archiveLocation': file.location,
         'todos': _extractTodos(raw),
         'updates': [
-          {
-            'id': '${updatedAt.microsecondsSinceEpoch}-restore-update',
-            'time': _dateLabel(updatedAt),
-            'createdAt': updatedAt.millisecondsSinceEpoch,
-            'source': '恢复',
-            'text': '从原文件夹恢复项目',
-            'colorValue': 0xFF2F6F73,
-          },
+          if (updatedAt != null)
+            {
+              'id': '${updatedAt.microsecondsSinceEpoch}-restore-update',
+              'time': formatProjectDateTime(updatedAt),
+              'createdAt': updatedAt.millisecondsSinceEpoch,
+              'source': '恢复',
+              'text': '从原文件夹恢复项目',
+              'colorValue': 0xFF2F6F73,
+            },
           ...fileUpdates,
         ],
       },
-      sortKey: updatedAt.millisecondsSinceEpoch,
+      sortKey: updatedAt?.millisecondsSinceEpoch ?? 0,
     );
   }
 
@@ -2356,7 +2366,7 @@ List<Map<String, Object?>> _extractProjectFileUpdates(
       updates.add({
         'id':
             '${updatedAt.microsecondsSinceEpoch}-restore-file-${updates.length}',
-        'time': _dateLabel(updatedAt),
+        'time': formatProjectDateTime(updatedAt),
         'createdAt': updatedAt.millisecondsSinceEpoch,
         'source': isImage ? '图片资料' : '文件',
         'text': fileName,

@@ -12,6 +12,7 @@ import '../../core/markdown/project_markdown_paths.dart';
 import '../../core/storage/recoverable_local_file_writer.dart';
 import '../../core/theme/app_colors.dart';
 import 'project_markdown_service.dart';
+import 'project_time.dart';
 
 const projectsSettingsKey = 'projects_state_v1';
 const _projectUpdatesRetainLimit = 60;
@@ -293,6 +294,7 @@ Future<void> syncProjectFlashEntryArchive(
     projectId: projectId,
     updatedAt: updatedAt,
     notify: notify,
+    advanceProjectTime: false,
     archiveEntry: ProjectArchiveEntry(
       text: isTodo ? '添加待办：$text' : text,
       source: isTodo ? '待办' : '文本记录',
@@ -1045,6 +1047,7 @@ Future<void> _updateProject(
   bool syncArchive = true,
   bool notify = true,
   bool persistBeforeArchive = false,
+  bool advanceProjectTime = true,
   Future<void> Function()? onSaved,
   required FutureOr<Map<String, Object?>> Function(Map<String, Object?> project)
   update,
@@ -1057,7 +1060,14 @@ Future<void> _updateProject(
       if (project['id'] == projectId)
         await () async {
           changed = true;
-          changedProject = await update(project);
+          final updated = await update(project);
+          changedProject = advanceProjectTime && !identical(updated, project)
+              ? {
+                  ...updated,
+                  'lastUpdatedAt': updatedAt.millisecondsSinceEpoch,
+                  'lastUpdate': formatProjectDateTime(updatedAt),
+                }
+              : updated;
           return changedProject!;
         }()
       else
@@ -1248,12 +1258,15 @@ Map<String, Object?>? _normalizeProject(Object? raw) {
   final id = raw['id'] as String?;
   final name = raw['name'] as String?;
   if (id == null || name == null || name.trim().isEmpty) return null;
+  final lastUpdatedAt = parseProjectEpoch(raw['lastUpdatedAt']);
   return {
     'id': id,
     'name': name,
     'status': raw['status'] as String? ?? '进行中',
     'goal': raw['goal'] as String? ?? '慢慢推进这件事',
     'lastUpdate': raw['lastUpdate'] as String? ?? '刚刚',
+    if (lastUpdatedAt != null)
+      'lastUpdatedAt': lastUpdatedAt.millisecondsSinceEpoch,
     if (raw['archiveLocation'] is String)
       'archiveLocation': raw['archiveLocation'] as String,
     'todos': _listOfMaps(raw['todos']),
@@ -1273,15 +1286,7 @@ List<Map<String, Object?>> _listOfMaps(Object? raw) {
 }
 
 String _formatProjectTime(DateTime time) {
-  final now = DateTime.now();
-  final sameDay =
-      time.year == now.year && time.month == now.month && time.day == now.day;
-  if (sameDay) {
-    final hour = time.hour.toString().padLeft(2, '0');
-    final minute = time.minute.toString().padLeft(2, '0');
-    return '今天 $hour:$minute';
-  }
-  return '${time.month}月${time.day}日';
+  return formatProjectDateTime(time);
 }
 
 Future<void> _ensureProjectMaterialsNoMedia(

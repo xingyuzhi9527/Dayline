@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -18,8 +19,10 @@ import '../projects/project_store.dart';
 import '../timeline/timeline_providers.dart';
 import 'flash_record_notifier.dart';
 import 'flash_record_state.dart';
+import 'startup_todo_reminder_providers.dart';
 import 'widgets/audio_waveform.dart';
 import 'widgets/flash_card.dart';
+import 'widgets/startup_todo_reminder.dart';
 import 'widgets/voice_button.dart';
 
 final todayTodoPanelEventsProvider = FutureProvider<List<TimelineEvent>>((
@@ -90,6 +93,14 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   bool _keyboardHiding = false;
   bool _capturingPhoto = false;
   bool _recoveringLostPhoto = false;
+  bool _startupReminderVisible = false;
+  bool _startupReminderDismissInProgress = false;
+  bool _startupDismissalLoaded = false;
+  bool _startupReminderRoundConsumed = false;
+  StartupTodoDismissal? _startupDismissal;
+  StartupTodoReminderSnapshot? _startupReminderSnapshot;
+  Future<void> _startupDismissalWriteChain = Future<void>.value();
+  int _startupRequestSeen = 0;
   int _launchCompletedAt = 0;
   Offset _intentDragOffset = Offset.zero;
 
@@ -111,6 +122,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       reverseDuration: const Duration(milliseconds: 320),
     );
     unawaited(_recoverLostPhoto());
+    unawaited(_prepareStartupReminder(initial: true));
   }
 
   @override
@@ -176,13 +188,24 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     }
   }
 
-  void _submitText() {
+  Future<void> _submitText() async {
     if (ref.read(flashRecordProvider).textSaving) return;
     final text = _textController.text.trim();
     if (text.isEmpty) return;
-    _textController.clear();
-    _collapseIntentInput(reason: 'submit');
-    unawaited(ref.read(flashRecordProvider.notifier).saveAsText(text));
+
+    final notifier = ref.read(flashRecordProvider.notifier);
+    final savedSequence = ref.read(flashRecordProvider).savedSequence;
+    await notifier.saveAsText(text);
+    if (!mounted) return;
+
+    // Keep the draft visible while confirmation, a timeout, or an error is
+    // shown. The listener below also handles saves that finish after the UI
+    // timeout.
+    final state = ref.read(flashRecordProvider);
+    if (state.savedSequence != savedSequence) {
+      _textController.clear();
+      _collapseIntentInput(reason: 'submit-saved');
+    }
   }
 
   static void _openLongNoteEditor(BuildContext context) {
@@ -359,6 +382,11 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 
   void _openMemoryScatter() {
+    _consumeStartupReminderForInteraction();
+    _openMemoryScatterInternal();
+  }
+
+  void _openMemoryScatterInternal() {
     FocusScope.of(context).unfocus();
     _closeToolDrawer();
     if (_memoryExpanded) return;
@@ -366,6 +394,109 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     setState(() => _memoryExpanded = true);
     _memoryController.forward(from: 0);
   }
+
+  void _consumeStartupReminderForInteraction() {
+    if (!_startupReminderVisible) return;
+    if (mounted) setState(() => _startupReminderVisible = false);
+    _startupReminderRoundConsumed = true;
+  }
+
+  Future<void> _prepareStartupReminder({bool initial = false}) async {
+    try {
+      final dismissal = await readStartupTodoDismissal(
+        ref.read(appSettingsRepositoryProvider),
+        now: DateTime.now(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _startupDismissal =
+            dismissal ??
+            StartupTodoDismissal(date: _dateKey(DateTime.now()), closeCount: 0);
+        _startupDismissalLoaded = true;
+      });
+      if (initial) await _showStartupReminderIfEligible();
+    } catch (_) {
+      // A failed settings read must not be treated as zero dismissals.
+      _startupDismissalLoaded = false;
+    }
+  }
+
+  Future<void> _showStartupReminderIfEligible({bool manual = false}) async {
+    if (!mounted || !_startupDismissalLoaded) return;
+    if (!manual && _startupReminderRoundConsumed) return;
+    if (!manual && _startupDismissal?.reachedLimit == true) return;
+    if (ref.read(startupTodoExternalFlowProvider)) return;
+    final state = ref.read(flashRecordProvider);
+    if (state.phase != FlashPhase.idle ||
+        _memoryExpanded ||
+        _intentExpanded ||
+        _toolsExpanded) {
+      return;
+    }
+    StartupTodoReminderSnapshot? snapshot;
+    try {
+      snapshot = await ref.read(startupTodoReminderProvider.future);
+    } catch (_) {
+      return;
+    }
+    if (!mounted || snapshot == null || snapshot.totalCount == 0) return;
+    if (!manual && _startupReminderRoundConsumed) return;
+    setState(() {
+      _startupReminderSnapshot = snapshot;
+      _startupReminderVisible = true;
+      _startupReminderDismissInProgress = false;
+    });
+    if (!manual) _startupReminderRoundConsumed = true;
+  }
+
+  void _dismissStartupReminder() {
+    if (!_startupReminderVisible || _startupReminderDismissInProgress) return;
+    _startupReminderDismissInProgress = true;
+    final previous = _startupDismissal?.closeCount ?? 0;
+    final next = math.min(3, previous + 1);
+    final now = DateTime.now();
+    setState(() {
+      _startupReminderVisible = false;
+      _startupDismissal = StartupTodoDismissal(
+        date: _dateKey(now),
+        closeCount: next,
+      );
+    });
+    _startupDismissalWriteChain = _startupDismissalWriteChain
+        .then(
+          (_) => saveStartupTodoDismissal(
+            ref.read(appSettingsRepositoryProvider),
+            now: now,
+            closeCount: next,
+          ),
+        )
+        .catchError((_) {})
+        .whenComplete(() => _startupReminderDismissInProgress = false);
+    if (next == 3 && previous < 3 && mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('今天不再自动提醒'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 2),
+          ),
+        );
+    }
+  }
+
+  void _openStartupTodoReminder() {
+    if (!_startupReminderVisible) return;
+    setState(() => _startupReminderVisible = false);
+    _startupReminderRoundConsumed = true;
+    // Let the ancestor tap handler finish before opening the existing panel.
+    Future<void>.microtask(_openMemoryScatterInternal);
+  }
+
+  String _dateKey(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-'
+      '${date.month.toString().padLeft(2, '0')}-'
+      '${date.day.toString().padLeft(2, '0')}';
 
   void _closeMemoryScatter() {
     if (!_memoryExpanded) return;
@@ -418,6 +549,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     FocusScope.of(context).unfocus();
 
     setState(() => _capturingPhoto = true);
+    ref.read(startupTodoExternalFlowProvider.notifier).setActive(true);
 
     try {
       final photo = await _imagePicker.pickImage(
@@ -458,6 +590,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           ),
         );
     } finally {
+      ref.read(startupTodoExternalFlowProvider.notifier).setActive(false);
       if (mounted) {
         setState(() => _capturingPhoto = false);
       }
@@ -472,7 +605,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
     FocusScope.of(context).unfocus();
 
     setState(() => _capturingPhoto = true);
-
+    ref.read(startupTodoExternalFlowProvider.notifier).setActive(true);
     try {
       final images = await _imagePicker.pickMultiImage(imageQuality: 92);
       if (!mounted || images.isEmpty) return;
@@ -510,6 +643,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
           ),
         );
     } finally {
+      ref.read(startupTodoExternalFlowProvider.notifier).setActive(false);
       if (mounted) {
         setState(() => _capturingPhoto = false);
       }
@@ -517,6 +651,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 
   Future<void> _pickExpenseReceiptImage() async {
+    ref.read(startupTodoExternalFlowProvider.notifier).setActive(true);
     try {
       final image = await _imagePicker.pickImage(
         source: ImageSource.gallery,
@@ -536,13 +671,19 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             behavior: SnackBarBehavior.floating,
           ),
         );
+    } finally {
+      ref.read(startupTodoExternalFlowProvider.notifier).setActive(false);
     }
   }
 
   Future<void> _recoverLostPhoto() async {
     if (_recoveringLostPhoto) return;
     _recoveringLostPhoto = true;
-
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) {
+      _recoveringLostPhoto = false;
+      return;
+    }
     try {
       final response = await _imagePicker.retrieveLostData();
       if (!mounted || response.isEmpty) return;
@@ -586,12 +727,40 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   Widget build(BuildContext context) {
     final state = ref.watch(flashRecordProvider);
     final memoryEvents = ref.watch(todayTodoPanelEventsProvider);
+    ref.listen<int>(startupTodoReminderRequestProvider, (previous, next) {
+      if (previous == next || next == _startupRequestSeen) return;
+      _startupRequestSeen = next;
+      _startupReminderRoundConsumed = false;
+      unawaited(_prepareStartupReminder(initial: false));
+    });
+    ref.listen<int>(startupTodoReminderDayProvider, (previous, next) {
+      if (previous == next) return;
+      _startupReminderRoundConsumed = false;
+      unawaited(_prepareStartupReminder(initial: false));
+    });
+    ref.listen<AsyncValue<StartupTodoReminderSnapshot?>>(
+      startupTodoReminderProvider,
+      (_, next) {
+        final snapshot = next is AsyncData<StartupTodoReminderSnapshot?>
+            ? next.value
+            : null;
+        if (!mounted || snapshot == null) return;
+        setState(() => _startupReminderSnapshot = snapshot);
+        if (snapshot.totalCount == 0 && mounted) {
+          setState(() => _startupReminderVisible = false);
+        }
+      },
+    );
     final theme = Theme.of(context);
 
     // Handle saved state — show snackbar and reset
     ref.listen(flashRecordProvider, (prev, next) {
-      if (next.phase == FlashPhase.saved) {
+      final voiceSaveCompleted = next.phase == FlashPhase.saved;
+      final textSaveCompleted =
+          next.savedSequence > (prev?.savedSequence ?? next.savedSequence);
+      if (voiceSaveCompleted || textSaveCompleted) {
         _textController.clear();
+        _collapseIntentInput(reason: 'saved');
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
@@ -609,49 +778,94 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       }
     });
 
-    return Container(
-      color: theme.colorScheme.surface,
-      child: SafeArea(
-        child: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onTap: () => _dismissAmbientState(state),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // Main content
-              Positioned.fill(
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 120),
-                  opacity: MediaQuery.viewInsetsOf(context).bottom > 0
-                      ? 0.38
-                      : 1,
-                  child: Align(
-                    alignment: const Alignment(0, -0.03),
-                    child: _buildPrimaryStage(state, theme),
-                  ),
-                ),
-              ),
-
-              if (_intentExpanded)
+    return PopScope(
+      canPop:
+          !_memoryExpanded &&
+          !_startupReminderVisible &&
+          !_intentExpanded &&
+          !_toolsExpanded,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_memoryExpanded) {
+          _closeMemoryScatter();
+        } else if (_startupReminderVisible) {
+          _consumeStartupReminderForInteraction();
+        } else if (_intentExpanded) {
+          _collapseIntentInput(reason: 'system-back');
+        } else if (_toolsExpanded) {
+          _closeToolDrawer();
+        }
+      },
+      child: Container(
+        color: theme.colorScheme.surface,
+        child: SafeArea(
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () => _dismissAmbientState(state),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // Main content
                 Positioned.fill(
-                  child: ModalBarrier(
-                    key: const ValueKey('intent-dismiss-layer'),
-                    color: Colors.transparent,
-                    dismissible: true,
-                    onDismiss: () => _collapseIntentInput(reason: 'barrier'),
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 120),
+                    opacity: MediaQuery.viewInsetsOf(context).bottom > 0
+                        ? 0.38
+                        : 1,
+                    child: Align(
+                      alignment: const Alignment(0, -0.03),
+                      child: _buildPrimaryStage(state, theme),
+                    ),
                   ),
                 ),
 
-              if (state.isInputActive) _buildTextInputDock(state, theme),
+                if (_intentExpanded)
+                  Positioned.fill(
+                    child: ModalBarrier(
+                      key: const ValueKey('intent-dismiss-layer'),
+                      color: Colors.transparent,
+                      dismissible: true,
+                      onDismiss: () => _collapseIntentInput(reason: 'barrier'),
+                    ),
+                  ),
 
-              if (_memoryExpanded)
-                _buildMemoryScatterLayer(theme, memoryEvents),
+                if (state.isInputActive) _buildTextInputDock(state, theme),
 
-              // Flash card overlay
-              if (state.phase == FlashPhase.confirming &&
-                  state.parsedInput != null)
-                _buildCardOverlay(state, theme),
-            ],
+                if (_startupReminderSnapshot != null &&
+                    !_memoryExpanded &&
+                    !_startupReminderVisible)
+                  Positioned(
+                    top: 12,
+                    right: 16,
+                    child: StartupTodoReminderEntry(
+                      count: _startupReminderSnapshot!.totalCount,
+                      onTap: () => unawaited(
+                        _showStartupReminderIfEligible(manual: true),
+                      ),
+                    ),
+                  ),
+
+                if (_startupReminderVisible && _startupReminderSnapshot != null)
+                  Positioned(
+                    top: 12,
+                    left: 16,
+                    right: 16,
+                    child: StartupTodoReminder(
+                      snapshot: _startupReminderSnapshot!,
+                      onDismiss: _dismissStartupReminder,
+                      onOpen: _openStartupTodoReminder,
+                    ),
+                  ),
+
+                if (_memoryExpanded)
+                  _buildMemoryScatterLayer(theme, memoryEvents),
+
+                // Flash card overlay
+                if (state.phase == FlashPhase.confirming &&
+                    state.parsedInput != null)
+                  _buildCardOverlay(state, theme),
+              ],
+            ),
           ),
         ),
       ),
@@ -785,9 +999,15 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               Positioned.fill(
                 child: GestureDetector(
                   onTap: _closeMemoryScatter,
-                  child: ColoredBox(
-                    color: theme.colorScheme.scrim.withAlpha(
-                      (38 * fade).round(),
+                  child: BackdropFilter(
+                    filter: ui.ImageFilter.blur(
+                      sigmaX: 9 * fade,
+                      sigmaY: 9 * fade,
+                    ),
+                    child: ColoredBox(
+                      color: theme.colorScheme.scrim.withAlpha(
+                        (54 * fade).round(),
+                      ),
                     ),
                   ),
                 ),
@@ -795,17 +1015,21 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
               Positioned.fill(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final sheetHeight = (constraints.maxHeight * 0.58)
-                        .clamp(360.0, 560.0)
-                        .toDouble();
+                    // Keep the original bottom edge and todo geometry fixed.
+                    // The extra room is reserved for the timeline above it.
+                    final baseSheetHeight = constraints.maxHeight > 900
+                        ? constraints.maxHeight * 0.84
+                        : constraints.maxHeight * 0.70;
+                    final availableTop =
+                        constraints.maxHeight - baseSheetHeight;
+                    final extraHeight = math.min(
+                      96,
+                      math.max(0, availableTop - 8),
+                    );
+                    final sheetHeight = baseSheetHeight + extraHeight;
 
                     return Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.containerMargin,
-                        0,
-                        AppSpacing.containerMargin,
-                        AppSpacing.md,
-                      ),
+                      padding: const EdgeInsets.fromLTRB(0, 0, 0, 0),
                       child: Align(
                         alignment: Alignment.bottomCenter,
                         child: SizedBox(
@@ -822,6 +1046,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
                                   child: _buildMemoryBottomSheet(
                                     theme,
                                     memoryEvents,
+                                    baseSheetHeight: baseSheetHeight,
                                   ),
                                 ),
                               ),
@@ -842,71 +1067,136 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
 
   Widget _buildMemoryBottomSheet(
     ThemeData theme,
-    AsyncValue<List<TimelineEvent>> memoryEvents,
-  ) {
+    AsyncValue<List<TimelineEvent>> memoryEvents, {
+    required double baseSheetHeight,
+  }) {
     final colorScheme = theme.colorScheme;
     return GestureDetector(
       onTap: () {},
-      child: Material(
-        key: const ValueKey('todo-panel-bottom-sheet'),
-        color: colorScheme.surface.withAlpha(248),
-        elevation: 14,
-        shadowColor: colorScheme.shadow.withAlpha(36),
-        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.sm,
-            AppSpacing.md,
-            AppSpacing.md,
-          ),
-          child: Column(
-            children: [
-              Row(
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+          child: Material(
+            key: const ValueKey('todo-panel-bottom-sheet'),
+            color: colorScheme.surface.withAlpha(206),
+            elevation: 0,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.sm,
+                AppSpacing.lg,
+                AppSpacing.lg,
+              ),
+              child: Column(
                 children: [
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: colorScheme.primary.withAlpha(18),
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                    ),
-                    child: Icon(
-                      Icons.checklist_rounded,
-                      color: colorScheme.primary,
-                      size: 20,
-                    ),
+                  Row(
+                    children: [
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary.withAlpha(18),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.wb_sunny_outlined,
+                          color: colorScheme.primary,
+                          size: 19,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: memoryEvents.when(
+                          data: (events) {
+                            final recordCount = events
+                                .where(
+                                  (event) =>
+                                      event.source != TimelineEventSource.todo,
+                                )
+                                .length;
+                            final todoCount = events
+                                .where(
+                                  (event) =>
+                                      event.source == TimelineEventSource.todo,
+                                )
+                                .length;
+                            final now = DateTime.now();
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '今天 · ${now.month}月${now.day}日',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    color: colorScheme.onSurface,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '$recordCount 条记录  ·  $todoCount 项待办',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                          loading: () => Text(
+                            '正在整理今天',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              color: colorScheme.onSurface,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          error: (_, _) => Text(
+                            '今天的记录',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              color: colorScheme.onSurface,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        key: const ValueKey('todo-panel-close'),
+                        tooltip: '收起',
+                        onPressed: _closeMemoryScatter,
+                        icon: const Icon(Icons.close_rounded),
+                        color: colorScheme.primary,
+                      ),
+                    ],
                   ),
-                  const Spacer(),
-                  IconButton(
-                    key: const ValueKey('todo-panel-close'),
-                    tooltip: '收起',
-                    onPressed: _closeMemoryScatter,
-                    icon: const Icon(Icons.close_rounded),
-                    color: colorScheme.primary,
+                  const SizedBox(height: AppSpacing.xxs),
+                  Expanded(
+                    child: memoryEvents.when(
+                      data: (events) => _buildTodoPanelAgenda(
+                        events,
+                        baseSheetHeight: baseSheetHeight,
+                      ),
+                      loading: () => _buildMemoryPanelMessage(
+                        icon: Icons.hourglass_empty_rounded,
+                      ),
+                      error: (_, _) => _buildMemoryPanelMessage(
+                        icon: Icons.error_outline_rounded,
+                      ),
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: AppSpacing.xxs),
-              Expanded(
-                child: memoryEvents.when(
-                  data: (events) => _buildTodoPanelAgenda(events),
-                  loading: () => _buildMemoryPanelMessage(
-                    icon: Icons.hourglass_empty_rounded,
-                  ),
-                  error: (_, _) => _buildMemoryPanelMessage(
-                    icon: Icons.error_outline_rounded,
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildTodoPanelAgenda(List<TimelineEvent> events) {
+  Widget _buildTodoPanelAgenda(
+    List<TimelineEvent> events, {
+    required double baseSheetHeight,
+  }) {
     final dailyEvents = events
         .where((event) => event.source != TimelineEventSource.todo)
         .toList();
@@ -914,27 +1204,64 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
         .where((event) => event.source == TimelineEventSource.todo)
         .toList();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: _buildTodoPanelColumn(
-            key: const ValueKey('todo-panel-daily-column'),
-            listKey: const ValueKey('todo-panel-daily-list'),
-            events: dailyEvents,
-            todoColumn: false,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Expanded(
-          child: _buildTodoPanelColumn(
-            key: const ValueKey('todo-panel-todo-column'),
-            listKey: const ValueKey('todo-panel-todo-list'),
-            events: todoEvents,
-            todoColumn: true,
-          ),
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // These constants mirror the existing header and gaps. The todo box
+        // keeps the height it had before the timeline expansion.
+        final baseAgendaHeight = math.max(0.0, baseSheetHeight - 74);
+        final baseFlexSpace = math.max(0.0, baseAgendaHeight - 44);
+        final baseTodoAllocation = baseFlexSpace * 8 / 11;
+        final todoBoxHeight = math.max(0.0, baseTodoAllocation - 36);
+        final todoAllocation = todoBoxHeight + 36;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _MemoryPanelSectionHeader(
+              icon: Icons.timeline_rounded,
+              title: '时间线',
+              count: dailyEvents.length,
+            ),
+            const SizedBox(height: AppSpacing.xxs),
+            Expanded(
+              flex: 3,
+              child: _buildTodoPanelColumn(
+                key: const ValueKey('todo-panel-daily-column'),
+                listKey: const ValueKey('todo-panel-daily-list'),
+                events: dailyEvents,
+                todoColumn: false,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            SizedBox(
+              height: math
+                  .min(todoAllocation, constraints.maxHeight)
+                  .toDouble(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _MemoryPanelSectionHeader(
+                    icon: Icons.checklist_rounded,
+                    title: '待办',
+                    count: todoEvents.length,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  SizedBox(
+                    key: const ValueKey('todo-panel-todo-column-slot'),
+                    height: todoBoxHeight,
+                    child: _buildTodoPanelColumn(
+                      key: const ValueKey('todo-panel-todo-column'),
+                      listKey: const ValueKey('todo-panel-todo-list'),
+                      events: todoEvents,
+                      todoColumn: true,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -949,9 +1276,15 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
       key: key,
       padding: const EdgeInsets.all(AppSpacing.xs),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow.withAlpha(220),
-        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        border: Border.all(color: colorScheme.outlineVariant.withAlpha(210)),
+        color: todoColumn
+            ? colorScheme.surface.withAlpha(238)
+            : colorScheme.surface.withAlpha(52),
+        borderRadius: todoColumn
+            ? BorderRadius.circular(AppSpacing.radiusLg)
+            : BorderRadius.zero,
+        border: todoColumn
+            ? Border.all(color: colorScheme.outlineVariant.withAlpha(130))
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1601,6 +1934,7 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
             key: const ValueKey('record-text-input'),
             focusNode: _textFocusNode,
             controller: _textController,
+            readOnly: state.textSaving,
             textInputAction: TextInputAction.send,
             onSubmitted: (_) => _submitText(),
             maxLines: 1,
@@ -1860,6 +2194,55 @@ class _FlashRecordPageState extends ConsumerState<FlashRecordPage>
   }
 }
 
+class _MemoryPanelSectionHeader extends StatelessWidget {
+  const _MemoryPanelSectionHeader({
+    required this.icon,
+    required this.title,
+    required this.count,
+  });
+
+  final IconData icon;
+  final String title;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final label = count == 0 ? '暂无' : '$count';
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: colorScheme.primary),
+        const SizedBox(width: AppSpacing.xs),
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+            color: colorScheme.onSurface,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.xs),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          decoration: BoxDecoration(
+            color: colorScheme.primary.withAlpha(18),
+            borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+          ),
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: colorScheme.primary,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const Expanded(
+          child: Divider(indent: AppSpacing.sm, endIndent: 0, height: 1),
+        ),
+      ],
+    );
+  }
+}
+
 class _MiniTimelineEvent extends StatelessWidget {
   const _MiniTimelineEvent({required this.event, required this.isLast});
 
@@ -1913,14 +2296,11 @@ class _MiniTimelineEvent extends StatelessWidget {
           child: Padding(
             padding: EdgeInsets.only(bottom: isLast ? 0 : AppSpacing.xxs),
             child: Container(
-              padding: const EdgeInsets.all(AppSpacing.xs),
-              decoration: BoxDecoration(
-                color: colorScheme.surface.withAlpha(232),
-                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                border: Border.all(
-                  color: colorScheme.outlineVariant.withAlpha(190),
-                ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.xs,
+                vertical: AppSpacing.xxs,
               ),
+              decoration: BoxDecoration(color: Colors.transparent),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -2033,7 +2413,7 @@ class _TodoPanelEventCard extends ConsumerWidget {
                   children: [
                     Text(
                       event.title,
-                      maxLines: 2,
+                      maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: isCompleted

@@ -17,6 +17,7 @@ import '../features/monthly_expenses/monthly_expense_markdown_service.dart';
 import '../features/projects/project_store.dart';
 import '../features/restore/markdown_restore_dialog.dart';
 import '../features/restore/markdown_restore_service.dart';
+import '../features/flash_record/startup_todo_reminder_providers.dart';
 import '../features/timeline/timeline_providers.dart';
 
 class LiflowShell extends ConsumerStatefulWidget {
@@ -28,14 +29,40 @@ class LiflowShell extends ConsumerStatefulWidget {
   ConsumerState<LiflowShell> createState() => _LiflowShellState();
 }
 
-class _LiflowShellState extends ConsumerState<LiflowShell> {
+class _LiflowShellState extends ConsumerState<LiflowShell>
+    with WidgetsBindingObserver {
   var _onboardingChecked = false;
+  var _wasBackgrounded = false;
+  var _startupReminderPending = false;
   Timer? _backupSnapshotTimer;
+  Timer? _startupDayTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _scheduleStartupDayRollover();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkOnboarding());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _wasBackgrounded = true;
+      return;
+    }
+    if (state != AppLifecycleState.resumed || !_wasBackgrounded) return;
+    _wasBackgrounded = false;
+    if (!mounted) return;
+    if (ref.read(startupTodoExternalFlowProvider)) return;
+    ref.invalidate(startupTodoReminderProvider);
+    _scheduleStartupDayRollover();
+    if (widget.navigationShell.currentIndex != 0) {
+      _startupReminderPending = true;
+      return;
+    }
+    ref.read(startupTodoReminderRequestProvider.notifier).request();
   }
 
   Future<void> _checkOnboarding() async {
@@ -55,14 +82,19 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
           needsAndroidVisibleFolder ||
           lostTreeAccess) {
         if (!mounted) return;
-        final configured = await showMarkdownDirectoryDialog(
-          context,
-          dirService,
-        );
-        if (configured && mounted) {
-          await _maybeOfferMarkdownRestore(dirService);
-          _scheduleBackupSnapshot();
-          unawaited(_ensurePreviousMonthExpenseReport(dirService));
+        ref.read(startupTodoExternalFlowProvider.notifier).setActive(true);
+        try {
+          final configured = await showMarkdownDirectoryDialog(
+            context,
+            dirService,
+          );
+          if (configured && mounted) {
+            await _maybeOfferMarkdownRestore(dirService);
+            _scheduleBackupSnapshot();
+            unawaited(_ensurePreviousMonthExpenseReport(dirService));
+          }
+        } finally {
+          ref.read(startupTodoExternalFlowProvider.notifier).setActive(false);
         }
         unawaited(
           ref
@@ -155,8 +187,23 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _backupSnapshotTimer?.cancel();
+    _startupDayTimer?.cancel();
     super.dispose();
+  }
+
+  void _scheduleStartupDayRollover() {
+    _startupDayTimer?.cancel();
+    final now = DateTime.now();
+    final next = DateTime(now.year, now.month, now.day + 1);
+    final delay = next.difference(now);
+    _startupDayTimer = Timer(delay, () {
+      if (!mounted) return;
+      ref.invalidate(startupTodoReminderProvider);
+      ref.read(startupTodoReminderDayProvider.notifier).rollover();
+      _scheduleStartupDayRollover();
+    });
   }
 
   void _onNavTapped(int index) {
@@ -165,11 +212,19 @@ class _LiflowShellState extends ConsumerState<LiflowShell> {
       widget.navigationShell.goBranch(index, initialLocation: true);
       if (index == 0) {
         ref.read(timelineScrollToLatestSignalProvider.notifier).request();
+        if (_startupReminderPending) {
+          _startupReminderPending = false;
+          ref.read(startupTodoReminderRequestProvider.notifier).request();
+        }
       }
       return;
     }
     _releaseInputFocus();
     widget.navigationShell.goBranch(index);
+    if (index == 0 && _startupReminderPending) {
+      _startupReminderPending = false;
+      ref.read(startupTodoReminderRequestProvider.notifier).request();
+    }
     if (index == 0) {
       ref.read(timelineScrollToLatestSignalProvider.notifier).request();
     }
