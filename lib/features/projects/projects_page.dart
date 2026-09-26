@@ -21,6 +21,7 @@ import 'project_markdown_service.dart';
 import 'project_ordering.dart';
 import 'project_store.dart';
 import 'project_stored_image.dart';
+import 'project_time.dart';
 
 class ProjectsPage extends ConsumerStatefulWidget {
   const ProjectsPage({
@@ -169,6 +170,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       status: draft.status,
       goal: draft.goal,
       lastUpdate: _formatUpdateTime(now),
+      lastUpdatedAt: now.millisecondsSinceEpoch,
       todos: [
         if (draft.firstTodo.isNotEmpty)
           _ProjectTodo(
@@ -1361,8 +1363,9 @@ class _CurrentProjectCard extends StatelessWidget {
                               Flexible(
                                 child: Text(
                                   project.lastUpdate,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 2,
+                                  softWrap: true,
+                                  overflow: TextOverflow.visible,
                                   style: theme.textTheme.bodySmall?.copyWith(
                                     color: colors.primary,
                                     fontWeight: FontWeight.w600,
@@ -2774,6 +2777,9 @@ class _UpdateRow extends StatelessWidget {
                       Expanded(
                         child: Text(
                           update.time,
+                          maxLines: 2,
+                          softWrap: true,
+                          overflow: TextOverflow.visible,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colors.onSurfaceVariant,
                           ),
@@ -4112,6 +4118,7 @@ class _ProjectInfo {
     required this.lastUpdate,
     required this.todos,
     required this.updates,
+    this.lastUpdatedAt,
     this.favorites = const [],
     this.archiveLocation,
   });
@@ -4121,6 +4128,7 @@ class _ProjectInfo {
   final String status;
   final String goal;
   final String lastUpdate;
+  final int? lastUpdatedAt;
   final List<_ProjectTodo> todos;
   final List<_ProjectUpdate> updates;
   final List<_ProjectFavorite> favorites;
@@ -4167,6 +4175,7 @@ class _ProjectInfo {
 
     return copyWith(
       lastUpdate: writtenAt,
+      lastUpdatedAt: updatedAt.millisecondsSinceEpoch,
       todos: nextTodos,
       updates: [
         _ProjectUpdate(
@@ -4203,6 +4212,7 @@ class _ProjectInfo {
 
     return copyWith(
       lastUpdate: writtenAt,
+      lastUpdatedAt: updatedAt.millisecondsSinceEpoch,
       todos: nextTodos,
       updates: [
         _ProjectUpdate(
@@ -4222,6 +4232,7 @@ class _ProjectInfo {
     final writtenAt = _formatUpdateTime(createdAt);
     return copyWith(
       lastUpdate: writtenAt,
+      lastUpdatedAt: createdAt.millisecondsSinceEpoch,
       updates: [
         _ProjectUpdate(
           id: '${createdAt.microsecondsSinceEpoch}-manual-update',
@@ -4240,6 +4251,7 @@ class _ProjectInfo {
     final writtenAt = _formatUpdateTime(createdAt);
     return copyWith(
       lastUpdate: writtenAt,
+      lastUpdatedAt: createdAt.millisecondsSinceEpoch,
       todos: [
         ...todos,
         _ProjectTodo(
@@ -4271,6 +4283,7 @@ class _ProjectInfo {
       name: name,
       status: status,
       lastUpdate: writtenAt,
+      lastUpdatedAt: updatedAt.millisecondsSinceEpoch,
       updates: [
         _ProjectUpdate(
           id: '${updatedAt.microsecondsSinceEpoch}-project-edit-update',
@@ -4289,6 +4302,7 @@ class _ProjectInfo {
     String? name,
     String? status,
     String? lastUpdate,
+    int? lastUpdatedAt,
     List<_ProjectTodo>? todos,
     List<_ProjectUpdate>? updates,
     List<_ProjectFavorite>? favorites,
@@ -4300,6 +4314,7 @@ class _ProjectInfo {
       status: status ?? this.status,
       goal: goal,
       lastUpdate: lastUpdate ?? this.lastUpdate,
+      lastUpdatedAt: lastUpdatedAt ?? this.lastUpdatedAt,
       todos: todos ?? this.todos,
       updates: updates ?? this.updates,
       favorites: favorites ?? this.favorites,
@@ -4314,6 +4329,7 @@ class _ProjectInfo {
       'status': status,
       'goal': goal,
       'lastUpdate': lastUpdate,
+      if (lastUpdatedAt != null) 'lastUpdatedAt': lastUpdatedAt,
       'todos': todos.map((todo) => todo.toJson()).toList(),
       'favorites': favorites.map((favorite) => favorite.toJson()).toList(),
       'updates': updates.map((update) => update.toJson()).toList(),
@@ -4332,7 +4348,13 @@ class _ProjectInfo {
       name: name,
       status: raw['status'] as String? ?? '进行中',
       goal: raw['goal'] as String? ?? '慢慢推进这件事',
-      lastUpdate: raw['lastUpdate'] as String? ?? '刚刚',
+      lastUpdate: formatStoredProjectTime(
+        timestamp: raw['lastUpdatedAt'],
+        legacyText: raw['lastUpdate'],
+      ),
+      lastUpdatedAt: parseProjectEpoch(
+        raw['lastUpdatedAt'],
+      )?.millisecondsSinceEpoch,
       archiveLocation: raw['archiveLocation'] as String?,
       todos: [
         for (final item in (raw['todos'] as List? ?? const []))
@@ -4431,11 +4453,13 @@ class _ProjectFavorite {
       'markdown_file' => _ProjectFavoriteType.markdownFile,
       _ => _ProjectFavoriteType.text,
     };
+    final created =
+        parseProjectEpoch(raw['createdAt']) ?? parseProjectUpdateId(id);
     return _ProjectFavorite(
       id: id,
       type: type,
       title: title,
-      createdAt: raw['createdAt'] as int? ?? _createdAtFromProjectUpdateId(id),
+      createdAt: created?.millisecondsSinceEpoch ?? 0,
       updateId: raw['updateId'] as String?,
       relativePath: raw['relativePath'] as String?,
       sourceText: raw['sourceText'] as String?,
@@ -4574,10 +4598,16 @@ class _ProjectUpdate {
     final id = raw['id'] as String?;
     final text = raw['text'] as String?;
     if (id == null || text == null || text.trim().isEmpty) return null;
+    final created =
+        parseProjectEpoch(raw['createdAt']) ?? parseProjectUpdateId(id);
     return _ProjectUpdate(
       id: id,
-      time: raw['time'] as String? ?? '刚刚',
-      createdAt: raw['createdAt'] as int? ?? _createdAtFromProjectUpdateId(id),
+      time: formatStoredProjectTime(
+        timestamp: created?.millisecondsSinceEpoch,
+        legacyText: raw['time'],
+        id: id,
+      ),
+      createdAt: created?.millisecondsSinceEpoch ?? 0,
       source: raw['source'] as String? ?? '项目',
       text: text,
       colorValue: raw['colorValue'] as int? ?? AppColors.primary.toARGB32(),
@@ -4692,16 +4722,6 @@ Map<String, Object?> _decodeMetadata(Object? raw) {
   return const {};
 }
 
-int _createdAtFromProjectUpdateId(String id) {
-  final rawMicroseconds = int.tryParse(id.split('-').first);
-  if (rawMicroseconds == null) {
-    return DateTime.now().millisecondsSinceEpoch;
-  }
-  return DateTime.fromMicrosecondsSinceEpoch(
-    rawMicroseconds,
-  ).millisecondsSinceEpoch;
-}
-
 DateTime _dateFromProjectId(String id) {
   final rawMicroseconds = int.tryParse(id.split('-').first);
   if (rawMicroseconds == null) return DateTime.now();
@@ -4709,13 +4729,5 @@ DateTime _dateFromProjectId(String id) {
 }
 
 String _formatUpdateTime(DateTime time) {
-  final now = DateTime.now();
-  final sameDay =
-      time.year == now.year && time.month == now.month && time.day == now.day;
-  if (sameDay) {
-    final hour = time.hour.toString().padLeft(2, '0');
-    final minute = time.minute.toString().padLeft(2, '0');
-    return '今天 $hour:$minute';
-  }
-  return '${time.month}月${time.day}日';
+  return formatProjectDateTime(time);
 }

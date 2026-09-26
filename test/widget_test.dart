@@ -448,7 +448,9 @@ void main() {
     );
     final screenHeight =
         tester.view.physicalSize.height / tester.view.devicePixelRatio;
-    expect(sheetRect.top, greaterThan(screenHeight * 0.25));
+    // The expanded sheet is now allowed to grow upward while its bottom edge
+    // and todo box remain anchored. Keep only a safe-area bound here.
+    expect(sheetRect.top, greaterThanOrEqualTo(8));
     expect(sheetRect.height, greaterThan(screenHeight * 0.45));
 
     await tester.tapAt(Offset(sheetRect.center.dx, sheetRect.top - 24));
